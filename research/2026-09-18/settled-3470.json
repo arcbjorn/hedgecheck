@@ -1,0 +1,1 @@
+{"spec":{"outcome":3470,"name":"Recurring","description":"class:priceBinary|underlying:HYPE|expiry:20260917-0600|targetPrice:77.244|period:1d","sideSpecs":[{"name":"Yes"},{"name":"No"}],"quoteToken":"USDC"},"settleFraction":"1.0","details":"price:78.711"}

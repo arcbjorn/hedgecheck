@@ -1,0 +1,10 @@
+{
+  "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/contract-specifications.md",
+  "method": "GET",
+  "requested_at": "2026-09-18T07:53:24.735687+00:00",
+  "retrieved_at": "2026-09-18T07:53:24.943961+00:00",
+  "http_status": 200,
+  "response_file": "contract-specifications.md",
+  "response_sha256": "59ef08be4b7e3d7cc0f4245abd4f133d743a983820df5b2ef0ce1ceb6af50ea3",
+  "server_date": "Fri, 18 Sep 2026 07:53:25 GMT"
+}

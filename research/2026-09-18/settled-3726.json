@@ -1,0 +1,1 @@
+{"spec":{"outcome":3726,"name":"Recurring Named Outcome","description":"index:2","sideSpecs":[{"name":"Yes"},{"name":"No"}],"quoteToken":"USDC"},"settleFraction":"0.0","details":"price:77457.8","question":{"question":{"settled":300},"name":"Recurring","description":"class:priceBucket|underlying:BTC|expiry:20260918-0600|priceThresholds:74772,77824|period:1d"}}

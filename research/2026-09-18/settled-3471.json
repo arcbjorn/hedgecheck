@@ -1,0 +1,1 @@
+{"spec":{"outcome":3471,"name":"Recurring Fallback","description":"other","sideSpecs":[{"name":"Yes"},{"name":"No"}],"quoteToken":"USDC"},"settleFraction":"0.0","details":"","question":{"question":{"settled":286},"name":"Recurring","description":"class:priceBucket|underlying:BTC|expiry:20260917-0600|priceThresholds:74422,77460|period:1d"}}
