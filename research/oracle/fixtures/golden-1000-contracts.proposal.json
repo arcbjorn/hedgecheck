@@ -1,0 +1,21 @@
+{
+  "schema_version": "1",
+  "units": {"money": "USDC", "price": "USDC per BTC", "exposure": "BTC", "size": "contracts"},
+  "domain": {"lower": "60000", "upper": "110000"},
+  "baseline": {"kind": "explicit", "price": "100000", "label": "synthetic"},
+  "exposure": {"kind": "linear_spot", "quantity": "0.1"},
+  "legs": [
+    {
+      "kind": "digital_below",
+      "size": "1000",
+      "strike": "90000",
+      "premium": {"kind": "fixed", "price": "0.2"},
+      "observation_time": "2026-01-02T06:00:00Z",
+      "semantics": "synthetic"
+    }
+  ],
+  "objective": [{"id": "loss_cap", "min_pnl": "-1000"}],
+  "objective_valuation_time": "2026-01-02T06:00:00Z",
+  "other_costs": "0",
+  "assumptions": ["common_reference", "fixed_premium", "zero_other_costs"]
+}
