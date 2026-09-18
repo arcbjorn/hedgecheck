@@ -1,0 +1,13 @@
+{
+  "endpoint": "https://api.hyperliquid.xyz/info",
+  "method": "POST",
+  "request_body": {
+    "type": "outcomeMeta"
+  },
+  "requested_at": "2026-09-15T22:14:24.169259+00:00",
+  "retrieved_at": "2026-09-15T22:14:24.523976+00:00",
+  "http_status": 200,
+  "response_file": "outcome-meta.json",
+  "response_sha256": "4da787f95476cc8c0fbcab43b8c67c305234d64a8f4499f12ab3fe2645b26f40",
+  "server_date": "Tue, 15 Sep 2026 22:14:24 GMT"
+}

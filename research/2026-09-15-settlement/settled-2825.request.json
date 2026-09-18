@@ -1,0 +1,14 @@
+{
+  "endpoint": "https://api.hyperliquid.xyz/info",
+  "method": "POST",
+  "request_body": {
+    "type": "settledOutcome",
+    "outcome": 2825
+  },
+  "requested_at": "2026-09-15T22:14:22.310655+00:00",
+  "retrieved_at": "2026-09-15T22:14:22.655636+00:00",
+  "http_status": 200,
+  "response_file": "settled-2825.json",
+  "response_sha256": "12d9f611f095f0a029a6728a3c695a7f303eeb22fdcc63a59241492171286e15",
+  "server_date": "Tue, 15 Sep 2026 22:14:22 GMT"
+}

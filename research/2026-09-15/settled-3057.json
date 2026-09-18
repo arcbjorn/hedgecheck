@@ -1,0 +1,1 @@
+{"spec":{"outcome":3057,"name":"template:binaryPrice","description":"perp:BTC|priceDescription:BTC-USDC perp mark|seconds:60|threshold:77522|time:20260914-0600","sideSpecs":[{"name":"template:Yes"},{"name":"template:No"}],"quoteToken":"USDC","venue":"out","deployerFeeScale":"1.0"},"settleFraction":"1.0","details":"template"}
