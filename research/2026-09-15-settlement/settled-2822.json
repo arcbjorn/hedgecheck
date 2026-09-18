@@ -1,1 +1,0 @@
-{"spec":{"outcome":2822,"name":"Recurring","description":"class:priceBinary|underlying:ETH|expiry:20260914-0600|targetPrice:2522.3|period:1d","sideSpecs":[{"name":"Yes"},{"name":"No"}],"quoteToken":"USDC"},"settleFraction":"0.0","details":"price:2515.6"}

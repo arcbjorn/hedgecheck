@@ -1,1 +1,0 @@
-{"spec":{"outcome":3253,"name":"Recurring","description":"class:priceBinary|underlying:BTC|expiry:20260916-0600|targetPrice:77616|period:1d","sideSpecs":[{"name":"Yes"},{"name":"No"}],"quoteToken":"USDC"},"settleFraction":"0.0","details":"price:75941.6"}

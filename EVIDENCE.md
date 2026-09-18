@@ -12,6 +12,9 @@ that does not establish a rule.
 A universal negative ("none exists", "cannot be done") is only as wide as the
 search behind it, so each one states its search scope.
 
+Evidence packages are committed at `085ccfb`, not in the working tree. Restore
+with `git checkout 085ccfb -- research/`, then:
+
 ```sh
 python3 research/2026-09-15/verify.py             # 128 checks, 6 hashes
 python3 research/2026-09-15-settlement/verify.py  # 222 checks, 13 hashes

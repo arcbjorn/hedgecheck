@@ -19,6 +19,15 @@ HedgeCheck LLC; the directory keeps the codename. The namespaces for
 
 ## Check everything yourself
 
+The evidence packages are **not in the working tree**. They are committed at
+`085ccfb` and restored with one command:
+
+```sh
+git checkout 085ccfb -- research/
+```
+
+Then all five verifiers run offline, with no dependencies:
+
 ```sh
 python3 research/2026-09-15/verify.py             # 128 checks, 6 response hashes
 python3 research/2026-09-15-settlement/verify.py  # 222 checks, 13 response hashes
@@ -27,22 +36,22 @@ python3 research/2026-09-18-decisions/verify.py   # 82 checks, 6 official pages,
 python3 research/oracle/verify.py                 # 4,077 checks: golden table, fixture, PLAN.md example
 ```
 
-All five run offline with no dependencies. The first three verify retained API
-response bytes and the arithmetic built on them. The fourth verifies retained
-official documentation text and the namespace sweep. The fifth verifies the golden
-table and the example result printed in `PLAN.md` against a generated fixture,
-and fails if the document drifts from it.
+The first three verify retained API response bytes and the arithmetic built on
+them. The fourth verifies retained official documentation text and the namespace
+sweep. The fifth verifies the golden table and the example result printed in
+`PLAN.md` against a generated fixture, and fails if the document drifts from it.
+
+Every **[V]** claim in `EVIDENCE.md` is checkable this way. The retained bytes
+cannot be re-captured — instances rotate and are pruned from the live catalogue —
+so `085ccfb` is the only copy.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
-| `research/2026-09-15/` | Catalogue, templates and books nineteen minutes before the 15 September expiry |
-| `research/2026-09-15-settlement/` | Eight settlements across two rollovers, capture script |
-| `research/2026-09-18/` | Twelve more binary settlements, three bucket settlements, the live binary and bucket books, capture and discovery scripts |
-| `research/2026-09-18-decisions/` | Six official documentation pages retained as Markdown, the name-availability sweep, capture script |
-| `research/oracle/` | Reference oracle for exact terminal evaluation, fixtures. **Not the product engine** — the smallest evaluator that can state an expected result |
-| `research/observer.mjs` | Approximate settlement consistency observer. Optional, not independent, no characterised tolerance — see [EVIDENCE.md §5](./EVIDENCE.md) |
+| `PLAN.md` | Authoritative build plan |
+| `EVIDENCE.md` | Verified facts, with source and date |
+| `research/` | Evidence packages and verifiers. **Restore from `085ccfb`** (above) |
 
 Market snapshots are historical observations, not prices to trade on.
 Capabilities and tiers in `PLAN.md` are proposed work, not completed features.

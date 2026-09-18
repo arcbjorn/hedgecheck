@@ -1,1 +1,0 @@
-{"spec":{"outcome":3063,"name":"Recurring","description":"class:priceBinary|underlying:SOL|expiry:20260915-0600|targetPrice:101.07|period:1d","sideSpecs":[{"name":"Yes"},{"name":"No"}],"quoteToken":"USDC"},"settleFraction":"1.0","details":"price:101.31"}

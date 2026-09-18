@@ -114,7 +114,7 @@ Interval length is **not a probability**. Axis label: "scenario price."
 ### Golden cases
 
 `S ∈ [60000, 110000]`, `P&L(S,n) = 0.1(S − 100000) + n·I(S < 90000) − 0.2n`,
-objective `P&L ≥ −1000`. Every row is asserted by `research/oracle/verify.py`.
+objective `P&L ≥ −1000`. Every row is asserted by `research/oracle/verify.py` (restore from `085ccfb`).
 
 | Input | Expected |
 |---|---|
