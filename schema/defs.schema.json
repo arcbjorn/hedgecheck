@@ -259,6 +259,40 @@
       },
       "additionalProperties": false
     },
+    "cost": {
+      "description": "What a leg cost. 'fixed' is a hypothetical per-unit price, multiplied by size. 'walked' is the exact total paid to acquire the whole size along one named path, carrying the book it was walked on. A total rather than a per-unit price because the total is what walking the book measures: a walk over several levels has no single price, and its average is a derived quantity that is usually a repeating decimal (1409 contracts at 645.76904 averages 8072113/17612500). Both forms are exact under the number grammar; the total is the one that was observed.",
+      "oneOf": [
+        {
+          "$ref": "defs.schema.json#/$defs/fixed_price"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "total",
+            "path",
+            "snapshot"
+          ],
+          "properties": {
+            "kind": {
+              "const": "walked"
+            },
+            "total": {
+              "$ref": "defs.schema.json#/$defs/number"
+            },
+            "path": {
+              "enum": [
+                "direct_book"
+              ]
+            },
+            "snapshot": {
+              "$ref": "defs.schema.json#/$defs/sha256"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "witness": {
       "type": "object",
       "required": [

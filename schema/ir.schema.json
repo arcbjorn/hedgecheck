@@ -75,7 +75,7 @@
                 "$ref": "defs.schema.json#/$defs/pays_on"
               },
               "premium": {
-                "$ref": "defs.schema.json#/$defs/fixed_price"
+                "$ref": "defs.schema.json#/$defs/cost"
               },
               "observation_time": {
                 "$ref": "defs.schema.json#/$defs/time"
@@ -122,7 +122,7 @@
                 "$ref": "defs.schema.json#/$defs/number"
               },
               "premium": {
-                "$ref": "defs.schema.json#/$defs/fixed_price"
+                "$ref": "defs.schema.json#/$defs/cost"
               },
               "observation_time": {
                 "$ref": "defs.schema.json#/$defs/time"
