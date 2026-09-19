@@ -4,13 +4,16 @@ How the system is built. [PLAN.md](./PLAN.md) says what, why and in what order;
 [EVIDENCE.md](./EVIDENCE.md) holds the facts. Where this file and the plan
 disagree about *order or scope*, the plan wins; about *structure*, this file does.
 
-19 Sep 2026. **What exists is a skeleton, not an engine:** the contract as draft
-schemas, the conformance spine in three languages, the oracle kernel, two draft
-registry entries, and the tests that hold the boundaries. Everything else below
-is design, marked with the tier that builds it.
+19 Sep 2026, **T1 closed.** What exists is one complete check, on real data, on
+the oracle: the contract as **frozen v1 schemas**, discovery that names no ids,
+lowering from retained bytes, an exact result with its cost, sizing, alternatives
+and witnesses, a reference refuser that refuses fourteen certificate bundles by
+class, and a throwaway live spike that replays byte for byte. The conformance
+spine stands in three languages; **the engine and the checker do not exist yet**
+— T2 and T3 build them. Everything below marked with a tier is design.
 
 ```sh
-make check    # vectors, schemas, oracle (with PLAN.md's guard), Go, TypeScript. Offline, no install
+make check    # vectors, bundles, schemas, oracle, spike, Go, TypeScript. Offline, no install
 ```
 
 ---
@@ -74,6 +77,16 @@ independently checkable, and the ranking is re-derived rather than trusted. Only
 passing candidates are ranked: a cost that bought an unestablished result has no
 place in an ordering by cost.
 
+**Capture provenance.** A result records `capture`: the worst skew the capturer
+measured across its snapshots, the bound it refused above, and who measured it. This
+is an **assertion, not a derivation**. The contexts response carries no venue
+timestamp ([EVIDENCE §4](./EVIDENCE.md)), so the spread between a book's venue clock
+and the baseline's retrieval is measurable only at capture time and can never be
+re-derived from the bytes. Recording it makes the claim visible to a reader and to a
+checker; neither can confirm it, and the documents say so rather than implying the
+kernel established it. A result also lists the `snapshots` it rests on, which a
+checker *can* re-derive and compare.
+
 `input_digest` covers everything that determines a result except the engine:
 `proposal_digest`, the snapshot hashes, the `semantics_version` of each entry
 used, and the schema version. Same `input_digest`, same `engine_version` ⇒ the
@@ -84,10 +97,12 @@ response bytes. It is evidence, not contract: hashed as a file, never
 canonicalized, and it keeps the JSON numbers the venue's API requires. The schema
 matches all 50 records retained at `085ccfb`.
 
-**The schemas are drafts.** They validate the golden fixture and one real case —
-`fixtures/drafts/2026-09-18-bucket0.proposal.json`, the 18 Sep bucket-0 hedge,
-citing the retained catalogue, mark and book by hash — but that proposal has not
-been lowered or evaluated by anything. T1 freezes schema v1 after it has.
+**The schemas are frozen at v1.** They met real data before freezing: the 18
+September replay proposals were lowered and evaluated against the retained
+catalogue, mark and books, and the certificate bundles were built from the
+results. Every change since `062a245` is in [schema/CHANGES.md](./schema/CHANGES.md)
+with the case that forced it, and `make check` fails if a schema file changes
+while that log does not.
 
 ---
 
@@ -248,9 +263,11 @@ Implementations agree with the vectors, never the other way round.
 |---|---|---|---|
 | Numbers, canonical JSON | built | built | built |
 | Kernel | built | T2 | T3 |
-| Lowering | canonical families only, T1 | T2, T4 | T3, T4 |
+| Lowering | built, canonical families | T2, T4 | T3, T4 |
+| Sizing, alternatives, reductions | built | T2 | T3 |
+| Refusing a certificate bundle | built, **reference only** | — | T3, the real one |
 | Assembly, service, storage | — | T2 | — |
-| Verifying a result | — | — | T3 |
+| Verifying a result in the browser | — | — | T3 |
 
 - **Generated cases** are compared across all three at the level of the kernel.
 - **Whole results** are compared between engine and checker on every fixture.
@@ -260,10 +277,16 @@ Implementations agree with the vectors, never the other way round.
   Later tiers' expected results come from the engine, are verified by the
   checker, and are pinned the same way.
 - **The checker is not a second engine.** It takes proposal, snapshots, registry
-  and result, and answers accept or refuse, with a reason. It re-lowers and
-  compares `ir_digest`; re-evaluates and compares every claim; evaluates each
-  witness on the *unreduced* payoff. Its acceptance test is refusing corrupted
-  certificates (PLAN §5).
+  and result, and answers accept or refuse, with a reason from the closed list in
+  `refusal.schema.json`. It re-lowers and compares `ir_digest`; re-evaluates and
+  compares every claim; evaluates each witness on the *unreduced* payoff. Its
+  acceptance test is refusing corrupted certificates (PLAN §5).
+- **`oracle/refuse.py` is not that checker.** It exists so each of the fourteen
+  bundles is known to be refused for its stated reason before a second
+  implementation is asked to agree. T3's checker shares the schemas with it and
+  nothing else. Where the two disagree on a bundle, the refusal classes make it a
+  real disagreement rather than a wording difference — which is why the list is
+  closed.
 
 **The server computes and the client verifies.** The result screen runs the
 checker in the browser on every view; a consumer runs it before it signs.
@@ -287,6 +310,10 @@ checker in the browser on every view; a consumer runs it before it signs.
 | A lowered leg matches the instance it names | `oracle/verify.py` replay — terms against the catalogue, coin against outcome and side, baseline against the contexts snapshot, size against displayed depth |
 | Retained evidence in a fixture is the retained response | `oracle/verify.py` replay — each file's SHA-256 against its own request record and against the hash in the evidence commit |
 | Documented examples cannot drift | `oracle/verify.py` parses PLAN.md and compares its example with the generated fixture |
+| Documented counts cannot drift | `tools/validate.py` — the schema count in README and ARCHITECTURE, and a layout row per top-level directory, are compared with the filesystem |
+| Every contract document is schema-checked | `tools/validate.py` — including both good certificate bundles; corrupted bundles are the refuser's business |
+| A stored result replays byte for byte | `spike/verify.py` — the retained 19 September run is recomputed from its stored bytes, offline |
+| The validator's one deviation from JSON Schema 2020-12 stays deliberate | `tools/validate.py` — 1.0 is not an integer here, and `integer` is asserted to appear only in `snapshot-record` |
 
 Each guard was run against a deliberate violation before it was trusted.
 
@@ -296,7 +323,7 @@ Each guard was run against a deliberate violation before it was trusted.
 
 ```text
 ARCHITECTURE.md  PLAN.md  EVIDENCE.md  Makefile
-schema/     seven draft schemas. The only thing implementations share
+schema/     nine draft schemas. The only thing implementations share
 fixtures/   golden/   lowered proposal and its generated expected result
             vectors/  numbers and canonical JSON, generated from hand-written cases
             replay/   retained responses, their request records, and the real
@@ -358,7 +385,6 @@ an entry; it never runs inside lowering, evaluation or checking.
 |---|---|
 | Module and package names (`hedgecheck/engine`, `@hedgecheck/checker`) are local; they change to the public path when the repository has one | Publishing |
 | Whether the oracle moves from `Fn` to explicit piece lists when T1 extends it. Recommended: yes | T1 |
-| The permitted skew between snapshots in one result | T1 |
 | How the checker's accepted registry digests are distributed and rotated | T3 |
 | CI. No workflow is committed because none has been run; `make check` is the contract until a remote exists | Publishing |
 | TypeScript tests are executed but not type-checked: that needs `@types/node`, a dependency. Only `src/` is type-checked | — |
