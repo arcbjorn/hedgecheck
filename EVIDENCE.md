@@ -391,7 +391,8 @@ FluxRPC.
 
 Kept so they are not reintroduced. Everything from "The example result" down was
 found on 18 Sep, the last four of those in revisions written that same day; the
-final four on 19 Sep, in the plan's own design and the first oracle.
+next four on 19 Sep, in the plan's own design and the first oracle; the last on
+20 Sep, found only by porting the kernel to a second language.
 
 | Claim | Correction |
 |---|---|
@@ -424,6 +425,7 @@ final four on 19 Sep, in the plan's own design and the first oracle.
 | A reduced leg leaves "the verdict stands", so `fails` may rest on any bound | Only on a **tight** one. A bound no scenario attains proves nothing about failure, and a price alone is not a counterexample once a leg is bounded. |
 | Go's `big.Rat` "parses both number forms natively" — offered as a reason | It also parses `"0x10"`, `"1e3"`, `"+5"`, `"1_000"`; Python's `Fraction` disagrees on some of them. Default JSON differs too: one object, three SHA-256 digests across Go, Python and JavaScript. Both run 19 Sep; both become fixtures in T1. |
 | "An undeclared breakpoint is an error, not a wrong answer" | False for the first oracle. Its probe samples three points per interval; with a strike at 65,000 on `[60000, 110000]` omitted it raised nothing and returned failure `(60000, 67000)` for `[65000, 67000)` and infimum −4,200 for −3,700. `evaluate()` was never affected — it takes breakpoints from the legs' own constructors — but the guarantee was. Now a function cannot be separated from its breakpoints; `oracle/verify.py` asserts what the probe catches and what it cannot. |
+| `oracle.infimum` reports an attaining price | **Found 20 Sep, porting to Go.** On a *flat open* piece it reported the excluded lower endpoint as attaining. Reproduced: an indicator paying 700 on `(-inf, 90000]` less a cost of 100 is flat at −100 on `(90000, 110000]` and 600 at 90000; `infimum` returned `value=-100, attained=True, price=90000`, where the function is 600. A witness built from it would name a price the objective is not violated at. The rule is now explicit: the smallest attaining price when the attaining set has a minimum, otherwise the midpoint of the first attaining open piece. **No committed fixture changed**, which is why it survived T1 — the shape was unreachable from every pinned case. |
 
 ---
 
