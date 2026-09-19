@@ -472,8 +472,63 @@ def replay():
     except ValueError:
         check(True, "replay: refuses to compare proposals with different valuation times")
 
+    bundles()
     print(f"replay: {len(proposals)} real proposals need review as drafts on disk; "
           f"pinned values verified against in-memory reviewed copies")
+
+
+def bundles():
+    """Every certificate bundle is accepted or refused with exactly its stated class.
+
+    The manifest names the class, so a fixture that stops being refused, or starts
+    being refused for a different reason, fails here rather than silently weakening.
+    """
+    import refuse
+
+    directory = PROJECT / "fixtures" / "bundles"
+    found = sorted(path for path in directory.iterdir() if path.is_dir())
+    check(found, "bundles: the fixtures exist")
+    accepted, refused = 0, {}
+    for path in found:
+        manifest = canon.loads((path / "manifest.json").read_bytes())
+        check(not validate_manifest(manifest), f"bundles: {path.name} manifest is valid")
+        outcome = refuse.refuse_directory(path)
+        actual = "accept" if outcome["accepted"] else outcome["refusal"]["class"]
+        check(actual == manifest["expects"],
+              f"bundles: {path.name} expects {manifest['expects']}, the refuser said {actual}")
+        if outcome["accepted"]:
+            accepted += 1
+            check("corruption" not in manifest, f"bundles: {path.name} is accepted and declares no corruption")
+        else:
+            refused[manifest["expects"]] = refused.get(manifest["expects"], 0) + 1
+            check("corruption" in manifest, f"bundles: {path.name} is refused and documents its one change")
+    check(accepted == 2, "bundles: two good bundles, one passing and one failing")
+    check(len(refused) == len(found) - accepted, "bundles: each corruption has a distinct refusal class")
+
+    # The kernel-level corruption, which is not a bundle: a band reduction that shifts
+    # the middle bucket instead of shrinking it. Shifting claims value below P1 that the
+    # true reduction does not have, so it is unsound rather than merely loose.
+    P1, P2, size, band = exact.parse("75908"), exact.parse("79007"), exact.parse("924"), exact.parse("50")
+    middle = O.digital_range(size, P1, P2)
+    true_reduction = O.band_infimum(middle, band)
+    shrunk = O.digital_range(size, P1 + band, P2 - band)
+    shifted = O.digital_range(size, P1 - band, P2 - band)
+    probes = [P1 - 1, P1, P1 + band - 1, P1 + band, P2 - band - 1, P2 - band, P2 - 1, P2]
+    check(all(shrunk(price) == true_reduction(price) for price in probes),
+          "bundles: shrinking the middle bucket from both sides is the band reduction")
+    check(any(shifted(price) != true_reduction(price) for price in probes),
+          "bundles: shifting the middle bucket is not the band reduction")
+    over = [price for price in probes if shifted(price) > true_reduction(price)]
+    check(over and O.fmt(over[0]) == "75907",
+          "bundles: the shift claims 924 at 75907, where the true reduction pays nothing")
+    check(true_reduction(P1 - 1) == 0 and shifted(P1 - 1) == size,
+          "bundles: a shifted bucket over-credits a long holder below the lower threshold")
+
+    print(f"bundles: {accepted} accepted, {len(found) - accepted} refused, each with its stated class")
+
+
+def validate_manifest(document):
+    return _validator().valid(document, "bundle-manifest.schema.json")
 
 
 def _at(profile, price):
