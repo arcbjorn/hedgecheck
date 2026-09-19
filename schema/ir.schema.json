@@ -186,6 +186,9 @@
         "additionalProperties": false
       },
       "description": "Every lowering rule that lowered a leg's value, so a checker can re-derive and compare."
+    },
+    "capture": {
+      "$ref": "defs.schema.json#/$defs/capture"
     }
   },
   "additionalProperties": false

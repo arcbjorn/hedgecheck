@@ -346,6 +346,35 @@
       },
       "additionalProperties": false,
       "description": "A price alone is a counterexample only when no leg was bounded; otherwise it carries the adverse state of each reduced leg."
+    },
+    "capture": {
+      "description": "How the snapshots in this result were captured, as stated by whatever captured them. A pure evaluator cannot re-derive this: the contexts response carries no venue timestamp (EVIDENCE section 4), so the spread between a book's venue clock and the baseline's retrieval is measurable only at capture time. It is therefore an assertion, recorded so a reader can see it and a stale or wide capture is visible, not a fact the kernel establishes. `max_skew_ms` is the bound the capturer refused above.",
+      "type": "object",
+      "required": [
+        "skew_ms",
+        "max_skew_ms",
+        "measured_by"
+      ],
+      "properties": {
+        "skew_ms": {
+          "description": "The worst observed |book venue time - local retrieval time| across the snapshots in this result, in whole milliseconds.",
+          "$ref": "defs.schema.json#/$defs/integer_text"
+        },
+        "max_skew_ms": {
+          "description": "The bound the capturer enforced. A capture above it is refused, never recorded.",
+          "$ref": "defs.schema.json#/$defs/integer_text"
+        },
+        "measured_by": {
+          "$ref": "defs.schema.json#/$defs/text"
+        }
+      },
+      "additionalProperties": false
+    },
+    "integer_text": {
+      "description": "A whole number as a string. Milliseconds are counted, never measured, so they carry no fraction.",
+      "type": "string",
+      "maxLength": 20,
+      "pattern": "^(?:-?(?:0|[1-9][0-9]*))$"
     }
   }
 }

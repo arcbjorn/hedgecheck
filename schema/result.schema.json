@@ -490,6 +490,9 @@
         },
         "additionalProperties": false
       }
+    },
+    "capture": {
+      "$ref": "defs.schema.json#/$defs/capture"
     }
   },
   "additionalProperties": false

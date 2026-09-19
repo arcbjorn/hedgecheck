@@ -343,6 +343,9 @@
         "additionalProperties": false
       },
       "description": "Declared by the user, never defaulted."
+    },
+    "capture": {
+      "$ref": "defs.schema.json#/$defs/capture"
     }
   },
   "additionalProperties": false
