@@ -1,0 +1,274 @@
+{
+ "vectors": [
+  {
+   "name": "keys are sorted",
+   "input_hex": "7b2262223a2231222c2261223a2232227d",
+   "accepted": true,
+   "canonical": "{\"a\":\"2\",\"b\":\"1\"}",
+   "sha256": "f7a837dc9b605d08d450f14bb4927ae8ab268b757d17b579b4e8e61500d87c4a"
+  },
+  {
+   "name": "whitespace is dropped",
+   "input_hex": "207b0a20226122203a205b20227822202c2074727565202c2066616c7365205d207d09",
+   "accepted": true,
+   "canonical": "{\"a\":[\"x\",true,false]}",
+   "sha256": "8eaa3427666c0b46feb40f0258cd578325374fba2c1880adceff65519e517ff9"
+  },
+  {
+   "name": "html-sensitive and non-ascii characters stay literal",
+   "input_hex": "7b226c6162656c223a22636170203c31303030202620c3a9227d",
+   "accepted": true,
+   "canonical": "{\"label\":\"cap <1000 & \u00e9\"}",
+   "sha256": "7371d496019dedfecf8091a16e919f5fc1261f315e5e09994c71acbbde641876"
+  },
+  {
+   "name": "needless escapes are removed",
+   "input_hex": "7b2273223a225c75303065395c75303033635c2f227d",
+   "accepted": true,
+   "canonical": "{\"s\":\"\u00e9</\"}",
+   "sha256": "9e838863fe233a21e0746000bd4432a289fa24927b9a3b3babf659a7cada6f8e"
+  },
+  {
+   "name": "control characters keep short or lowercase escapes",
+   "input_hex": "7b2273223a225c6e5c75303031465c625c7530303030227d",
+   "accepted": true,
+   "canonical": "{\"s\":\"\\n\\u001f\\b\\u0000\"}",
+   "sha256": "89d3bd0d8aac9c816add6f6256bfc6e7dc98066b40d755df1ec9b6b74d0257bd"
+  },
+  {
+   "name": "quote and backslash stay escaped",
+   "input_hex": "7b2273223a225c225c5c227d",
+   "accepted": true,
+   "canonical": "{\"s\":\"\\\"\\\\\"}",
+   "sha256": "8e094918f52f9adc6a011876bcfd9ff71d867ba58357c980fce5a0d2a977be0c"
+  },
+  {
+   "name": "DEL stays raw",
+   "input_hex": "7b2273223a227f227d",
+   "accepted": true,
+   "canonical": "{\"s\":\"\u007f\"}",
+   "sha256": "487ec760fe5ebe05d21893f0f63b6271963dc1ba0a133585a0fb03b663f7cfe1"
+  },
+  {
+   "name": "U+2028 stays raw",
+   "input_hex": "7b2273223a22e280a8227d",
+   "accepted": true,
+   "canonical": "{\"s\":\"\u2028\"}",
+   "sha256": "d2dcdddd0f4b645daac78de5e4c6e8eb33b01c4aab0266e49f8c8ccc7f945d99"
+  },
+  {
+   "name": "an escaped surrogate pair becomes one character",
+   "input_hex": "7b2273223a225c75643833645c7564653030227d",
+   "accepted": true,
+   "canonical": "{\"s\":\"\ud83d\ude00\"}",
+   "sha256": "f9949e1006d1ca22bc0b60ea94f09779f11a8f0a29bae250fc7ab313d879f5e7"
+  },
+  {
+   "name": "sorting is recursive and arrays keep their order",
+   "input_hex": "7b227a223a7b2262223a2231222c2261223a2232227d2c2261223a5b7b2264223a2231222c2263223a2232227d2c2279222c2278225d7d",
+   "accepted": true,
+   "canonical": "{\"a\":[{\"c\":\"2\",\"d\":\"1\"},\"y\",\"x\"],\"z\":{\"a\":\"2\",\"b\":\"1\"}}",
+   "sha256": "e2f20230ff9c341e34b2e790f287c00a2ae3067f065b86b7fdbb7f828cd92048"
+  },
+  {
+   "name": "empty containers",
+   "input_hex": "7b2261223a7b7d2c2262223a5b5d7d",
+   "accepted": true,
+   "canonical": "{\"a\":{},\"b\":[]}",
+   "sha256": "aeeba1e56a144077f89e26c930dad7cf933e9383cfb8e33ddff618233b29be76"
+  },
+  {
+   "name": "digits sort before underscore",
+   "input_hex": "7b22615f31223a2233222c226131223a2232222c2261223a2231227d",
+   "accepted": true,
+   "canonical": "{\"a\":\"1\",\"a1\":\"2\",\"a_1\":\"3\"}",
+   "sha256": "ddd2df310357ae99c0623ae4cd453989536ea46c63459628528924a4dda0c9e8"
+  },
+  {
+   "name": "a top-level array is a document",
+   "input_hex": "5b2262222c2261225d",
+   "accepted": true,
+   "canonical": "[\"b\",\"a\"]",
+   "sha256": "02d8bc3008a9bb0dcc4b86d7fd3428ced792355c733c19756bec5a56dc61b2c5"
+  },
+  {
+   "name": "a container at depth 32 is accepted",
+   "input_hex": "5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d",
+   "accepted": true,
+   "canonical": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+   "sha256": "0a1731009840e8e7ccd8b1af7a7c61381043f415ae20dfad21a86d7f9f317edb"
+  },
+  {
+   "name": "a string at depth 32 is accepted",
+   "input_hex": "5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b2278225d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d",
+   "accepted": true,
+   "canonical": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[\"x\"]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+   "sha256": "da646f4c83d1633983252b297bc172e1c33e69d6b5981636a815b7c07a6f0ccf"
+  },
+  {
+   "name": "a container at depth 33 is rejected",
+   "input_hex": "5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d",
+   "accepted": false
+  },
+  {
+   "name": "a string at depth 33 is rejected",
+   "input_hex": "5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b2278225d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d",
+   "accepted": false
+  },
+  {
+   "name": "an integer is rejected",
+   "input_hex": "7b2261223a317d",
+   "accepted": false
+  },
+  {
+   "name": "a decimal is rejected",
+   "input_hex": "7b2261223a2231222c2262223a312e357d",
+   "accepted": false
+  },
+  {
+   "name": "negative zero is rejected",
+   "input_hex": "7b2261223a2d307d",
+   "accepted": false
+  },
+  {
+   "name": "an exponent is rejected",
+   "input_hex": "7b2261223a3165337d",
+   "accepted": false
+  },
+  {
+   "name": "NaN is rejected",
+   "input_hex": "7b2261223a4e614e7d",
+   "accepted": false
+  },
+  {
+   "name": "Infinity is rejected",
+   "input_hex": "7b2261223a496e66696e6974797d",
+   "accepted": false
+  },
+  {
+   "name": "null is rejected",
+   "input_hex": "7b2261223a6e756c6c7d",
+   "accepted": false
+  },
+  {
+   "name": "a top-level number is rejected",
+   "input_hex": "31",
+   "accepted": false
+  },
+  {
+   "name": "a top-level null is rejected",
+   "input_hex": "6e756c6c",
+   "accepted": false
+  },
+  {
+   "name": "a duplicate key is rejected",
+   "input_hex": "7b2261223a2231222c2261223a2232227d",
+   "accepted": false
+  },
+  {
+   "name": "a duplicate key written with an escape is rejected",
+   "input_hex": "7b2261223a2231222c225c7530303631223a2232227d",
+   "accepted": false
+  },
+  {
+   "name": "an uppercase key is rejected",
+   "input_hex": "7b2241223a2231227d",
+   "accepted": false
+  },
+  {
+   "name": "a non-ascii key is rejected",
+   "input_hex": "7b22c3a9223a2231227d",
+   "accepted": false
+  },
+  {
+   "name": "an empty key is rejected",
+   "input_hex": "7b22223a2231227d",
+   "accepted": false
+  },
+  {
+   "name": "a key starting with a digit is rejected",
+   "input_hex": "7b223161223a2278227d",
+   "accepted": false
+  },
+  {
+   "name": "a byte order mark is rejected",
+   "input_hex": "efbbbf7b2261223a2231227d",
+   "accepted": false
+  },
+  {
+   "name": "trailing text is rejected",
+   "input_hex": "7b2261223a2231227d2078",
+   "accepted": false
+  },
+  {
+   "name": "two documents are rejected",
+   "input_hex": "7b7d7b7d",
+   "accepted": false
+  },
+  {
+   "name": "an invalid UTF-8 byte is rejected",
+   "input_hex": "7b2261223a22ff227d",
+   "accepted": false
+  },
+  {
+   "name": "a surrogate encoded as UTF-8 is rejected",
+   "input_hex": "7b2261223a22eda080227d",
+   "accepted": false
+  },
+  {
+   "name": "an escaped lone surrogate is rejected",
+   "input_hex": "7b2261223a225c7564383030227d",
+   "accepted": false
+  },
+  {
+   "name": "a reversed surrogate pair is rejected",
+   "input_hex": "7b2261223a225c75646530305c7564383364227d",
+   "accepted": false
+  },
+  {
+   "name": "a literal U+FFFD is rejected",
+   "input_hex": "7b2261223a22efbfbd227d",
+   "accepted": false
+  },
+  {
+   "name": "an escaped U+FFFD is rejected",
+   "input_hex": "7b2261223a225c7566666664227d",
+   "accepted": false
+  },
+  {
+   "name": "a raw control character is rejected",
+   "input_hex": "7b2261223a2201227d",
+   "accepted": false
+  },
+  {
+   "name": "a raw newline in a string is rejected",
+   "input_hex": "7b2261223a220a227d",
+   "accepted": false
+  },
+  {
+   "name": "single quotes are rejected",
+   "input_hex": "7b2761273a2731277d",
+   "accepted": false
+  },
+  {
+   "name": "a trailing comma is rejected",
+   "input_hex": "7b2261223a2231222c7d",
+   "accepted": false
+  },
+  {
+   "name": "a comment is rejected",
+   "input_hex": "7b2261223a2231227d202f2f206e6f7465",
+   "accepted": false
+  },
+  {
+   "name": "empty input is rejected",
+   "input_hex": "",
+   "accepted": false
+  },
+  {
+   "name": "whitespace alone is rejected",
+   "input_hex": "20200a",
+   "accepted": false
+  }
+ ]
+}

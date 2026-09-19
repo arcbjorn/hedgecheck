@@ -1,0 +1,122 @@
+{
+  "schema_version": "1",
+  "units": {
+    "money": "USDC",
+    "price": "USDC per BTC",
+    "exposure": "BTC",
+    "size": "contracts"
+  },
+  "model_result": "fails",
+  "execution_readiness": "not_evaluated",
+  "evaluation_scope": "exhaustive_supported_terminal_model",
+  "baseline": {
+    "kind": "explicit",
+    "price": "100000",
+    "label": "synthetic"
+  },
+  "objective_valuation_time": "2026-01-02T06:00:00Z",
+  "leg_observation_times": [
+    "2026-01-02T06:00:00Z"
+  ],
+  "worst_case": {
+    "pnl": "-3200",
+    "attained": true,
+    "price": "60000"
+  },
+  "failing_intervals": [
+    {
+      "lower": "60000",
+      "lower_inclusive": true,
+      "upper": "82000",
+      "upper_inclusive": false,
+      "clause": "loss_cap",
+      "witness": {
+        "price": "60000",
+        "pnl": "-3200"
+      }
+    },
+    {
+      "lower": "90000",
+      "lower_inclusive": true,
+      "upper": "92000",
+      "upper_inclusive": false,
+      "clause": "loss_cap",
+      "witness": {
+        "price": "90000",
+        "pnl": "-1200"
+      }
+    }
+  ],
+  "profile": [
+    {
+      "lower": "60000",
+      "lower_inclusive": true,
+      "upper": "90000",
+      "upper_inclusive": false,
+      "slope": "0.1",
+      "intercept": "-9200"
+    },
+    {
+      "lower": "90000",
+      "lower_inclusive": true,
+      "upper": "110000",
+      "upper_inclusive": true,
+      "slope": "0.1",
+      "intercept": "-10200"
+    }
+  ],
+  "cost": {
+    "premium": "200",
+    "other_costs": "0",
+    "pnl_at_baseline": "-200",
+    "breakevens": [
+      "102000"
+    ]
+  },
+  "comparisons": {
+    "no_hedge": {
+      "worst_case": {
+        "pnl": "-4000",
+        "price": "60000"
+      },
+      "failing_intervals": [
+        {
+          "lower": "60000",
+          "lower_inclusive": true,
+          "upper": "90000",
+          "upper_inclusive": false
+        }
+      ],
+      "proposal_better": [
+        {
+          "lower": "60000",
+          "lower_inclusive": true,
+          "upper": "90000",
+          "upper_inclusive": false
+        }
+      ],
+      "proposal_worse": [
+        {
+          "lower": "90000",
+          "lower_inclusive": true,
+          "upper": "110000",
+          "upper_inclusive": true
+        }
+      ]
+    }
+  },
+  "reason_codes": [
+    "LOSS_BOUND_EXCEEDED"
+  ],
+  "assumptions": [
+    "common_reference",
+    "fixed_premium",
+    "zero_other_costs"
+  ],
+  "checks_not_performed": [
+    "LIVE_EXECUTION",
+    "PATH_RISK"
+  ],
+  "engine_version": "reference-oracle-2",
+  "ir_digest": "09b39606fddeb6e64d48090b8025cfdcce51c215c1128fa340091595d26b1264"
+}
