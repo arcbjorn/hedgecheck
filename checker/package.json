@@ -1,0 +1,7 @@
+{
+  "name": "@hedgecheck/checker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Independent certificate checker. No dependencies; runs in a browser, Node, Deno or Bun."
+}
