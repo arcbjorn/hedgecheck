@@ -154,7 +154,7 @@ def main():
     # ---- every contract document is inside the canonical JSON profile and valid against its schema
     documents = {}
     plan = [("fixtures/golden/*.ir.json", "ir.schema.json"), ("fixtures/golden/*.result.json", "result.schema.json"),
-            ("fixtures/drafts/*.proposal.json", "proposal.schema.json"), ("registry/*.json", "registry-entry.schema.json")]
+            ("fixtures/replay/*/*.proposal.json", "proposal.schema.json"), ("registry/*.json", "registry-entry.schema.json")]
     for pattern, schema in plan:
         paths = sorted(PROJECT.glob(pattern))
         check(paths, f"{pattern}: at least one document")
@@ -174,11 +174,18 @@ def main():
         used = {bound["term"] for payoff in entry["payoffs"] for pays in payoff["pays"] for key, bound in pays["pays_on"].items() if isinstance(bound, dict)}
         check(used <= declared, f"{path}: payoffs use only declared terms")
         check(entry["review"]["state"] == "draft" or "reviewed_by" in entry["review"], f"{path}: a reviewed entry names its reviewer")
+        # review.digest pins the semantics that were reviewed. A state of "reviewed" whose digest
+        # does not match the entry's current semantics_version means the semantics changed after
+        # review, so canon.reviewed() reports it unreviewed rather than trusting a stale approval.
+        if entry["review"]["state"] == "reviewed":
+            check("digest" in entry["review"], f"{path}: a reviewed entry records the digest it reviewed")
+        check(canon.reviewed(entry) == (entry["review"]["state"] == "reviewed" and entry["review"].get("digest") == canon.semantics_version(entry)),
+              f"{path}: review state and digest together decide whether it is reviewed")
     for name, document in documents.items():
         if name.endswith(".proposal.json"):
             for leg in document["legs"]:
                 check(leg["family"] in registry, f"{name}: {leg['id']} names a family the registry has")
-                check(leg["semantics_version"] == canon.digest(registry[leg["family"]][1]), f"{name}: {leg['id']} pins the registry entry it was written against")
+                check(leg["semantics_version"] == canon.semantics_version(registry[leg["family"]][1]), f"{name}: {leg['id']} pins the registry entry it was written against")
                 check(10 * int(leg["instance"]["outcome"]) + (0 if leg["side"] == "yes" else 1) == int(leg["instance"]["coin"][1:]), f"{name}: {leg['id']} coin encodes outcome and side")
 
     # ---- "valid" means something: each mutation below must be refused
@@ -196,6 +203,9 @@ def main():
         ("ir.schema.json", mutate(lowered, ["objective"], []), "an empty objective"),
         ("ir.schema.json", mutate(lowered, ["breakpoints"], ["90000"]), "breakpoints passed beside the function"),
         ("ir.schema.json", mutate(lowered, ["objective_valuation_time"], "2026-01-02T06:00:00+00:00"), "a time that is not UTC 'Z'"),
+        ("ir.schema.json", mutate(lowered, ["legs", 0, "premium"], {"kind": "walked", "total": "645.76904", "path": "direct_book"}), "a walked cost that does not cite the book it walked"),
+        ("ir.schema.json", mutate(lowered, ["legs", 0, "premium"], {"kind": "walked", "total": "645.76904", "path": "guessed", "snapshot": "d62ba1359f45abc313840ed63deef8d705fcc9bd988ca0f29e9412d8e2cd1ef1"}), "a walked cost on an unnamed acquisition path"),
+        ("ir.schema.json", mutate(lowered, ["legs", 0, "premium"], {"kind": "walked", "price": "0.2", "path": "direct_book", "snapshot": "d62ba1359f45abc313840ed63deef8d705fcc9bd988ca0f29e9412d8e2cd1ef1"}), "a walked cost carrying a per-unit price instead of a total"),
         ("result.schema.json", mutate(result, ["model_result"], "unproven"), "an unknown verdict"),
         ("result.schema.json", mutate(result, ["reason_codes"], ["loss_bound_exceeded"]), "a lowercase reason code"),
         ("result.schema.json", mutate(result, ["failing_intervals", 0, "witness"]), "a failing interval without a witness"),
@@ -204,9 +214,25 @@ def main():
         ("registry-entry.schema.json", mutate(entry, ["review", "state"], "approved"), "an unknown review state"),
         ("registry-entry.schema.json", mutate(entry, ["sources"], []), "an entry without a source"),
         ("registry-entry.schema.json", mutate(entry, ["evidence", 0, "label"], "verified"), "an evidence label outside V, T, U"),
+        ("registry-entry.schema.json", mutate(entry, ["review", "digest"], canon.semantics_version(entry)), "a review digest without a reviewer and a date"),
     ]
     for schema, document, what in refused:
         check(valid(document, schema), f"refuses {what}")
+
+    # ---- "reviewed with a stale digest" is a cross-field rule no schema keyword can express
+    genuine = mutate(entry, ["review"], {"state": "reviewed", "drafted_by": "model", "reviewed_by": "owner",
+                                         "reviewed_on": "2026-09-19", "digest": canon.semantics_version(entry)})
+    check(not valid(genuine, "registry-entry.schema.json"), "a correctly reviewed entry is still valid")
+    check(canon.reviewed(genuine), "a review whose digest matches the semantics counts as reviewed")
+    # The digest pins the semantics, so editing them after review must not leave the entry reviewed.
+    edited = mutate(genuine, ["observation"], genuine["observation"] + " Edited after review.")
+    check(canon.semantics_version(edited) != canon.semantics_version(genuine), "editing the semantics changes semantics_version")
+    check(not canon.reviewed(edited), "refuses reviewed with a stale digest")
+    # Review state alone is not enough, and neither is a digest of the wrong thing.
+    check(not canon.reviewed(mutate(genuine, ["review", "digest"], canon.digest(genuine))), "refuses a digest taken over the whole entry")
+    check(not canon.reviewed(mutate(genuine, ["review", "state"], "draft")), "a draft is not reviewed whatever its digest says")
+    # The point of the split: marking an entry reviewed must not move the pin.
+    check(canon.semantics_version(genuine) == canon.semantics_version(entry), "reviewing an entry does not change what proposals pin")
     try:
         lint({"type": "string", "format": "date-time"}, "probe")
     except SchemaError:
