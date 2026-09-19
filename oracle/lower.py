@@ -153,10 +153,6 @@ def resolve(leg, registry):
     if leg["semantics_version"] != version:
         _refuse("SEMANTICS_PIN_MISMATCH",
                 f"{leg['id']}: pins {leg['semantics_version'][:12]}, the registry entry is {version[:12]}")
-    if not canon.reviewed(entry):
-        # T1 refuses. The next task replaces this with a loose reduction that bounds
-        # an unreviewed leg at zero rather than declining to answer.
-        _refuse("UNREVIEWED_FAMILY", f"{leg['id']}: {leg['family']} has not been reviewed by its owner")
     return entry, version
 
 
@@ -213,10 +209,14 @@ def walk(leg, book, digest):
     size = num(leg["size"])
     if size.denominator != 1 or size <= 0:
         _refuse("SIZE_NOT_WHOLE", f"{leg['id']}: size {leg['size']} is not a positive whole number of contracts")
-    cost = oracle.ask_cost(_asks(book), size)
+    levels = _asks(book)
+    cost = oracle.ask_cost(levels, size)
     if cost is None:
         _refuse("INSUFFICIENT_DEPTH", f"{leg['id']}: displayed asks do not cover {leg['size']} contracts")
-    return {"kind": "walked", "total": exact.format(cost), "path": "direct_book", "snapshot": digest}
+    # The levels travel with the total so the size window is derived from the same bytes
+    # as the price, without a second look at the book.
+    return {"kind": "walked", "total": exact.format(cost), "path": "direct_book", "snapshot": digest,
+            "levels": [[exact.format(price), exact.format(available)] for price, available in levels]}
 
 
 def price(leg, snapshots):
@@ -308,6 +308,21 @@ def lower(proposal, registry, snapshots):
     for leg in proposal["legs"]:
         entry, version = resolve(leg, registry)
         versions.append(version)
+        # Reductions lower a leg's value to something provable. Each is listed in the
+        # lowered proposal so a checker can re-derive it, and each declares whether it
+        # is tight: a loose bound can make a proposal need review, never make it fail.
+        if leg["terms"]["expiry"] != proposal["objective_valuation_time"]:
+            # The leg is not observed when the objective is valued. Its own observation
+            # may pay nothing by then, or not be resolved yet, so it is worth zero here.
+            # Tight: that state is admissible, not merely unproven.
+            reductions.append({"leg": leg["id"], "rule": "horizon_mismatch", "tight": True,
+                               "reason_code": "LEG_WORST_CASED_HORIZON"})
+        if not canon.reviewed(entry):
+            # Nobody has checked this reading of the contract, so nothing is known about
+            # what the leg pays. Not tight: the leg is probably worth more than zero, and
+            # a verdict may not rest on the bound alone.
+            reductions.append({"leg": leg["id"], "rule": "unreviewed_family", "tight": False,
+                               "reason_code": "UNREVIEWED_FAMILY"})
         _check_coin(leg)
         catalogue = _cited(snapshots, leg["instance"]["catalogue"], f"{leg['id']} catalogue")
         values, _item = check_terms(leg, catalogue)
