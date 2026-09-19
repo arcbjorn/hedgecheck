@@ -110,3 +110,27 @@ def canonical(value):
 
 def digest(value):
     return sha256(canonical(value)).hexdigest()
+
+
+def semantics_version(entry):
+    """The digest of a registry entry's semantics, excluding its review block.
+
+    A proposal pins the reading it was written against, not the review state of
+    that reading. Digesting the whole entry would couple the two: the owner
+    marking an entry reviewed would change the digest and break every proposal
+    pinning it. So `review` is excluded here, and `review.digest` records which
+    semantics_version was reviewed (see `reviewed`).
+    """
+    return digest({key: value for key, value in entry.items() if key != "review"})
+
+
+def reviewed(entry):
+    """True when this exact reading has been reviewed.
+
+    Both halves are required: the state says the owner reviewed something, and
+    the digest says it was *this* semantics. Any later edit to the semantics
+    changes semantics_version, so the stale review.digest no longer matches and
+    the entry silently reverts to unreviewed.
+    """
+    review = entry.get("review", {})
+    return review.get("state") == "reviewed" and review.get("digest") == semantics_version(entry)
