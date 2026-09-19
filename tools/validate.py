@@ -146,7 +146,7 @@ def mutate(document, path, value=DELETE):
 def main():
     # ---- the schemas stay inside the subset this validator enforces
     names = sorted(p.name for p in SCHEMAS.glob("*.schema.json"))
-    check(names == ["defs.schema.json", "ir.schema.json", "proposal.schema.json", "registry-entry.schema.json", "result.schema.json", "snapshot-record.schema.json"], "the six schema files")
+    check(names == ["comparison.schema.json", "defs.schema.json", "ir.schema.json", "proposal.schema.json", "registry-entry.schema.json", "result.schema.json", "snapshot-record.schema.json"], "the seven schema files")
     for name in names:
         lint(load(name), name)
         check(True, f"{name}: only enforced keywords")
@@ -191,6 +191,19 @@ def main():
     # ---- "valid" means something: each mutation below must be refused
     lowered, result = documents["fixtures/golden/1000-contracts.ir.json"], documents["fixtures/golden/1000-contracts.result.json"]
     entry = registry["recurring.priceBinary"][1]
+    # A minimal comparison, built here rather than read from disk: the mutations below only
+    # need a valid shape to break, and the real one is exercised by oracle/verify.py.
+    comparison = {
+        "schema_version": "1",
+        "shared": {"domain": lowered["domain"], "baseline": lowered["baseline"],
+                   "objective": lowered["objective"], "objective_valuation_time": lowered["objective_valuation_time"]},
+        "candidates": [{"label": "binary", "ir_digest": "a" * 64, "model_result": "passes", "cost": "645.76904"},
+                       {"label": "bucket0", "ir_digest": "b" * 64, "model_result": "passes", "cost": "160.76676"}],
+        "ranked_by": "cost_of_smallest_passing_size",
+        "ranking": ["bucket0", "binary"],
+        "engine_version": "reference-oracle-3",
+    }
+    check(not valid(comparison, "comparison.schema.json"), "a comparison of two results is valid")
     refused = [
         ("ir.schema.json", mutate(lowered, ["legs", 0, "size"], "1e3"), "an exponent"),
         ("ir.schema.json", mutate(lowered, ["legs", 0, "size"], "5\n"), "a trailing newline, which Python's own $ would let through"),
@@ -215,6 +228,19 @@ def main():
         ("registry-entry.schema.json", mutate(entry, ["sources"], []), "an entry without a source"),
         ("registry-entry.schema.json", mutate(entry, ["evidence", 0, "label"], "verified"), "an evidence label outside V, T, U"),
         ("registry-entry.schema.json", mutate(entry, ["review", "digest"], canon.semantics_version(entry)), "a review digest without a reviewer and a date"),
+        ("ir.schema.json", mutate(lowered, ["reductions"], [{"leg": "put", "rule": "horizon_mismatch", "reason_code": "LEG_WORST_CASED_HORIZON"}]), "a reduction that does not say whether it is tight"),
+        ("ir.schema.json", mutate(lowered, ["reductions"], [{"leg": "put", "rule": "horizon_mismatch", "tight": "yes", "reason_code": "LEG_WORST_CASED_HORIZON"}]), "a tightness that is a string rather than a boolean"),
+        ("result.schema.json", mutate(result, ["size_windows"], [{"leg": "put", "status": "nonempty", "binding": [], "smallest": "1409"}]), "a size window with a smallest size but no largest"),
+        ("result.schema.json", mutate(result, ["size_windows"], [{"leg": "put", "status": "maybe", "binding": []}]), "a size window that is neither empty nor nonempty"),
+        ("result.schema.json", mutate(result, ["size_windows"], [{"leg": "put", "status": "empty", "binding": [{"price": "60000", "side": "near"}]}]), "a binding site that is not at, above or below a price"),
+        ("result.schema.json", mutate(result, ["size_windows"], [{"leg": "put", "status": "empty", "binding": [], "certificate": {"kind": "farkas", "weights": ["0.8"]}}]), "an infeasibility certificate with one weight instead of two"),
+        ("result.schema.json", mutate(result, ["comparisons", "smallest_reduction", "keep_quantity"]), "an alternative that does not say how much to keep"),
+        ("result.schema.json", mutate(result, ["comparisons", "smallest_reduction"]), "a result without the no-premium alternative"),
+        ("result.schema.json", mutate(result, ["reductions"], [{"leg": "put", "rule": "horizon_mismatch", "tight": True}]), "a reduction in a result without its reason code"),
+        ("comparison.schema.json", mutate(comparison, ["candidates"], comparison["candidates"][:1]), "a comparison of one candidate"),
+        ("comparison.schema.json", mutate(comparison, ["candidates", 0, "ir_digest"], "not-a-digest"), "a candidate cited by something other than a digest"),
+        ("comparison.schema.json", mutate(comparison, ["ranked_by"], "cheapest"), "an unknown ranking rule"),
+        ("comparison.schema.json", mutate(comparison, ["shared"]), "a comparison that does not state the terms its candidates share"),
     ]
     for schema, document, what in refused:
         check(valid(document, schema), f"refuses {what}")
