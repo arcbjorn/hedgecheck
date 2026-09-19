@@ -85,6 +85,14 @@ def errors(instance, schema, base, where="$"):
         out += errors(instance, target, target_base, where)
     if "type" in schema:
         kind = TYPES[schema["type"]]
+        # One deliberate deviation from JSON Schema 2020-12, and the only one: the
+        # specification counts 1.0 as an integer, this does not. `integer` appears in
+        # exactly one place, snapshot-record's http_status, where the value is a status
+        # code the venue returned. A float there means the record was rewritten by
+        # something that round-tripped it through a float, which is precisely the
+        # corruption a record is meant to expose. Being stricter than the spec cannot
+        # accept a bad document; it could only reject a good one, and no good record
+        # carries 200.0. Documented in ARCHITECTURE section 7.
         if not isinstance(instance, kind) or (kind is int and isinstance(instance, bool)) or (kind is not bool and isinstance(instance, bool)):
             return out + [f"{where}: expected {schema['type']}"]
     if "const" in schema and instance != schema["const"]:
@@ -146,7 +154,7 @@ def mutate(document, path, value=DELETE):
 def main():
     # ---- the schemas stay inside the subset this validator enforces
     names = sorted(p.name for p in SCHEMAS.glob("*.schema.json"))
-    check(names == ["comparison.schema.json", "defs.schema.json", "ir.schema.json", "proposal.schema.json", "registry-entry.schema.json", "result.schema.json", "snapshot-record.schema.json"], "the seven schema files")
+    check(names == ["bundle-manifest.schema.json", "comparison.schema.json", "defs.schema.json", "ir.schema.json", "proposal.schema.json", "refusal.schema.json", "registry-entry.schema.json", "result.schema.json", "snapshot-record.schema.json"], "the nine schema files")
     for name in names:
         lint(load(name), name)
         check(True, f"{name}: only enforced keywords")
@@ -154,7 +162,16 @@ def main():
     # ---- every contract document is inside the canonical JSON profile and valid against its schema
     documents = {}
     plan = [("fixtures/golden/*.ir.json", "ir.schema.json"), ("fixtures/golden/*.result.json", "result.schema.json"),
-            ("fixtures/replay/*/*.proposal.json", "proposal.schema.json"), ("registry/*.json", "registry-entry.schema.json")]
+            ("fixtures/replay/*/*.proposal.json", "proposal.schema.json"), ("registry/*.json", "registry-entry.schema.json"),
+            # Every bundle manifest, and the documents of the GOOD bundles. A corrupted
+            # bundle is corrupt on purpose, and some corruptions are schema-invalid --
+            # that is the refuser's business (oracle/verify.py), not the validator's.
+            # Without these globs a good bundle could carry a schema-invalid result and
+            # make check stayed green.
+            ("fixtures/bundles/*/manifest.json", "bundle-manifest.schema.json"),
+            ("fixtures/bundles/good*/proposal.json", "proposal.schema.json"),
+            ("fixtures/bundles/good*/lowered.json", "ir.schema.json"),
+            ("fixtures/bundles/good*/result.json", "result.schema.json")]
     for pattern, schema in plan:
         paths = sorted(PROJECT.glob(pattern))
         check(paths, f"{pattern}: at least one document")
@@ -259,6 +276,16 @@ def main():
     check(not canon.reviewed(mutate(genuine, ["review", "state"], "draft")), "a draft is not reviewed whatever its digest says")
     # The point of the split: marking an entry reviewed must not move the pin.
     check(canon.semantics_version(genuine) == canon.semantics_version(entry), "reviewing an entry does not change what proposals pin")
+    # The one documented deviation from JSON Schema 2020-12, pinned so it stays a
+    # decision rather than becoming an accident. `integer` is used only for a venue
+    # status code, where a float means the record was rewritten.
+    check(errors(1.0, {"type": "integer"}, "probe"), "stricter than 2020-12: 1.0 is not accepted as an integer")
+    check(not errors(1, {"type": "integer"}, "probe"), "a whole number is an integer")
+    check(errors(True, {"type": "integer"}, "probe"), "a boolean is never an integer")
+    integer_uses = [name for name in names if '"integer"' in (SCHEMAS / name).read_text()]
+    check(integer_uses == ["snapshot-record.schema.json"],
+          f"'integer' is used only where that deviation is harmless, found in {integer_uses}")
+
     try:
         lint({"type": "string", "format": "date-time"}, "probe")
     except SchemaError:
@@ -286,6 +313,47 @@ def main():
         retained = {json.loads(subprocess.run(["git", "-C", str(PROJECT), "show", f"{EVIDENCE_COMMIT}:{p}"], capture_output=True, check=True).stdout)["response_sha256"] for p in records}
         check(cited <= retained, "every snapshot a draft proposal cites is a retained response")
         print(f"{len(records)} retained snapshot records at {EVIDENCE_COMMIT} match the schema")
+
+    # ---- the freeze: a schema cannot change without schema/CHANGES.md changing
+    #
+    # The schemas are v1. A change needs a row in CHANGES.md naming the case that
+    # forced it, so the two move together or not at all. Compared against HEAD rather
+    # than a stored digest: a digest would itself need updating in the same commit,
+    # which is the drift this prevents.
+    changed = subprocess.run(["git", "-C", str(PROJECT), "diff", "--name-only", "HEAD", "--", "schema/"],
+                             capture_output=True, text=True)
+    untracked = subprocess.run(["git", "-C", str(PROJECT), "ls-files", "--others", "--exclude-standard", "schema/"],
+                               capture_output=True, text=True)
+    if changed.returncode != 0:
+        print("note: not a git repository here; the schema freeze was not checked")
+    else:
+        touched = {line for line in (changed.stdout + untracked.stdout).split() if line.endswith(".json")}
+        recorded = "schema/CHANGES.md" in (changed.stdout + untracked.stdout)
+        check(not touched or recorded,
+              f"schema files changed without schema/CHANGES.md: {sorted(touched)[:3]}")
+        check((PROJECT / "schema" / "CHANGES.md").exists(), "schema/CHANGES.md exists")
+        for name in names:
+            comment = load(name).get("$comment", "")
+            check("DRAFT" not in comment, f"{name}: no longer marked DRAFT")
+            check("CHANGES.md" in comment, f"{name}: points at the change log")
+
+    # ---- documented counts are printed by a command, never remembered
+    #
+    # Every count in the four documents drifted at least once before this existed:
+    # README said six schemas when there were nine, ARCHITECTURE said seven. A count
+    # in prose is a claim, and a claim needs a check.
+    readme = (PROJECT / "README.md").read_text()
+    architecture = (PROJECT / "ARCHITECTURE.md").read_text()
+    words = {6: "Six", 7: "seven", 8: "Eight", 9: "Nine", 10: "Ten"}
+    spelled = words.get(len(names), str(len(names)))
+    check(f"{spelled} draft JSON Schemas" in readme,
+          f"README names the schema count: expected '{spelled} draft JSON Schemas' for {len(names)} files")
+    check(f"{spelled.lower()} draft schemas" in architecture,
+          f"ARCHITECTURE names the schema count: expected '{spelled.lower()} draft schemas'")
+    for directory in sorted(p.name for p in (PROJECT / "fixtures").iterdir() if p.is_dir()):
+        check(f"`{directory}/`" in readme, f"README's fixtures row mentions {directory}/")
+    for top in ("oracle", "engine", "checker", "tools", "schema", "spike", "research"):
+        check(f"| `{top}/` |" in readme, f"README's layout table has a row for {top}/")
 
     print(f"{CHECKS} checks passed; {len(documents)} contract documents valid, {len(refused)} mutations refused.")
 
