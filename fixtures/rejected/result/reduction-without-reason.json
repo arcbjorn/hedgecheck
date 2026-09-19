@@ -1,0 +1,167 @@
+{
+ "assumptions": [
+  "common_reference",
+  "fixed_premium",
+  "zero_other_costs"
+ ],
+ "baseline": {
+  "kind": "explicit",
+  "label": "synthetic",
+  "price": "100000"
+ },
+ "checks_not_performed": [
+  "LIVE_EXECUTION",
+  "PATH_RISK"
+ ],
+ "comparisons": {
+  "no_hedge": {
+   "failing_intervals": [
+    {
+     "lower": "60000",
+     "lower_inclusive": true,
+     "upper": "90000",
+     "upper_inclusive": false
+    }
+   ],
+   "proposal_better": [
+    {
+     "lower": "60000",
+     "lower_inclusive": true,
+     "upper": "90000",
+     "upper_inclusive": false
+    }
+   ],
+   "proposal_worse": [
+    {
+     "lower": "90000",
+     "lower_inclusive": true,
+     "upper": "110000",
+     "upper_inclusive": true
+    }
+   ],
+   "worst_case": {
+    "pnl": "-4000",
+    "price": "60000"
+   }
+  },
+  "smallest_reduction": {
+   "keep_quantity": "0.025",
+   "proposal_better": [
+    {
+     "lower": "268000/3",
+     "lower_inclusive": false,
+     "upper": "90000",
+     "upper_inclusive": false
+    },
+    {
+     "lower": "308000/3",
+     "lower_inclusive": false,
+     "upper": "110000",
+     "upper_inclusive": true
+    }
+   ],
+   "proposal_worse": [
+    {
+     "lower": "60000",
+     "lower_inclusive": true,
+     "upper": "268000/3",
+     "upper_inclusive": false
+    },
+    {
+     "lower": "90000",
+     "lower_inclusive": true,
+     "upper": "308000/3",
+     "upper_inclusive": false
+    }
+   ],
+   "sell_at": "100000",
+   "sell_quantity": "0.075",
+   "worst_case": {
+    "pnl": "-1000",
+    "price": "60000"
+   }
+  }
+ },
+ "cost": {
+  "breakevens": [
+   "102000"
+  ],
+  "other_costs": "0",
+  "pnl_at_baseline": "-200",
+  "premium": "200"
+ },
+ "engine_version": "reference-oracle-3",
+ "evaluation_scope": "exhaustive_supported_terminal_model",
+ "execution_readiness": "not_evaluated",
+ "failing_intervals": [
+  {
+   "clause": "loss_cap",
+   "lower": "60000",
+   "lower_inclusive": true,
+   "upper": "82000",
+   "upper_inclusive": false,
+   "witness": {
+    "pnl": "-3200",
+    "price": "60000"
+   }
+  },
+  {
+   "clause": "loss_cap",
+   "lower": "90000",
+   "lower_inclusive": true,
+   "upper": "92000",
+   "upper_inclusive": false,
+   "witness": {
+    "pnl": "-1200",
+    "price": "90000"
+   }
+  }
+ ],
+ "ir_digest": "09b39606fddeb6e64d48090b8025cfdcce51c215c1128fa340091595d26b1264",
+ "leg_observation_times": [
+  "2026-01-02T06:00:00Z"
+ ],
+ "model_result": "fails",
+ "objective_valuation_time": "2026-01-02T06:00:00Z",
+ "profile": [
+  {
+   "intercept": "-9200",
+   "lower": "60000",
+   "lower_inclusive": true,
+   "slope": "0.1",
+   "upper": "90000",
+   "upper_inclusive": false
+  },
+  {
+   "intercept": "-10200",
+   "lower": "90000",
+   "lower_inclusive": true,
+   "slope": "0.1",
+   "upper": "110000",
+   "upper_inclusive": true
+  }
+ ],
+ "reason_codes": [
+  "LOSS_BOUND_EXCEEDED"
+ ],
+ "reductions": [
+  {
+   "leg": "put",
+   "rule": "horizon_mismatch",
+   "tight": true
+  }
+ ],
+ "schema_version": "1",
+ "snapshots": [],
+ "units": {
+  "exposure": "BTC",
+  "money": "USDC",
+  "price": "USDC per BTC",
+  "size": "contracts"
+ },
+ "worst_case": {
+  "attained": true,
+  "pnl": "-3200",
+  "price": "60000"
+ }
+}

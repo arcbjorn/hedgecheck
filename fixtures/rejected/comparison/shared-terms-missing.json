@@ -1,0 +1,23 @@
+{
+ "candidates": [
+  {
+   "cost": "645.76904",
+   "ir_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "label": "binary",
+   "model_result": "passes"
+  },
+  {
+   "cost": "160.76676",
+   "ir_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "label": "bucket0",
+   "model_result": "passes"
+  }
+ ],
+ "engine_version": "reference-oracle-3",
+ "ranked_by": "cost_of_smallest_passing_size",
+ "ranking": [
+  "bucket0",
+  "binary"
+ ],
+ "schema_version": "1"
+}

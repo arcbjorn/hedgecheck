@@ -1,0 +1,41 @@
+{
+ "candidates": [
+  {
+   "cost": "645.76904",
+   "ir_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "label": "binary",
+   "model_result": "passes"
+  },
+  {
+   "cost": "160.76676",
+   "ir_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "label": "bucket0",
+   "model_result": "passes"
+  }
+ ],
+ "engine_version": "reference-oracle-3",
+ "ranked_by": "cheapest",
+ "ranking": [
+  "bucket0",
+  "binary"
+ ],
+ "schema_version": "1",
+ "shared": {
+  "baseline": {
+   "kind": "explicit",
+   "label": "synthetic",
+   "price": "100000"
+  },
+  "domain": {
+   "lower": "60000",
+   "upper": "110000"
+  },
+  "objective": [
+   {
+    "id": "loss_cap",
+    "min_pnl": "-1000"
+   }
+  ],
+  "objective_valuation_time": "2026-01-02T06:00:00Z"
+ }
+}

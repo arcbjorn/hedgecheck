@@ -1,0 +1,51 @@
+{
+ "assumptions": [
+  "common_reference",
+  "fixed_premium",
+  "zero_other_costs"
+ ],
+ "baseline": {
+  "kind": "explicit",
+  "label": "synthetic",
+  "price": "100000"
+ },
+ "domain": {
+  "lower": "60000",
+  "upper": "110000"
+ },
+ "exposure": {
+  "kind": "linear",
+  "quantity": "0.1"
+ },
+ "legs": [
+  {
+   "id": "put",
+   "kind": "indicator",
+   "observation_time": "2026-01-02T06:00:00Z",
+   "pays_on": {
+    "upper": "90000"
+   },
+   "premium": {
+    "kind": "fixed",
+    "price": "0.2"
+   },
+   "semantics": "synthetic",
+   "size": "1000"
+  }
+ ],
+ "objective": [
+  {
+   "id": "loss_cap",
+   "min_pnl": "-1000"
+  }
+ ],
+ "objective_valuation_time": "2026-01-02T06:00:00Z",
+ "other_costs": "0",
+ "schema_version": "1",
+ "units": {
+  "exposure": "BTC",
+  "money": "USDC",
+  "price": "USDC per BTC",
+  "size": "contracts"
+ }
+}
