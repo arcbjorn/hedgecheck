@@ -340,41 +340,138 @@ def leg_cost(leg):
     return num(leg["size"]) * num(premium["price"])
 
 
+def smallest_reduction(quantity, baseline, cap, lower):
+    """The smallest exposure reduction meeting the cap, as a kept quantity.
+
+    Selling (quantity - keep) at the baseline and holding the cash leaves a linear
+    P&L of keep*(S - baseline), whose worst case on the domain is keep*(lower -
+    baseline). Setting that equal to the cap gives keep = -cap / (baseline - lower),
+    the largest holding that still meets the cap, so the smallest sale that does.
+    """
+    keep = -cap / (baseline - lower)
+    return min(keep, quantity)
+
+
+def _breakevens(fn, lower, upper):
+    out = []
+    for piece in profile(fn, lower, upper):
+        if piece["slope"] != 0:
+            root = -piece["intercept"] / piece["slope"]
+            if (piece["lower"] < root < piece["upper"]
+                    or (root == piece["lower"] and piece["lower_inclusive"])
+                    or (root == piece["upper"] and piece["upper_inclusive"])):
+                out.append(fmt(root))
+    return out
+
+
+def _sized_leg_window(lowered, leg, lower, upper, baseline, cap):
+    """The exact and whole-contract sizes of one book-walked leg that meet the cap.
+
+    Only meaningful when this leg is the one being sized, so the rest of the
+    proposal is the base. Returns None when the leg was not walked on a book: a
+    hypothetical fixed price says nothing about what depth would allow.
+    """
+    if leg["premium"]["kind"] != "walked" or "levels" not in leg["premium"]:
+        return None
+    others = [other for other in lowered["legs"] if other["id"] != leg["id"]]
+    base = total([linear(num(lowered["exposure"]["quantity"]), baseline)]
+                 + [_leg(other) for other in others]
+                 + [cash(-sum((leg_cost(other) for other in others), F(0)) - num(lowered["other_costs"]))])
+    unit = _leg(dict(leg, size="1"))
+    levels = [(num(price), num(size)) for price, size in leg["premium"]["levels"]]
+    window = size_window(base, unit, levels, cap, lower, upper)
+    out = {"leg": leg["id"], "status": window["status"]}
+    if window["lower_bound"] is not None:
+        out["lower_bound"] = fmt(window["lower_bound"])
+        out["upper_bound"] = fmt(window["upper_bound"])
+    out["binding"] = [{"price": fmt(price), "side": side} for price, side in window["binding"] if price is not None]
+    if window["status"] == "nonempty":
+        out["smallest"] = fmt(window["smallest"])
+        out["largest"] = fmt(window["largest"])
+    elif len(levels) == 1:
+        # One flat price: the infeasibility has a two-line certificate. With D the loss
+        # at the strike and A the further loss to the floor, the constraints at those two
+        # sites are -D - p*n >= cap and -D - A + n*(1-p) >= cap. Weighting them by (1-p, p)
+        # cancels n and leaves -(D + p*A) >= cap, which is false whatever the size.
+        price = levels[0][0]
+        out["certificate"] = {"kind": "farkas", "weights": [fmt(F(1) - price), fmt(price)]}
+    return out
+
+
 def evaluate(lowered):
-    """Expected result for a lowered proposal (schema/ir.schema.json)."""
+    """Expected result for a lowered proposal (schema/ir.schema.json).
+
+    Every reduction gives a *lower* profile, which is what the verdict rests on, and
+    an *upper* profile, which is the best the proposal could be if the reduction were
+    undone. With no reductions the two coincide. A violation that survives only on the
+    lower profile, and only because of a rule that is not tight, is `needs_review`:
+    the loose bound proves nothing about the real payoff, so it can never say `fails`.
+    """
     lower, upper = num(lowered["domain"]["lower"]), num(lowered["domain"]["upper"])
     baseline = num(lowered["baseline"]["price"])
-    exposure = linear(num(lowered["exposure"]["quantity"]), baseline)
+    quantity = num(lowered["exposure"]["quantity"])
+    exposure = linear(quantity, baseline)
     premium = sum((leg_cost(leg) for leg in lowered["legs"]), F(0))
     other = num(lowered["other_costs"])
-    pnl = total([exposure] + [_leg(leg) for leg in lowered["legs"]] + [cash(-premium - other)])
+    reductions = lowered.get("reductions", [])
+    zeroed = {reduction["leg"] for reduction in reductions}
+    loose_legs = {reduction["leg"] for reduction in reductions if not reduction["tight"]}
 
-    failing, codes = [], []
+    # A reduced leg is valued at zero in the lower profile. Its premium still counts:
+    # it was paid whatever the leg turns out to be worth.
+    costs = cash(-premium - other)
+    kept = [leg for leg in lowered["legs"] if leg["id"] not in zeroed]
+    pnl = total([exposure] + [_leg(leg) for leg in kept] + [costs])
+    # A long fully collateralized token is worth at most its size (EVIDENCE section 1),
+    # so the upper profile credits every reduced leg with its full size.
+    ceiling = sum((num(leg["size"]) for leg in lowered["legs"] if leg["id"] in zeroed), F(0))
+    upper_pnl = (pnl + cash(ceiling)) if ceiling else pnl
+
+    failing, undecided, codes = [], [], []
     for clause in lowered["objective"]:
-        for interval in below(pnl, num(clause["min_pnl"]), lower, upper):
+        threshold = num(clause["min_pnl"])
+        for interval in below(pnl, threshold, lower, upper):
             shown = text_interval(interval)
             shown["clause"] = clause["id"]
             point = witness(pnl, interval)
             shown["witness"] = {"price": fmt(point["price"]), "pnl": fmt(point["pnl"])}
-            failing.append(shown)
+            # The upper profile is the best the proposal could be. Where it also violates
+            # the clause, the failure is real whatever the loose legs are worth. Where it
+            # does not, the violation rests only on a loose bound, which proves nothing
+            # about the real payoff: that is `needs_review`, never `fails`.
+            survives = bool(below(upper_pnl, threshold, *_clip(interval, lower, upper))) if loose_legs else True
+            if not survives:
+                shown["responsible_legs"] = sorted(loose_legs)
+                undecided.append(shown)
+            else:
+                # Once any leg has been bounded, a price alone is not a counterexample:
+                # the witness has to carry the adverse state of each reduced leg.
+                if zeroed:
+                    shown["witness"]["adverse_states"] = _adverse(reductions)
+                failing.append(shown)
     if failing:
         codes.append("LOSS_BOUND_EXCEEDED")
+    for reduction in reductions:
+        if reduction["reason_code"] not in codes:
+            codes.append(reduction["reason_code"])
+    if undecided and not failing:
+        verdict = "needs_review"
+    else:
+        verdict = "fails" if failing else "passes"
+
     worst, attained, where = infimum(pnl, lower, upper)
     bare_worst, _, bare_where = infimum(exposure, lower, upper)
     cap = min(num(clause["min_pnl"]) for clause in lowered["objective"])
-    breakevens = []
-    for piece in profile(pnl, lower, upper):
-        if piece["slope"] != 0:
-            root = -piece["intercept"] / piece["slope"]
-            inside = (piece["lower"] < root < piece["upper"]
-                      or (root == piece["lower"] and piece["lower_inclusive"])
-                      or (root == piece["upper"] and piece["upper_inclusive"]))
-            if inside:
-                breakevens.append(fmt(root))
-    return {
+
+    # The smallest exposure reduction that meets the same clauses, with no premium.
+    keep = smallest_reduction(quantity, baseline, cap, lower)
+    reduced = linear(keep, baseline)
+    reduced_worst, _, reduced_where = infimum(reduced, lower, upper)
+
+    result = {
         "schema_version": "1",
         "units": lowered["units"],
-        "model_result": "fails" if failing else "passes",
+        "model_result": verdict,
         "execution_readiness": "not_evaluated",
         "evaluation_scope": "exhaustive_supported_terminal_model",
         "baseline": lowered["baseline"],
@@ -384,15 +481,80 @@ def evaluate(lowered):
         "failing_intervals": failing,
         "profile": [text_interval(piece) for piece in profile(pnl, lower, upper)],
         "cost": {"premium": fmt(premium), "other_costs": fmt(other),
-                 "pnl_at_baseline": fmt(pnl(baseline)), "breakevens": breakevens},
-        "comparisons": {"no_hedge": {
-            "worst_case": {"pnl": fmt(bare_worst), "price": fmt(bare_where)},
-            "failing_intervals": [text_interval(i) for i in below(exposure, cap, lower, upper)],
-            "proposal_better": [text_interval(i) for i in below(exposure - pnl, F(0), lower, upper)],
-            "proposal_worse": [text_interval(i) for i in below(pnl - exposure, F(0), lower, upper)]}},
+                 "pnl_at_baseline": fmt(pnl(baseline)), "breakevens": _breakevens(pnl, lower, upper)},
+        "comparisons": {
+            "no_hedge": {
+                "worst_case": {"pnl": fmt(bare_worst), "price": fmt(bare_where)},
+                "failing_intervals": [text_interval(i) for i in below(exposure, cap, lower, upper)],
+                "proposal_better": [text_interval(i) for i in below(exposure - pnl, F(0), lower, upper)],
+                "proposal_worse": [text_interval(i) for i in below(pnl - exposure, F(0), lower, upper)]},
+            "smallest_reduction": {
+                "keep_quantity": fmt(keep), "sell_quantity": fmt(quantity - keep), "sell_at": fmt(baseline),
+                "worst_case": {"pnl": fmt(reduced_worst), "price": fmt(reduced_where)},
+                "proposal_better": [text_interval(i) for i in below(reduced - pnl, F(0), lower, upper)],
+                "proposal_worse": [text_interval(i) for i in below(pnl - reduced, F(0), lower, upper)]}},
         "reason_codes": codes,
         "assumptions": lowered["assumptions"],
         "checks_not_performed": ["LIVE_EXECUTION", "PATH_RISK"],
-        "engine_version": "reference-oracle-2",
+        "engine_version": "reference-oracle-3",
         "ir_digest": digest(lowered),
     }
+    if undecided:
+        result["undecided_intervals"] = undecided
+    if reductions:
+        result["reductions"] = reductions
+        result["upper_profile"] = [text_interval(piece) for piece in profile(upper_pnl, lower, upper)]
+    windows = [w for w in (_sized_leg_window(lowered, leg, lower, upper, baseline, cap)
+                           for leg in lowered["legs"] if leg["id"] not in zeroed) if w]
+    if windows:
+        result["size_windows"] = windows
+    return result
+
+
+def compare(labelled):
+    """Rank independently evaluated proposals (schema/comparison.schema.json).
+
+    Takes (label, lowered, result) triples that were each evaluated on their own.
+    Nothing here re-evaluates anything: the comparison cites results by `ir_digest`
+    and restates none of their numbers, so each result stays about one proposal and
+    stays independently checkable. A checker verifies the results first, then
+    re-derives this ranking from them.
+
+    Comparing proposals that do not share an objective, domain, baseline and
+    valuation time would rank answers to different questions, so that is an error.
+    """
+    first = labelled[0][1]
+    shared = {"domain": first["domain"], "baseline": first["baseline"],
+              "objective": first["objective"], "objective_valuation_time": first["objective_valuation_time"]}
+    for label, lowered, _ in labelled:
+        if {key: lowered[key] for key in shared} != shared:
+            raise ValueError(f"{label} does not share the objective, domain, baseline and valuation time")
+    candidates = [{"label": label, "ir_digest": result["ir_digest"],
+                   "model_result": result["model_result"], "cost": result["cost"]["premium"]}
+                  for label, _, result in labelled]
+    # Only a passing candidate is ranked: a cost that bought an unestablished result
+    # has no place in an ordering by cost.
+    passing = [c for c in candidates if c["model_result"] == "passes"]
+    out = {"schema_version": "1", "shared": shared, "candidates": candidates,
+           "ranked_by": "cost_of_smallest_passing_size", "engine_version": "reference-oracle-3"}
+    if passing:
+        out["ranking"] = [c["label"] for c in sorted(passing, key=lambda c: num(c["cost"]))]
+    return out
+
+
+def _clip(interval, lower, upper):
+    """The interval as (lower, upper) bounds for a nested `below` call."""
+    return max(interval["lower"], lower), min(interval["upper"], upper)
+
+
+ADVERSE_STATES = {
+    "horizon_mismatch": "the leg's own observation pays zero",
+    "unreviewed_family": "nothing is established about what the leg pays",
+}
+
+
+def _adverse(reductions):
+    """Why a price alone is not a counterexample once a leg has been bounded."""
+    return [{"leg": reduction["leg"], "rule": reduction["rule"],
+             "state": ADVERSE_STATES.get(reduction["rule"], "the leg is valued at zero")}
+            for reduction in reductions]
