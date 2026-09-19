@@ -1,0 +1,59 @@
+# Schema changes
+
+Every change to these schemas since `062a245`, the commit that first added them,
+with the real case that forced it. A change with no forcing case does not belong
+here and does not belong in the schemas; there are none.
+
+The schemas are **frozen at v1** as of T1's gate. `schema_version` stays `"1"`.
+A change after the freeze needs a new `schema_version`, a row here, and a
+mutation in `tools/validate.py` that the old shape would have failed.
+
+`make check` fails if any file in `schema/` differs from `HEAD` while this file
+does not, so a change cannot land without a row.
+
+---
+
+## Forced by the 18 September replay
+
+The first time the contract met real catalogues, books and marks.
+
+| Change | Forcing case |
+|---|---|
+| `defs.cost`: a leg's premium may be `walked` — an exact `total` with `path` and `snapshot` — not only a `fixed` per-unit price | A book walk over several levels has no single per-unit price. 1,409 contracts at 645.76904 averages `8072113/17612500`, a repeating decimal. Both forms are exact under the number grammar; the total is the one that was observed. Exercised by `fixtures/bundles/premium-altered`. |
+| `defs.cost`: a `walked` cost carries the `levels` it walked | The size window asks "what size would have met the cap on this book". Re-reading the snapshot inside `evaluate` would make the kernel touch evidence, so the levels travel with the total. Exercised by `fixtures/bundles/size-window-too-small`. |
+| `registry-entry.review` gains `digest`; `semantics_version` excludes the `review` key | Reproduced before it was fixed: marking `recurring.priceBinary` reviewed changed its digest from `630b8c2f` to `7b1aa160`, which would have broken every proposal pinning it. An entry now counts as reviewed only when `review.digest` still matches its `semantics_version`, so editing the semantics silently un-reviews it. Exercised by `fixtures/bundles/wrong-semantics-version`. |
+| `ir.baseline` keeps its `source` through lowering | Caught by the IR schema when lowering first dropped it. A checker must be able to re-read the baseline price from the same retained response rather than trust the number the lowering wrote down. |
+
+## Forced by the complete result
+
+A verdict alone does not answer what a person asks before approving a hedge.
+
+| Change | Forcing case |
+|---|---|
+| `result.size_windows` | On 18 September the two canonical hedges both pass the same cap at 645.77 and 160.77. "Can size fix it" is unanswerable without the window, its exact bounds, and which site binds each end. Exercised by `fixtures/bundles/size-window-too-small` and `certificate-negative-weight`. |
+| `result.comparisons.smallest_reduction` | The no-premium alternative is the benchmark a paid hedge has to beat: keep `5000/88157` BTC, sell the rest, worst case exactly −1000. A result that omits it invites approving a hedge that is worse than selling. |
+| `result.reductions` and `result.upper_profile` | The `needs_review` verdict needs both profiles. The lower one carries the verdict; the upper one decides whether a violation rests on a loose bound. Without the upper profile a loose bound could produce `fails`, which PLAN §4 forbids. Exercised by `fixtures/bundles/reduction-without-reason` and `good-horizon`. |
+| `comparison.schema.json`, a separate document | The 18 September binary and bucket lower to different IRs with different digests. Folding a cross-instrument ranking into either result would make that result depend on a proposal it is not about. The comparison cites results by `ir_digest` and restates none of their numbers. |
+
+## Forced by the certificate fixtures
+
+| Change | Forcing case |
+|---|---|
+| `refusal.schema.json`, a closed list of classes | The TypeScript checker in T3 must refuse the same bundle for the same stated reason as the reference refuser. An open list would make every disagreement a wording question. |
+| `bundle-manifest.schema.json` | A bundle must be self-contained, so refusing it never depends on the state of the tree it was built from — it carries its own registry entries and snapshots. The manifest names the class the bundle must be refused with, so a fixture that stops being refused fails loudly. |
+| `bundle-manifest.files.registry` and `.snapshots` are lists, not maps | The canonical JSON profile forbids a dot in a key, and `recurring.priceBinary` has one. Found by `canon.CanonError` on the first generation. |
+
+## Forced by the audit
+
+| Change | Forcing case |
+|---|---|
+| `result.capture`, `ir.capture`, `proposal.capture`, `defs.capture`, `defs.integer_text` | T1's gate says snapshots must be "retrieved within a stated skew, **recorded in it**". Nothing recorded it. `result.snapshots` already existed and nothing populated it, so the provenance slot was there and empty. `capture` is an **assertion, not a derivation**: the contexts response carries no venue timestamp, so the spread between a book's venue clock and the baseline's retrieval cannot be re-derived from the bytes by anyone, including a checker. |
+| `result.upper_profile` re-typed from `interval` to the profile piece shape | Found the moment the validator began checking bundle documents: `$.upper_profile[0]: unexpected 'intercept'`. It had been typed as a bare interval while carrying `slope` and `intercept`. A schema too loose in one direction and too tight in the other, invisible until the fixtures were validated. |
+
+---
+
+## Not changed, and why
+
+- **`schema_version` stays `"1"`.** Every change above is additive: no field was removed, no field became required, no existing value became invalid. A document valid at `062a245` is valid now.
+- **`defs.number` is untouched.** The grammar is the one thing three implementations share, pinned by 48 canonical-JSON and 55 number vectors and re-checked by a differential fuzz across Python, Go and TypeScript.
+- **The validator is stricter than JSON Schema 2020-12 in exactly one place.** `1.0` is not accepted as an integer. `integer` appears only at `snapshot-record.http_status`, where a float means the record was round-tripped through something lossy — the corruption a record exists to expose. Pinned by a check in `tools/validate.py`.

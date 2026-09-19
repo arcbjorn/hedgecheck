@@ -46,5 +46,6 @@
       "type": "string"
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$comment": "Frozen as schema v1 at T1's gate (PLAN.md section 7), after the contract met live data on 18 and 19 September. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored. Every change since 062a245 is listed in schema/CHANGES.md with the case that forced it; a change after the freeze needs a new schema_version and a row there."
 }

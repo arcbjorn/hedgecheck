@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "registry-entry.schema.json",
   "title": "Semantics registry entry",
-  "$comment": "DRAFT. Frozen as schema v1 only at T1's gate (PLAN.md section 7), after the contract has met live data. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored.",
+  "$comment": "Frozen as schema v1 at T1's gate (PLAN.md section 7), after the contract met live data on 18 and 19 September. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored. Every change since 062a245 is listed in schema/CHANGES.md with the case that forced it; a change after the freeze needs a new schema_version and a row there.",
   "description": "One reviewed reading of one contract family, as data. semantics_version is the canonical digest of the entry WITHOUT its 'review' key, so review state and pins are independent. An entry counts as reviewed only when review.state is 'reviewed' AND review.digest equals its current semantics_version; editing the semantics therefore silently un-reviews it. Lowering refuses an entry that is not reviewed by that rule.",
   "type": "object",
   "required": [

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "proposal.schema.json",
   "title": "Proposal",
-  "$comment": "DRAFT. Frozen as schema v1 only at T1's gate (PLAN.md section 7), after the contract has met live data. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored. Only the two canonical families have a terms schema so far.",
+  "$comment": "Frozen as schema v1 at T1's gate (PLAN.md section 7), after the contract met live data on 18 and 19 September. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored. Every change since 062a245 is listed in schema/CHANGES.md with the case that forced it; a change after the freeze needs a new schema_version and a row there.",
   "description": "What a person or an agent asks about, at the level of contract families. Lowering turns it into ir.schema.json using the registry and the retained snapshots it cites.",
   "type": "object",
   "required": [

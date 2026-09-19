@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "comparison.schema.json",
   "title": "Comparison of independent results",
-  "$comment": "DRAFT. Frozen as schema v1 only at T1's gate (PLAN.md section 7). Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored.",
+  "$comment": "Frozen as schema v1 at T1's gate (PLAN.md section 7), after the contract met live data on 18 and 19 September. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored. Every change since 062a245 is listed in schema/CHANGES.md with the case that forced it; a change after the freeze needs a new schema_version and a row there.",
   "description": "Ranks N proposals that were each evaluated on their own. It cites results by digest and never restates their numbers, so a result stays about one proposal and stays independently checkable: a checker re-verifies each result, then re-derives this ranking from them. Only results sharing an objective, domain, baseline and valuation time may be compared, and those shared terms are repeated here so a checker can confirm it without opening the results.",
   "type": "object",
   "required": [
