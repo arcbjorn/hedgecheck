@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "defs.schema.json",
+  "title": "Shared definitions",
+  "$comment": "DRAFT. Frozen as schema v1 only at T1's gate (PLAN.md section 7), after the contract has met live data. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored.",
+  "$defs": {
+    "number": {
+      "description": "An exact number: a decimal or p/q. One grammar across every implementation (fixtures/vectors/numbers.json).",
+      "type": "string",
+      "maxLength": 80,
+      "pattern": "^(?:-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?|-?(?:0|[1-9][0-9]*)/[1-9][0-9]*)$"
+    },
+    "time": {
+      "description": "UTC, whole seconds.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "slug": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "leg_id": {
+      "type": "string",
+      "maxLength": 32,
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "code": {
+      "description": "A reason code or a check name.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "digits": {
+      "type": "string",
+      "maxLength": 12,
+      "pattern": "^(?:0|[1-9][0-9]*)$"
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "reference": {
+      "description": "source:series:statistic[:window], never free text. 'synthetic' for fixtures.",
+      "type": "string",
+      "maxLength": 80,
+      "pattern": "^(?:synthetic|[a-z0-9]+(?::[A-Za-z0-9/._-]+){2,3})$"
+    },
+    "family": {
+      "type": "string",
+      "enum": [
+        "recurring.priceBinary",
+        "recurring.priceBucket",
+        "template.binaryPrice",
+        "template.scalarPrice",
+        "template.priceTouch"
+      ]
+    },
+    "units": {
+      "type": "object",
+      "required": [
+        "money",
+        "price",
+        "exposure",
+        "size"
+      ],
+      "properties": {
+        "money": {
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "price": {
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "exposure": {
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "size": {
+          "$ref": "defs.schema.json#/$defs/text"
+        }
+      },
+      "additionalProperties": false
+    },
+    "domain": {
+      "type": "object",
+      "required": [
+        "lower",
+        "upper"
+      ],
+      "properties": {
+        "lower": {
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "upper": {
+          "$ref": "defs.schema.json#/$defs/number"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Closed: both ends belong to it."
+    },
+    "interval": {
+      "type": "object",
+      "required": [
+        "lower",
+        "lower_inclusive",
+        "upper",
+        "upper_inclusive"
+      ],
+      "properties": {
+        "lower": {
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "lower_inclusive": {
+          "type": "boolean"
+        },
+        "upper": {
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "upper_inclusive": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Endpoint ownership is always explicit."
+    },
+    "pays_on": {
+      "description": "Where an indicator pays. A missing bound is unbounded; a present bound always states who owns it.",
+      "type": "object",
+      "properties": {
+        "lower": {
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "lower_inclusive": {
+          "type": "boolean"
+        },
+        "upper": {
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "upper_inclusive": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "minProperties": 2,
+      "dependentRequired": {
+        "lower": [
+          "lower_inclusive"
+        ],
+        "lower_inclusive": [
+          "lower"
+        ],
+        "upper": [
+          "upper_inclusive"
+        ],
+        "upper_inclusive": [
+          "upper"
+        ]
+      }
+    },
+    "baseline": {
+      "description": "Required, no default.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "price",
+            "label"
+          ],
+          "properties": {
+            "kind": {
+              "const": "explicit"
+            },
+            "price": {
+              "$ref": "defs.schema.json#/$defs/number"
+            },
+            "label": {
+              "$ref": "defs.schema.json#/$defs/text"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "price",
+            "source"
+          ],
+          "properties": {
+            "kind": {
+              "const": "analysis_time"
+            },
+            "price": {
+              "$ref": "defs.schema.json#/$defs/number"
+            },
+            "source": {
+              "type": "object",
+              "required": [
+                "snapshot",
+                "coin"
+              ],
+              "properties": {
+                "snapshot": {
+                  "$ref": "defs.schema.json#/$defs/sha256"
+                },
+                "coin": {
+                  "$ref": "defs.schema.json#/$defs/text"
+                }
+              },
+              "additionalProperties": false,
+              "description": "The retained response the price is read from, so a checker can read it again."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "clause": {
+      "type": "object",
+      "required": [
+        "id",
+        "min_pnl"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "defs.schema.json#/$defs/slug"
+        },
+        "min_pnl": {
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "on": {
+          "$ref": "defs.schema.json#/$defs/interval"
+        }
+      },
+      "additionalProperties": false,
+      "description": "P&L >= min_pnl on the interval; the whole domain when 'on' is absent."
+    },
+    "fixed_price": {
+      "type": "object",
+      "required": [
+        "kind",
+        "price"
+      ],
+      "properties": {
+        "kind": {
+          "const": "fixed"
+        },
+        "price": {
+          "$ref": "defs.schema.json#/$defs/number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "witness": {
+      "type": "object",
+      "required": [
+        "price",
+        "pnl"
+      ],
+      "properties": {
+        "price": {
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "pnl": {
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "adverse_states": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "leg",
+              "rule",
+              "state"
+            ],
+            "properties": {
+              "leg": {
+                "$ref": "defs.schema.json#/$defs/leg_id"
+              },
+              "rule": {
+                "$ref": "defs.schema.json#/$defs/slug"
+              },
+              "state": {
+                "$ref": "defs.schema.json#/$defs/text"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "A price alone is a counterexample only when no leg was bounded; otherwise it carries the adverse state of each reduced leg."
+    }
+  }
+}

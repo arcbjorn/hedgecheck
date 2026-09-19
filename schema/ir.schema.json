@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ir.schema.json",
+  "title": "Lowered proposal",
+  "$comment": "DRAFT. Frozen as schema v1 only at T1's gate (PLAN.md section 7), after the contract has met live data. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored.",
+  "description": "What the kernel evaluates: primitives only. Families, snapshots and reductions have already been resolved by lowering; nothing here needs the registry or the network.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "units",
+    "domain",
+    "baseline",
+    "exposure",
+    "legs",
+    "objective",
+    "objective_valuation_time",
+    "other_costs",
+    "assumptions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "units": {
+      "$ref": "defs.schema.json#/$defs/units"
+    },
+    "domain": {
+      "$ref": "defs.schema.json#/$defs/domain"
+    },
+    "baseline": {
+      "$ref": "defs.schema.json#/$defs/baseline"
+    },
+    "exposure": {
+      "type": "object",
+      "required": [
+        "kind",
+        "quantity"
+      ],
+      "properties": {
+        "kind": {
+          "const": "linear"
+        },
+        "quantity": {
+          "$ref": "defs.schema.json#/$defs/number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "legs": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind",
+              "size",
+              "pays_on",
+              "premium",
+              "observation_time",
+              "semantics"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "defs.schema.json#/$defs/leg_id"
+              },
+              "kind": {
+                "const": "indicator"
+              },
+              "size": {
+                "$ref": "defs.schema.json#/$defs/number"
+              },
+              "pays_on": {
+                "$ref": "defs.schema.json#/$defs/pays_on"
+              },
+              "premium": {
+                "$ref": "defs.schema.json#/$defs/fixed_price"
+              },
+              "observation_time": {
+                "$ref": "defs.schema.json#/$defs/time"
+              },
+              "semantics": {
+                "$ref": "defs.schema.json#/$defs/text"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind",
+              "size",
+              "direction",
+              "low",
+              "high",
+              "premium",
+              "observation_time",
+              "semantics"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "defs.schema.json#/$defs/leg_id"
+              },
+              "kind": {
+                "const": "ramp"
+              },
+              "size": {
+                "$ref": "defs.schema.json#/$defs/number"
+              },
+              "direction": {
+                "enum": [
+                  "long",
+                  "short"
+                ]
+              },
+              "low": {
+                "$ref": "defs.schema.json#/$defs/number"
+              },
+              "high": {
+                "$ref": "defs.schema.json#/$defs/number"
+              },
+              "premium": {
+                "$ref": "defs.schema.json#/$defs/fixed_price"
+              },
+              "observation_time": {
+                "$ref": "defs.schema.json#/$defs/time"
+              },
+              "semantics": {
+                "$ref": "defs.schema.json#/$defs/text"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Reserved for template.scalarPrice (T4). The oracle's evaluate() does not accept it yet."
+          }
+        ]
+      }
+    },
+    "objective": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "defs.schema.json#/$defs/clause"
+      }
+    },
+    "max_premium": {
+      "$ref": "defs.schema.json#/$defs/number"
+    },
+    "objective_valuation_time": {
+      "$ref": "defs.schema.json#/$defs/time"
+    },
+    "other_costs": {
+      "$ref": "defs.schema.json#/$defs/number"
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "$ref": "defs.schema.json#/$defs/slug"
+      }
+    },
+    "reductions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "leg",
+          "rule",
+          "tight",
+          "reason_code"
+        ],
+        "properties": {
+          "leg": {
+            "$ref": "defs.schema.json#/$defs/leg_id"
+          },
+          "rule": {
+            "$ref": "defs.schema.json#/$defs/slug"
+          },
+          "tight": {
+            "type": "boolean"
+          },
+          "reason_code": {
+            "$ref": "defs.schema.json#/$defs/code"
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Every lowering rule that lowered a leg's value, so a checker can re-derive and compare."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "snapshot-record.schema.json",
+  "title": "Snapshot record",
+  "description": "The request record kept beside retained response bytes. Not a contract document: it is hashed as a file, never canonicalized, and it contains JSON numbers the venue's API requires.",
+  "type": "object",
+  "required": [
+    "endpoint",
+    "method",
+    "request_body",
+    "requested_at",
+    "retrieved_at",
+    "http_status",
+    "response_file",
+    "response_sha256",
+    "server_date"
+  ],
+  "properties": {
+    "endpoint": {
+      "const": "https://api.hyperliquid.xyz/info"
+    },
+    "method": {
+      "const": "POST"
+    },
+    "request_body": {
+      "type": "object"
+    },
+    "requested_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+\\+00:00$"
+    },
+    "retrieved_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+\\+00:00$"
+    },
+    "http_status": {
+      "type": "integer"
+    },
+    "response_file": {
+      "type": "string"
+    },
+    "response_sha256": {
+      "$ref": "defs.schema.json#/$defs/sha256"
+    },
+    "server_date": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

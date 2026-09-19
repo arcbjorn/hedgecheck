@@ -1,0 +1,349 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "proposal.schema.json",
+  "title": "Proposal",
+  "$comment": "DRAFT. Frozen as schema v1 only at T1's gate (PLAN.md section 7), after the contract has met live data. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored. Only the two canonical families have a terms schema so far.",
+  "description": "What a person or an agent asks about, at the level of contract families. Lowering turns it into ir.schema.json using the registry and the retained snapshots it cites.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "units",
+    "domain",
+    "baseline",
+    "exposure",
+    "legs",
+    "objective",
+    "objective_valuation_time",
+    "other_costs",
+    "assumptions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "units": {
+      "$ref": "defs.schema.json#/$defs/units"
+    },
+    "domain": {
+      "$ref": "defs.schema.json#/$defs/domain"
+    },
+    "baseline": {
+      "$ref": "defs.schema.json#/$defs/baseline"
+    },
+    "exposure": {
+      "type": "object",
+      "required": [
+        "kind",
+        "underlying",
+        "quantity",
+        "reference"
+      ],
+      "properties": {
+        "kind": {
+          "const": "linear_spot"
+        },
+        "underlying": {
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "quantity": {
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "reference": {
+          "$ref": "defs.schema.json#/$defs/reference"
+        }
+      },
+      "additionalProperties": false
+    },
+    "legs": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "family",
+              "semantics_version",
+              "side",
+              "terms",
+              "instance",
+              "size",
+              "acquisition"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "defs.schema.json#/$defs/leg_id"
+              },
+              "family": {
+                "const": "recurring.priceBinary"
+              },
+              "semantics_version": {
+                "$ref": "defs.schema.json#/$defs/sha256"
+              },
+              "side": {
+                "enum": [
+                  "yes",
+                  "no"
+                ]
+              },
+              "terms": {
+                "type": "object",
+                "required": [
+                  "underlying",
+                  "target_price",
+                  "expiry",
+                  "period"
+                ],
+                "properties": {
+                  "underlying": {
+                    "$ref": "defs.schema.json#/$defs/text"
+                  },
+                  "target_price": {
+                    "$ref": "defs.schema.json#/$defs/number"
+                  },
+                  "expiry": {
+                    "$ref": "defs.schema.json#/$defs/time"
+                  },
+                  "period": {
+                    "$ref": "defs.schema.json#/$defs/text"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "instance": {
+                "type": "object",
+                "required": [
+                  "outcome",
+                  "coin",
+                  "catalogue"
+                ],
+                "properties": {
+                  "outcome": {
+                    "$ref": "defs.schema.json#/$defs/digits"
+                  },
+                  "coin": {
+                    "type": "string",
+                    "pattern": "^#[0-9]{1,12}$"
+                  },
+                  "catalogue": {
+                    "$ref": "defs.schema.json#/$defs/sha256"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Discovered, never configured. 'catalogue' is the retained outcomeMeta response it was discovered in."
+              },
+              "size": {
+                "$ref": "defs.schema.json#/$defs/number"
+              },
+              "acquisition": {
+                "oneOf": [
+                  {
+                    "$ref": "defs.schema.json#/$defs/fixed_price"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "path",
+                      "snapshot"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "book_walk"
+                      },
+                      "path": {
+                        "enum": [
+                          "direct_book"
+                        ]
+                      },
+                      "snapshot": {
+                        "$ref": "defs.schema.json#/$defs/sha256"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "The cost names its path. split_and_sell and negate are later paths."
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "family",
+              "semantics_version",
+              "side",
+              "terms",
+              "instance",
+              "size",
+              "acquisition"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "defs.schema.json#/$defs/leg_id"
+              },
+              "family": {
+                "const": "recurring.priceBucket"
+              },
+              "semantics_version": {
+                "$ref": "defs.schema.json#/$defs/sha256"
+              },
+              "side": {
+                "enum": [
+                  "yes",
+                  "no"
+                ]
+              },
+              "terms": {
+                "type": "object",
+                "required": [
+                  "underlying",
+                  "thresholds",
+                  "index",
+                  "expiry",
+                  "period"
+                ],
+                "properties": {
+                  "underlying": {
+                    "$ref": "defs.schema.json#/$defs/text"
+                  },
+                  "thresholds": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {
+                      "$ref": "defs.schema.json#/$defs/number"
+                    }
+                  },
+                  "index": {
+                    "enum": [
+                      "0",
+                      "1",
+                      "2"
+                    ]
+                  },
+                  "expiry": {
+                    "$ref": "defs.schema.json#/$defs/time"
+                  },
+                  "period": {
+                    "$ref": "defs.schema.json#/$defs/text"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "instance": {
+                "type": "object",
+                "required": [
+                  "outcome",
+                  "coin",
+                  "catalogue"
+                ],
+                "properties": {
+                  "outcome": {
+                    "$ref": "defs.schema.json#/$defs/digits"
+                  },
+                  "coin": {
+                    "type": "string",
+                    "pattern": "^#[0-9]{1,12}$"
+                  },
+                  "catalogue": {
+                    "$ref": "defs.schema.json#/$defs/sha256"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Discovered, never configured. 'catalogue' is the retained outcomeMeta response it was discovered in."
+              },
+              "size": {
+                "$ref": "defs.schema.json#/$defs/number"
+              },
+              "acquisition": {
+                "oneOf": [
+                  {
+                    "$ref": "defs.schema.json#/$defs/fixed_price"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "kind",
+                      "path",
+                      "snapshot"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "book_walk"
+                      },
+                      "path": {
+                        "enum": [
+                          "direct_book"
+                        ]
+                      },
+                      "snapshot": {
+                        "$ref": "defs.schema.json#/$defs/sha256"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "The cost names its path. split_and_sell and negate are later paths."
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "objective": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "defs.schema.json#/$defs/clause"
+      }
+    },
+    "max_premium": {
+      "$ref": "defs.schema.json#/$defs/number"
+    },
+    "objective_valuation_time": {
+      "$ref": "defs.schema.json#/$defs/time"
+    },
+    "objective_reference": {
+      "$ref": "defs.schema.json#/$defs/reference"
+    },
+    "other_costs": {
+      "$ref": "defs.schema.json#/$defs/number"
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "$ref": "defs.schema.json#/$defs/slug"
+      }
+    },
+    "basis_bounds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "between",
+          "bound"
+        ],
+        "properties": {
+          "between": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "$ref": "defs.schema.json#/$defs/reference"
+            }
+          },
+          "bound": {
+            "$ref": "defs.schema.json#/$defs/number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Declared by the user, never defaulted."
+    }
+  },
+  "additionalProperties": false
+}

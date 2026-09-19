@@ -1,0 +1,330 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "registry-entry.schema.json",
+  "title": "Semantics registry entry",
+  "$comment": "DRAFT. Frozen as schema v1 only at T1's gate (PLAN.md section 7), after the contract has met live data. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored.",
+  "description": "One reviewed reading of one contract family, as data. Lowering refuses an entry whose review state is not 'reviewed'.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "family",
+    "version",
+    "status",
+    "settlement",
+    "review",
+    "sources",
+    "terms",
+    "reference",
+    "observation",
+    "payoffs",
+    "assumptions_required",
+    "ambiguities",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "family": {
+      "$ref": "defs.schema.json#/$defs/family"
+    },
+    "version": {
+      "$ref": "defs.schema.json#/$defs/digits"
+    },
+    "status": {
+      "enum": [
+        "computed",
+        "bounded",
+        "refused"
+      ]
+    },
+    "settlement": {
+      "enum": [
+        "protocol",
+        "deployer"
+      ]
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "state",
+        "drafted_by"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "draft",
+            "reviewed"
+          ]
+        },
+        "drafted_by": {
+          "enum": [
+            "model",
+            "owner"
+          ]
+        },
+        "reviewed_by": {
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "reviewed_on": {
+          "$ref": "defs.schema.json#/$defs/date"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "url",
+          "retrieved",
+          "sha256",
+          "retained_at",
+          "quotes"
+        ],
+        "properties": {
+          "title": {
+            "$ref": "defs.schema.json#/$defs/text"
+          },
+          "url": {
+            "$ref": "defs.schema.json#/$defs/text"
+          },
+          "retrieved": {
+            "$ref": "defs.schema.json#/$defs/date"
+          },
+          "sha256": {
+            "$ref": "defs.schema.json#/$defs/sha256"
+          },
+          "retained_at": {
+            "$ref": "defs.schema.json#/$defs/text"
+          },
+          "quotes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "defs.schema.json#/$defs/text"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "terms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "defs.schema.json#/$defs/slug"
+          },
+          "type": {
+            "enum": [
+              "number",
+              "numbers",
+              "time",
+              "text",
+              "index"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "reference": {
+      "$ref": "defs.schema.json#/$defs/text"
+    },
+    "observation": {
+      "$ref": "defs.schema.json#/$defs/text"
+    },
+    "payoffs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "select",
+          "pays"
+        ],
+        "properties": {
+          "select": {
+            "type": "object",
+            "required": [
+              "side"
+            ],
+            "properties": {
+              "side": {
+                "enum": [
+                  "yes",
+                  "no",
+                  "long",
+                  "short"
+                ]
+              },
+              "index": {
+                "$ref": "defs.schema.json#/$defs/digits"
+              }
+            },
+            "additionalProperties": false
+          },
+          "pays": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "primitive",
+                "pays_on"
+              ],
+              "properties": {
+                "primitive": {
+                  "const": "indicator"
+                },
+                "pays_on": {
+                  "type": "object",
+                  "properties": {
+                    "lower": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "term"
+                          ],
+                          "properties": {
+                            "term": {
+                              "$ref": "defs.schema.json#/$defs/slug"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "term",
+                            "at"
+                          ],
+                          "properties": {
+                            "term": {
+                              "$ref": "defs.schema.json#/$defs/slug"
+                            },
+                            "at": {
+                              "$ref": "defs.schema.json#/$defs/digits"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "lower_inclusive": {
+                      "type": "boolean"
+                    },
+                    "upper": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "term"
+                          ],
+                          "properties": {
+                            "term": {
+                              "$ref": "defs.schema.json#/$defs/slug"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "term",
+                            "at"
+                          ],
+                          "properties": {
+                            "term": {
+                              "$ref": "defs.schema.json#/$defs/slug"
+                            },
+                            "at": {
+                              "$ref": "defs.schema.json#/$defs/digits"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "upper_inclusive": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "minProperties": 2,
+                  "dependentRequired": {
+                    "lower": [
+                      "lower_inclusive"
+                    ],
+                    "lower_inclusive": [
+                      "lower"
+                    ],
+                    "upper": [
+                      "upper_inclusive"
+                    ],
+                    "upper_inclusive": [
+                      "upper"
+                    ]
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "assumptions_required": {
+      "type": "array",
+      "items": {
+        "$ref": "defs.schema.json#/$defs/slug"
+      }
+    },
+    "ambiguities": {
+      "type": "array",
+      "items": {
+        "$ref": "defs.schema.json#/$defs/text"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "claim",
+          "label",
+          "where"
+        ],
+        "properties": {
+          "claim": {
+            "$ref": "defs.schema.json#/$defs/text"
+          },
+          "label": {
+            "enum": [
+              "V",
+              "T",
+              "U"
+            ]
+          },
+          "where": {
+            "$ref": "defs.schema.json#/$defs/text"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
