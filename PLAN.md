@@ -236,6 +236,14 @@ proposal and stays independently checkable; a checker verifies the results first
 then re-derives the ranking. Only results sharing an objective, domain, baseline
 and valuation time may be compared, and only passing candidates are ranked.
 
+**`capture`** records how the evidence was gathered: the worst skew the capturer
+measured across the snapshots in this result, the bound it refused above, and who
+measured it. It is an **assertion, not a derivation** — the contexts response carries
+no venue timestamp ([EVIDENCE §4](./EVIDENCE.md)), so the spread between a book's
+venue clock and the baseline's retrieval cannot be re-derived from the bytes by
+anyone, including a checker. Recording it makes a wide or stale capture visible; it
+does not make it verified, and nothing here pretends otherwise.
+
 The result also carries snapshot hashes, `semantics_version`, `engine_version`,
 and three digests — `proposal_digest` of what was asked, `ir_digest` of what it
 was lowered to, `input_digest` of everything that determines the result
@@ -343,13 +351,51 @@ Each tier ships only through its gate. No tier has a date.
 | | Deliverable | Gate |
 |---|---|---|
 | **T0** done | Evidence packages, reference oracle, one fixture — at `085ccfb` | Five verifiers pass after the restore |
-| **T1** Contract, on real data | The live canonical check end to end **on the oracle**: discover instances → coherent snapshots → proposal → lowering → verdict, cost, alternatives → replay. From it, schema v1 frozen. Fixtures: the 18 Sep replay, corrupted certificates. *Already in the tree, 19 Sep:* oracle kernel, golden fixture, draft schemas, number and digest vectors, two registry entries awaiting review | No hard-coded ids; snapshots in one result retrieved within a stated skew, recorded in it; replaying the 18 Sep package reproduces the table in [EVIDENCE §3](./EVIDENCE.md); every fixture validates against the schema; each expected result is pinned by hand-derived assertions; one command runs everything, this file's guard included |
-| **T2** Engine | Go. A **pure evaluator** — library and CLI, proposal and snapshots in, result out, no I/O — then the live adapter, the service, and one result screen ordering binary, bucket and exposure reduction by the cost of the smallest passing size | Byte-identical results to the fixtures; agreement with the oracle on generated primitives; replay from stored snapshots reproduces the result byte for byte; T1's adapter deleted |
-| **T3** Checker and consumer | TypeScript checker, run by the result screen on every view. Then a simulated approval gate, then a **testnet** order behind it, with the order envelope the cost bound assumes, and a re-check after any partial fill | Every corrupted certificate and rejected input refused; engine and checker agree on every fixture; anything but `passes` produces zero downstream calls, asserted; a partial fill triggers the re-check, whose result — top up as a new proposal, or unwind — is the consumer's policy and never the gate's |
+| **T1** Contract, on real data — **done, 19 Sep** | The live canonical check end to end **on the oracle**: discover instances → coherent snapshots → proposal → lowering → verdict, cost, alternatives → replay. Schema v1 frozen ([schema/CHANGES.md](./schema/CHANGES.md)). Fixtures: the 18 Sep replay, a 19 Sep live capture, fourteen certificate bundles. | Every line proved by a command, below |
+| **T2** Engine | Go. A **pure evaluator** — library and CLI, proposal and snapshots in, result out, no I/O — then the live adapter, the service, and one result screen ordering binary, bucket and exposure reduction by the cost of the smallest passing size | **Frozen v1 schemas, not drafts: a shape change now needs a new `schema_version` and a row in `schema/CHANGES.md`.** A snapshot's hash says nothing about its shape, so a leg citing the catalogue where a book belongs is refused, never a crash (T1 found this by crashing). Byte-identical results to the fixtures; agreement with the oracle on generated primitives; replay from stored snapshots reproduces the result byte for byte; T1's adapter deleted |
+| **T3** Checker and consumer | TypeScript checker, run by the result screen on every view. Then a simulated approval gate, then a **testnet** order behind it, with the order envelope the cost bound assumes, and a re-check after any partial fill | Returns the closed classes in `refusal.schema.json`, so a disagreement with `oracle/refuse.py` is a real one. **A checker that re-adds the pieces the engine emitted proves nothing** — it must establish domain coverage, endpoint ownership and proposal-to-pieces correspondence independently, and evaluate each witness on the *unreduced* payoff. Every corrupted certificate and rejected input refused; engine and checker agree on every fixture; anything but `passes` produces zero downstream calls, asserted; a partial fill triggers the re-check, whose result — top up as a new proposal, or unwind — is the consumer's policy and never the gate's |
 | **T4** | Deployer families, the reference registry, the band reduction, the `priceTouch` bound | Each reference string reviewed; Skew's written confirmation, or an explicit assumption with an ID; fixtures for the shrunk middle bucket and for mixed legs on one foreign reference |
 | **T5** | Exact synthesis with infeasibility certificates | The checker verifies optimal structures and certificates alike; every rounded structure re-checked |
 | **T6** | Path reductions: isolated perps | Liquidation semantics reviewed from official text, portfolio margin included; every **[U]** it touches resolved |
 | **T7** | Certificate checker on HyperEVM, gating CoreWriter orders. On-chain the cost is bounded by `limit price × size`, so **no book read is needed** | An outcome limit order through CoreWriter accepted on testnet; the seconds-long delay priced in; stated plainly that an `Ioc` order can fill partly and no on-chain gate can undo that |
+
+**T1's gate, line by line.** Each line and the command that proves it. Run
+`make check` to run them all.
+
+| Gate line | Command | What it prints |
+|---|---|---|
+| No hard-coded ids | `python3 spike/verify.py` | `discovery finds the live instruments unaided and spike/ names no ids` — it finds 3965 and 3971 in a retained catalogue without being told, and refuses any outcome id or coin literal in `spike/` |
+| Snapshots in one result retrieved within a stated skew, recorded in it | `python3 oracle/verify.py` | The good bundle's result carries `capture`: −687 ms against a 5,000 ms bound, over the 2 snapshots it lists. **It is an assertion, not a derivation** — see §4 |
+| Replaying the 18 Sep package reproduces the table in [EVIDENCE §3](./EVIDENCE.md) | `python3 oracle/verify.py` | `the 18 September replay` agrees: both premiums, P&L at baseline, strike and floor, both size windows, both crossovers |
+| Every fixture validates against the schema | `python3 tools/validate.py` | `27 contract documents valid, 36 mutations refused` |
+| Each expected result is pinned by hand-derived assertions | `python3 oracle/verify.py` | Constants transcribed from `git show 085ccfb:research/2026-09-18/verify.py`, where they were hand-derived; an independent recomputation reproduced all 34 |
+| One command runs everything, this file's guard included | `make check` | `all checks passed`, including the guard that compares this file's example block with the generated fixture |
+
+Two things T1 did **not** establish, stated because the gate did not ask and a
+reader would assume otherwise: the registry entries are still **model drafts**, so
+every live result is `needs_review`; and `oracle/refuse.py` is a reference, not
+the checker T3 builds.
+
+**What T1 taught, and what it changes.** Four things, each learned by being wrong
+about it first; the T2 and T3 rows above carry the consequences.
+
+1. **A hash identifies bytes, not a shape.** A leg citing the catalogue where a
+   book belongs crashed lowering with `KeyError: 'levels'`. Every snapshot a tier
+   reads must be shape-checked before it is indexed. T2 inherits this at every
+   adapter boundary.
+2. **The result contract was a third larger than anyone predicted.** `size_windows`,
+   `comparisons.smallest_reduction`, `reductions`, `upper_profile` and `capture` all
+   arrived from real questions, not from design. Freezing v1 before the contract met
+   live data would have frozen it wrong — which is exactly why T1 ran first, and why
+   T2 now builds against a shape that has been used.
+3. **A guard that overlaps another proves less than it looks.** Removing the profile
+   coverage check alone did not make any fixture pass: endpoint ownership caught it.
+   Only removing both let a corrupted bundle through. T3 should expect the same of
+   its checker and test removals in pairs, not singly.
+4. **Some claims can never be re-derived, and must say so.** `capture` records a skew
+   no checker can confirm, because the contexts response carries no venue timestamp.
+   T2 and T3 must carry it without implying it was verified. A field that looks
+   checked but is not is worse than one that is plainly asserted.
 
 **Why T1 runs on the oracle.** A contract frozen before it meets live data gets
 frozen wrong, and then implemented wrong three times. The oracle is already exact
