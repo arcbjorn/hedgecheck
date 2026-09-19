@@ -195,9 +195,17 @@ def pays_on(entry, leg, values):
 # --------------------------------------------------------------------------- pricing
 
 
-def _asks(book):
-    """Displayed asks, exactly, in book order. levels[0] is bids, levels[1] is asks."""
-    return [(num(level["px"]), num(level["sz"])) for level in book["levels"][1]]
+def _asks(book, leg_id):
+    """Displayed asks, exactly, in book order. levels[0] is bids, levels[1] is asks.
+
+    A leg may cite any retained snapshot by hash, and a hash says nothing about what
+    the response was. Citing the catalogue where a book belongs is a wrong citation,
+    not a crash, so the shape is checked before it is indexed.
+    """
+    levels = book.get("levels") if isinstance(book, dict) else None
+    if not isinstance(levels, list) or len(levels) != 2 or "coin" not in book:
+        _refuse("SNAPSHOT_NOT_A_BOOK", f"{leg_id}: the cited snapshot is not an l2Book response")
+    return [(num(level["px"]), num(level["sz"])) for level in levels[1]]
 
 
 def walk(leg, book, digest):
@@ -209,7 +217,7 @@ def walk(leg, book, digest):
     size = num(leg["size"])
     if size.denominator != 1 or size <= 0:
         _refuse("SIZE_NOT_WHOLE", f"{leg['id']}: size {leg['size']} is not a positive whole number of contracts")
-    levels = _asks(book)
+    levels = _asks(book, leg["id"])
     cost = oracle.ask_cost(levels, size)
     if cost is None:
         _refuse("INSUFFICIENT_DEPTH", f"{leg['id']}: displayed asks do not cover {leg['size']} contracts")
