@@ -66,7 +66,7 @@ catalogue — so `085ccfb` is the only copy.
 | Path | Contents |
 |---|---|
 | `schema/` | Nine draft JSON Schemas: proposal, lowered proposal, result, comparison, registry entry, snapshot record, certificate bundle manifest, refusal classes, shared definitions |
-| `fixtures/` | `golden/` a lowered proposal and its generated result · `vectors/` numbers and canonical JSON · `replay/` retained responses and the real proposals lowered from them · `bundles/` certificate bundles, two good and twelve corrupted · `kernel/` the oracle's exact answers to 400 kernel queries, which the Go engine must reproduce |
+| `fixtures/` | `golden/` a lowered proposal and its generated result · `vectors/` numbers and canonical JSON · `replay/` retained responses and the real proposals lowered from them · `bundles/` certificate bundles, two good and twelve corrupted · `kernel/` the oracle's exact answers to 400 kernel queries, which the Go engine must reproduce · `rejected/` documents every schema must refuse, shared by all three implementations |
 | `registry/` | Contract semantics as data. Both entries are model drafts awaiting review |
 | `oracle/` | Python. Exact numbers, canonical JSON, the kernel, lowering, the reference refuser, the verifier. **Not the product engine** |
 | `engine/` | Go. So far the conformance spine and the architecture test |
