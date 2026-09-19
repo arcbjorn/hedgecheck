@@ -57,6 +57,7 @@ the canonical JSON profile (§5): no numbers, no nulls, no user-chosen keys.
 | Lowered proposal | `ir.schema.json` | Primitives with fixed costs, clauses, domain, baseline price, and the list of reductions applied | `ir_digest` |
 | Result | `result.schema.json` | Verdict, witnesses, profile, cost, comparisons, reason codes, assumptions, digests | — |
 | Registry entry | `registry-entry.schema.json` | One reviewed reading of one family, as data | `semantics_version` |
+| Comparison | `comparison.schema.json` | N results ranked against each other, cited by `ir_digest` | — |
 
 `semantics_version` is the canonical digest of a registry entry **without its
 `review` key**, so a proposal pins a reading rather than a review state: the owner
@@ -64,6 +65,14 @@ marking an entry reviewed does not move the pin. `review.digest` records which
 `semantics_version` was reviewed, and an entry counts as reviewed only when its
 state is `reviewed` **and** that digest still matches. Editing the semantics
 therefore silently un-reviews the entry rather than carrying an approval forward.
+
+A **comparison** never restates a result's numbers. It cites each by `ir_digest`
+and repeats only the terms its candidates must share — objective, domain,
+baseline, valuation time — so a checker can confirm they answer the same question
+without opening them. Each result therefore stays about one proposal and stays
+independently checkable, and the ranking is re-derived rather than trusted. Only
+passing candidates are ranked: a cost that bought an unestablished result has no
+place in an ordering by cost.
 
 `input_digest` covers everything that determines a result except the engine:
 `proposal_digest`, the snapshot hashes, the `semantics_version` of each entry
@@ -130,6 +139,12 @@ cites. It has four steps.
    `review.digest` that no longer matches its `semantics_version` — is refused:
    `UNREVIEWED_FAMILY`.
 
+   An entry that is not reviewed is **not** refused: it is reduced by
+   `unreviewed_family`, which values the leg at zero while its premium still
+   counts. That rule is loose, so the proposal can need review but can never fail
+   on it. Refusal is reserved for a proposal that cannot be lowered at all — a
+   stale pin, terms that disagree with the catalogue, a book too thin for the size.
+
    The instance is then checked against the catalogue the proposal cites: the
    outcome exists, its description matches the leg's terms field by field (for a
    bucket, the thresholds on the parent question and the outcome's position among
@@ -156,6 +171,7 @@ cites. It has four steps.
    | Rule | Rewrites | Tight? | Adverse state | Tier |
    |---|---|---|---|---|
    | `horizon_mismatch` | the leg → nothing | yes | the leg's own observation pays zero | T1 |
+   | `unreviewed_family` | the leg → nothing | **no** | — | T1 |
    | `unreviewed_reference` | the leg → nothing | **no** | — | T4 |
    | `basis_band` | each group of legs on one foreign reference → the band infimum of their sum | yes | the reference value in the band that attains it | T4 |
    | `deployer_strike` | the strike → owned by neither side; requires `deployer_settles_as_written` | yes | the deployer reads equality against the holder | T4 |
@@ -163,6 +179,20 @@ cites. It has four steps.
    | `perp_margin_at_risk` | an isolated perp liquidatable inside the path domain → minus its margin, everywhere | yes | the path reaches liquidation and recovers | T6 |
 
 4. **Normalize.** Canonical numbers, sorted where order is not meaning, digests.
+
+Every reduction gives two profiles. The **lower** profile values each reduced leg
+at zero and is what a verdict rests on; the **upper** profile credits it with its
+full size, which a long fully collateralized token can never exceed
+([EVIDENCE §1](./EVIDENCE.md)). With no reductions the two coincide.
+
+| Where the violation lives | Verdict |
+|---|---|
+| Lower and upper profile alike | `fails`, with a witness carrying each leg's adverse state |
+| Lower profile only, every responsible rule **tight** | `fails` — the adverse state is admissible, not merely unproven |
+| Lower profile only, some responsible rule **loose** | `needs_review`, with `undecided_intervals` naming the legs |
+
+**A loose bound can never produce a failing interval.** It is a statement about
+what has not been established, not about what the contract pays.
 
 The band infimum is a group operation on purpose. Evaluated leg by leg it is
 sound but loose; on the group's sum it is exact. And it is not a shift: the middle
@@ -249,9 +279,10 @@ checker in the browser on every view; a consumer runs it before it signs.
 | No third-party code in an evaluation path | same tests — `go.mod` has no `require`; `package.json` has no dependency field; sources import only each other |
 | The checker is runtime-neutral and its syntax erasable | `arch.test.ts` — no `node:`, `process`, `Deno`, `Bun`, `require`, `JSON.parse`; no `enum`, `namespace`, parameter properties. Node runs the sources unmodified; Deno type-checks them; Bun runs them too |
 | A function carries its breakpoints | `oracle/verify.py` — no evaluation function has a `breakpoints` parameter |
-| A schema constraint is never silently ignored | `tools/validate.py` — an unknown keyword or an unanchored pattern is an error; 23 mutations must be refused |
+| A schema constraint is never silently ignored | `tools/validate.py` — an unknown keyword or an unanchored pattern is an error; 36 mutations must be refused |
 | Documents agree with each other | `tools/validate.py` — a proposal pins the digest of the registry entry it uses; its coin encodes its outcome and side; every snapshot it cites is retained |
-| A draft registry entry cannot be evaluated | `canon.reviewed` — state and `review.digest` together; refused by lowering as `UNREVIEWED_FAMILY`. Both entries here are **model drafts awaiting the owner's review**, so the on-disk replay asserts the refusal |
+| A draft registry entry gets no credit | `canon.reviewed` — state and `review.digest` together; reduced by lowering as `unreviewed_family`, loose. Both entries here are **model drafts awaiting the owner's review**, so the on-disk replay returns `needs_review` |
+| A loose bound never fails a proposal | `oracle/verify.py` replay — the tight horizon fixture, re-run with its rule made loose, must move from `fails` to `needs_review` with no failing interval |
 | Reviewing an entry does not move what proposals pin | `tools/validate.py` — `semantics_version` excludes `review`; a review with a stale digest does not count as reviewed |
 | A lowered leg matches the instance it names | `oracle/verify.py` replay — terms against the catalogue, coin against outcome and side, baseline against the contexts snapshot, size against displayed depth |
 | Retained evidence in a fixture is the retained response | `oracle/verify.py` replay — each file's SHA-256 against its own request record and against the hash in the evidence commit |
@@ -265,11 +296,12 @@ Each guard was run against a deliberate violation before it was trusted.
 
 ```text
 ARCHITECTURE.md  PLAN.md  EVIDENCE.md  Makefile
-schema/     six draft schemas. The only thing implementations share
+schema/     seven draft schemas. The only thing implementations share
 fixtures/   golden/   lowered proposal and its generated expected result
             vectors/  numbers and canonical JSON, generated from hand-written cases
             replay/   retained responses, their request records, and the real
-                      proposals lowered from them (2026-09-18)
+                      proposals lowered from them (2026-09-18), including the
+                      horizon fixture valued a day after its leg is observed
 registry/   semantics entries as data: recurring.priceBinary, recurring.priceBucket
 oracle/     exact.py  canon.py  oracle.py (kernel, evaluate)  lower.py  verify.py
 engine/     exact/  canon/  arch_test.go          ── built
