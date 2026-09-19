@@ -214,12 +214,31 @@ is generated, and `make check` fails if any field here differs.
 }
 ```
 
-The engine adds `comparisons` (no hedge; smallest exposure reduction; each other
-supported instrument, with the exact intervals where the proposal is better and
-worse), `size_window` with its binding constraints or its infeasibility
-certificate, snapshot hashes, `semantics_version`, `engine_version`, and three
-digests — `proposal_digest` of what was asked, `ir_digest` of what it was lowered
-to, `input_digest` of everything that determines the result
+A complete result carries three more things, none of which the synthetic fixture
+above needs:
+
+- **`comparisons`** — `no_hedge`, and `smallest_reduction`: keep the largest holding that still meets the cap, sell the rest at the baseline, hold the cash. It costs no premium, so it is the benchmark a paid hedge has to beat. Each gives the exact intervals where the proposal is better and worse.
+- **`size_windows`** — per book-walked leg: the exact bounds, the whole-contract window inside them, and which site binds each end. An empty window at a flat price carries the Farkas weights `(1−p, p)` that prove no size works.
+- **`reductions`** and **`upper_profile`** — present when a lowering rule lowered a leg's value. The verdict rests on the lower profile; the upper profile is the best the proposal could be, since a long fully collateralized token is worth at most its size ([EVIDENCE §1](./EVIDENCE.md)).
+
+**A loose bound can never fail a proposal.** Each reduction declares whether it is
+`tight`. A violation the upper profile shares is real whatever the bounded legs
+are worth, so it is a `failing_interval`. A violation that rests only on a loose
+rule proves nothing about the real payoff: it becomes an `undecided_interval`
+naming the legs responsible, and the verdict is `needs_review`. Once any leg has
+been bounded, a price alone is not a counterexample, so each witness carries the
+`adverse_states` that produced it.
+
+**Comparing instruments is a separate document**
+(`schema/comparison.schema.json`), built from N independent results and citing
+each by `ir_digest` without restating its numbers. A result stays about one
+proposal and stays independently checkable; a checker verifies the results first,
+then re-derives the ranking. Only results sharing an objective, domain, baseline
+and valuation time may be compared, and only passing candidates are ranked.
+
+The result also carries snapshot hashes, `semantics_version`, `engine_version`,
+and three digests — `proposal_digest` of what was asked, `ir_digest` of what it
+was lowered to, `input_digest` of everything that determines the result
 ([ARCHITECTURE §2](./ARCHITECTURE.md)). The result is immutable; an idempotent
 response does not refresh its evidence.
 
