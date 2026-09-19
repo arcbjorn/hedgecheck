@@ -363,4 +363,8 @@ def lower(proposal, registry, snapshots):
     }
     if reductions:
         lowered["reductions"] = reductions
+    # Capture provenance travels with the proposal. Lowering cannot re-derive it --
+    # the contexts response carries no venue timestamp -- so it is copied, not checked.
+    if "capture" in proposal:
+        lowered["capture"] = proposal["capture"]
     return lowered, versions

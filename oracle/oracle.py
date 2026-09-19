@@ -498,7 +498,12 @@ def evaluate(lowered):
         "checks_not_performed": ["LIVE_EXECUTION", "PATH_RISK"],
         "engine_version": "reference-oracle-3",
         "ir_digest": digest(lowered),
+        "snapshots": sorted(_snapshots_of(lowered)),
     }
+    # How the evidence was captured, as asserted by whatever captured it. Carried so a
+    # reader sees the spread the result rests on; a pure evaluator cannot re-derive it.
+    if "capture" in lowered:
+        result["capture"] = lowered["capture"]
     if undecided:
         result["undecided_intervals"] = undecided
     if reductions:
@@ -539,6 +544,19 @@ def compare(labelled):
            "ranked_by": "cost_of_smallest_passing_size", "engine_version": "reference-oracle-3"}
     if passing:
         out["ranking"] = [c["label"] for c in sorted(passing, key=lambda c: num(c["cost"]))]
+    return out
+
+
+def _snapshots_of(lowered):
+    """Every snapshot the lowered proposal rests on, by hash."""
+    out = set()
+    source = lowered.get("baseline", {}).get("source")
+    if source:
+        out.add(source["snapshot"])
+    for leg in lowered["legs"]:
+        premium = leg.get("premium", {})
+        if premium.get("kind") == "walked":
+            out.add(premium["snapshot"])
     return out
 
 
