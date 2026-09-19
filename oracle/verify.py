@@ -227,6 +227,27 @@ PINNED = {
 }
 STRIKES = {"binary": "77457", "bucket0": "75908"}
 
+# (smallest, largest, exact lower bound, exact upper bound) passing sizes at displayed depth
+SIZES = {
+    "binary": ("1409", "2104", "18172417/12899", "25470083/12101"),
+    "bucket0": ("924", "2810", "76314000/82601", "281004800/99999"),
+}
+
+# The smallest exposure reduction meeting the same cap: keep this much BTC, sell the rest
+# at the baseline, hold the cash. Its worst case is exactly -1000, with no premium.
+KEEP = "5000/88157"
+
+# Where each proposal beats that reduction, as (lower, lower_inclusive, upper, upper_inclusive).
+BETTER = {
+    "binary": [("60000", True, "77457", False), ("630619989713/6813750", False, "110000", True)],
+    "bucket0": [("60000", True, "75908", False), ("369512914573/4542500", False, "110000", True)],
+}
+
+# The horizon fixture: the bucket hedge measured a day after the leg is observed. The leg is
+# worth nothing then, its premium still counts, so P&L(S) = 0.1*(S - 77631.4) - 160.76676.
+HORIZON = {"pieces": [("0.1", "-7923.90676")], "fails_on": ("60000", True, "69239.0676", False),
+           "worst": {"pnl": "-1923.90676", "attained": True, "price": "60000"}}
+
 
 def replay():
     import lower
@@ -251,15 +272,29 @@ def replay():
 
     proposals = {name: canon.loads((REPLAY / f"{name}.proposal.json").read_bytes()) for name in PINNED}
 
-    # ---- on disk the entries are drafts, so the replay refuses rather than answering
-    unreviewed = []
+    # ---- on disk the entries are drafts: a loose bound, so the replay needs review
+    #
+    # Hand-derived. The bucket leg is valued at zero and its premium still counts, so the
+    # lower profile is 0.1*(S - 77631.4) - 160.76676, which is -1923.90676 at the floor and
+    # crosses the -1000 cap at 69239.0676. The upper profile credits the leg with its full
+    # 924 (EVIDENCE section 1), giving -999.90676 at the floor: inside the cap everywhere.
+    # So nothing is proven to fail, and the verdict may never be `fails`.
     for name, proposal in proposals.items():
-        try:
-            lower.lower(proposal, registry, snapshots)
-        except lower.Refused as refusal:
-            check(refusal.code == "UNREVIEWED_FAMILY", f"replay: {name} refuses an unreviewed family")
-            unreviewed.append(name)
-    check(len(unreviewed) == len(proposals), "replay: every on-disk entry is still a draft")
+        lowered, _ = lower.lower(proposal, registry, snapshots)
+        check([r["rule"] for r in lowered["reductions"]] == ["unreviewed_family"], f"replay: {name} on disk is reduced by unreviewed_family")
+        check(lowered["reductions"][0]["tight"] is False, f"replay: {name} unreviewed_family is a loose rule")
+        result = O.evaluate(lowered)
+        check(result["model_result"] == "needs_review", f"replay: {name} on disk needs review")
+        check(result["failing_intervals"] == [], f"replay: {name} proves no failure from a loose bound")
+        check("UNREVIEWED_FAMILY" in result["reason_codes"], f"replay: {name} names the loose rule")
+        check([interval["responsible_legs"] for interval in result["undecided_intervals"]] == [[proposal["legs"][0]["id"]]],
+              f"replay: {name} names the leg responsible for each undecided interval")
+    bucket_draft = O.evaluate(lower.lower(proposals["bucket0"], registry, snapshots)[0])
+    check([(i["lower"], i["lower_inclusive"], i["upper"], i["upper_inclusive"]) for i in bucket_draft["undecided_intervals"]]
+          == [("60000", True, "69239.0676", False)], "replay: bucket0 on disk is undecided on [60000, 69239.0676)")
+    check([(p["slope"], p["intercept"]) for p in bucket_draft["profile"]] == [("0.1", "-7923.90676")], "replay: bucket0 lower profile with the leg at zero")
+    check([(p["slope"], p["intercept"]) for p in bucket_draft["upper_profile"]] == [("0.1", "-6999.90676")], "replay: bucket0 upper profile credits the leg with 924")
+    check(O.fmt(_at(bucket_draft["upper_profile"], exact.parse("60000"))) == "-999.90676", "replay: bucket0 upper profile meets the cap at the floor")
 
     # ---- the numbers are pinned against in-memory reviewed copies, never written to disk
     reviewed = {}
@@ -295,6 +330,31 @@ def replay():
         # The strike is owned by the piece above it: NO pays strictly below the target.
         lower_piece = [p for p in result["profile"] if exact.parse(p["upper"]) == strike]
         check(lower_piece and lower_piece[0]["upper_inclusive"] is False, f"replay: {name} strike belongs to the upper piece")
+
+        # ---- size window: which sizes would have met the cap on this book
+        smallest, largest, low_bound, high_bound = SIZES[name]
+        window = result["size_windows"][0]
+        check(window["status"] == "nonempty" and window["leg"] == lowered["legs"][0]["id"], f"replay: {name} reports a size window for its sized leg")
+        check((window["smallest"], window["largest"]) == (smallest, largest), f"replay: {name} whole-contract window {smallest}..{largest}")
+        check((window["lower_bound"], window["upper_bound"]) == (low_bound, high_bound), f"replay: {name} exact size bounds")
+        check([(b["price"], b["side"]) for b in window["binding"]] == [(lowered["domain"]["lower"], "at"), (STRIKES[name], "at")],
+              f"replay: {name} floor binds the minimum size, strike binds the maximum")
+        # The proposal's own size is the smallest that passes, and one fewer fails.
+        check(lowered["legs"][0]["size"] == smallest, f"replay: {name} is proposed at the smallest passing size")
+        one_fewer = json.loads(json.dumps(proposals[name]))
+        one_fewer["legs"][0]["size"] = str(int(smallest) - 1)
+        fewer_result = O.evaluate(lower.lower(one_fewer, reviewed, snapshots)[0])
+        check(fewer_result["model_result"] == "fails", f"replay: {name} at {int(smallest) - 1} contracts fails")
+
+        # ---- alternatives
+        reduction = result["comparisons"]["smallest_reduction"]
+        check(reduction["keep_quantity"] == KEEP, f"replay: {name} smallest reduction keeps {KEEP} BTC")
+        check(reduction["worst_case"]["pnl"] == "-1000", f"replay: {name} the reduction meets the cap exactly, with no premium")
+        check([(i["lower"], i["lower_inclusive"], i["upper"], i["upper_inclusive"]) for i in reduction["proposal_better"]] == BETTER[name],
+              f"replay: {name} beats the reduction exactly where it should")
+        no_hedge = result["comparisons"]["no_hedge"]
+        check([(i["lower"], i["upper"]) for i in no_hedge["proposal_better"]] == [(lowered["domain"]["lower"], STRIKES[name])],
+              f"replay: {name} beats no hedge only below the strike")
 
     # ---- a leg whose terms disagree with the catalogue is refused
     wrong = json.loads(json.dumps(proposals["binary"]))
@@ -360,7 +420,59 @@ def replay():
     except lower.Refused as refusal:
         check(refusal.code == "INSUFFICIENT_DEPTH", "replay: refuses a size the displayed book cannot fill")
 
-    print(f"replay: {len(proposals)} real proposals refused as drafts on disk; "
+    # ---- horizon: a leg observed at another time is worth nothing here, its premium still counts
+    horizon_proposal = canon.loads((REPLAY / "bucket0-horizon.proposal.json").read_bytes())
+    check(horizon_proposal["objective_valuation_time"] == "2026-09-20T06:00:00Z", "replay: the horizon fixture is valued a day later")
+    lowered = lower.lower(horizon_proposal, reviewed, snapshots)[0]
+    check([(r["rule"], r["tight"], r["reason_code"]) for r in lowered.get("reductions", [])] == [("horizon_mismatch", True, "LEG_WORST_CASED_HORIZON")],
+          "replay: a horizon mismatch is a tight reduction")
+    horizon = O.evaluate(lowered)
+    check(horizon["model_result"] == "fails", "replay: the horizon fixture fails; a tight bound can prove a failure")
+    check([(p["slope"], p["intercept"]) for p in horizon["profile"]] == HORIZON["pieces"], "replay: horizon profile is the exposure less the premium")
+    check(horizon["worst_case"] == HORIZON["worst"], "replay: horizon worst case -1923.90676 at the floor")
+    check([(i["lower"], i["lower_inclusive"], i["upper"], i["upper_inclusive"]) for i in horizon["failing_intervals"]] == [HORIZON["fails_on"]],
+          "replay: horizon fails on [60000, 69239.0676)")
+    check(horizon["cost"]["premium"] == PINNED["bucket0"][0], "replay: the horizon leg still costs its premium")
+    # A price alone is not a counterexample once a leg has been bounded.
+    states = horizon["failing_intervals"][0]["witness"]["adverse_states"]
+    check([(s["leg"], s["rule"]) for s in states] == [("bucket0-yes", "horizon_mismatch")], "replay: the witness names each bounded leg and the rule that bounded it")
+    check(states[0]["state"] == "the leg's own observation pays zero", "replay: the adverse state is the leg paying zero at its own observation")
+
+    # ---- no result anywhere may assert `fails` from a loose bound
+    #
+    # The strongest form of the rule: take the tight fixture, which really does fail, and
+    # make its reduction loose. The failure must stop being a failure, because a loose
+    # bound proves nothing about what the leg is worth.
+    loosened = json.loads(json.dumps(lowered))
+    loosened["reductions"][0]["tight"] = False
+    loosened_result = O.evaluate(loosened)
+    check(loosened_result["model_result"] == "needs_review", "replay: the same violation under a loose rule needs review")
+    check(loosened_result["failing_intervals"] == [], "replay: a loose rule proves no failing interval")
+    check([(i["lower"], i["upper"]) for i in loosened_result["undecided_intervals"]] == [(HORIZON["fails_on"][0], HORIZON["fails_on"][2])],
+          "replay: the violation moves to undecided intervals unchanged")
+    for label, document in (("tight", horizon), ("loose", loosened_result), ("draft", bucket_draft)):
+        if document["model_result"] == "fails":
+            check(all(r["tight"] for r in document.get("reductions", [])), f"replay: {label} only fails when every reduction is tight")
+
+    # ---- comparing instruments is a separate document, citing results by digest
+    candidates = []
+    for name in PINNED:
+        candidate_ir = lower.lower(proposals[name], reviewed, snapshots)[0]
+        candidates.append((name, candidate_ir, O.evaluate(candidate_ir)))
+    comparison = O.compare(candidates)
+    check(not validate_comparison(comparison), "replay: the comparison is valid against comparison.schema.json")
+    check([c["ir_digest"] for c in comparison["candidates"]] == [canon.digest(ir) for _, ir, _ in candidates],
+          "replay: the comparison cites each result by the digest of its lowered proposal")
+    check(comparison["ranking"] == ["bucket0", "binary"], "replay: the bucket hedge is the cheaper way to meet the same cap")
+    check([c["cost"] for c in comparison["candidates"]] == [PINNED[name][0] for name in PINNED], "replay: each candidate carries its own cost")
+    # Proposals answering different questions may not be ranked against each other.
+    try:
+        O.compare([candidates[0], (("horizon"), lowered, horizon)])
+        check(False, "replay: refuses to compare proposals with different valuation times")
+    except ValueError:
+        check(True, "replay: refuses to compare proposals with different valuation times")
+
+    print(f"replay: {len(proposals)} real proposals need review as drafts on disk; "
           f"pinned values verified against in-memory reviewed copies")
 
 
@@ -374,9 +486,17 @@ def _at(profile, price):
 
 
 def validate_ir(document):
+    return _validator().valid(document, "ir.schema.json")
+
+
+def validate_comparison(document):
+    return _validator().valid(document, "comparison.schema.json")
+
+
+def _validator():
     sys.path.insert(0, str(PROJECT / "tools"))
     import validate
-    return validate.valid(document, "ir.schema.json")
+    return validate
 
 
 if __name__ == "__main__":
