@@ -58,6 +58,13 @@ the canonical JSON profile (§5): no numbers, no nulls, no user-chosen keys.
 | Result | `result.schema.json` | Verdict, witnesses, profile, cost, comparisons, reason codes, assumptions, digests | — |
 | Registry entry | `registry-entry.schema.json` | One reviewed reading of one family, as data | `semantics_version` |
 
+`semantics_version` is the canonical digest of a registry entry **without its
+`review` key**, so a proposal pins a reading rather than a review state: the owner
+marking an entry reviewed does not move the pin. `review.digest` records which
+`semantics_version` was reviewed, and an entry counts as reviewed only when its
+state is `reviewed` **and** that digest still matches. Editing the semantics
+therefore silently un-reviews the entry rather than carrying an approval forward.
+
 `input_digest` covers everything that determines a result except the engine:
 `proposal_digest`, the snapshot hashes, the `semantics_version` of each entry
 used, and the schema version. Same `input_digest`, same `engine_version` ⇒ the
@@ -116,15 +123,32 @@ inputs only: the proposal, the registry entries it pins, the snapshot bytes it
 cites. It has four steps.
 
 1. **Resolve.** Each leg names a family, a side, its terms, and the
-   `semantics_version` it was written against. The registry entry maps
+   `semantics_version` it was written against; a pin that no longer matches the
+   entry's semantics is refused, `SEMANTICS_PIN_MISMATCH`. The registry entry maps
    `(side[, index])` to one or more `indicator`s over the leg's terms — NO on the
-   middle bucket is two. An entry whose review state is not `reviewed` is refused:
+   middle bucket is two. An entry that is not reviewed — state not `reviewed`, or a
+   `review.digest` that no longer matches its `semantics_version` — is refused:
    `UNREVIEWED_FAMILY`.
+
+   The instance is then checked against the catalogue the proposal cites: the
+   outcome exists, its description matches the leg's terms field by field (for a
+   bucket, the thresholds on the parent question and the outcome's position among
+   its named outcomes), and the coin equals `#` + `10*outcome + side`. The kernel's
+   numbers come from the catalogue, not from the leg.
 2. **Price.** A `fixed` acquisition is taken as given. A `book_walk` re-walks the
-   cited snapshot at the requested size along the named path, adds fees from the
-   official formula with the outcome's own `deployerFeeScale`, and fixes the
-   premium. The kernel never sees a book — except the size window, which receives
-   the levels as exact data.
+   cited snapshot at the requested size along the named path and carries the result
+   as an **exact total with provenance** — `{kind: walked, total, path, snapshot}` —
+   not as a per-unit price: a walk over several levels has no single price, and its
+   average is derived rather than observed. Displayed depth that cannot fill the
+   size is refused, `INSUFFICIENT_DEPTH`. Fees from the official formula with the
+   outcome's own `deployerFeeScale` are T2; today pricing at displayed asks requires
+   the dated `zero_base_fee` assumption, and its absence is refused. The kernel
+   never sees a book — except the size window, which receives the levels as exact
+   data.
+
+   The baseline is re-read from the cited contexts snapshot and refused on a
+   mismatch, so a hand-edited price cannot reach the kernel. The lowered proposal
+   keeps the baseline's `source`, so a checker can read it again.
 3. **Reduce.** Rules that lower a leg's value, applied in a fixed order and listed
    in the lowered proposal. Each is a lower bound, declares whether it is
    **tight**, and can construct its adverse state.
@@ -225,9 +249,12 @@ checker in the browser on every view; a consumer runs it before it signs.
 | No third-party code in an evaluation path | same tests — `go.mod` has no `require`; `package.json` has no dependency field; sources import only each other |
 | The checker is runtime-neutral and its syntax erasable | `arch.test.ts` — no `node:`, `process`, `Deno`, `Bun`, `require`, `JSON.parse`; no `enum`, `namespace`, parameter properties. Node runs the sources unmodified; Deno type-checks them; Bun runs them too |
 | A function carries its breakpoints | `oracle/verify.py` — no evaluation function has a `breakpoints` parameter |
-| A schema constraint is never silently ignored | `tools/validate.py` — an unknown keyword or an unanchored pattern is an error; 19 mutations must be refused |
+| A schema constraint is never silently ignored | `tools/validate.py` — an unknown keyword or an unanchored pattern is an error; 23 mutations must be refused |
 | Documents agree with each other | `tools/validate.py` — a proposal pins the digest of the registry entry it uses; its coin encodes its outcome and side; every snapshot it cites is retained |
-| A draft registry entry cannot be evaluated | the review state, refused by lowering (T1). Both entries here are **model drafts awaiting the owner's review** |
+| A draft registry entry cannot be evaluated | `canon.reviewed` — state and `review.digest` together; refused by lowering as `UNREVIEWED_FAMILY`. Both entries here are **model drafts awaiting the owner's review**, so the on-disk replay asserts the refusal |
+| Reviewing an entry does not move what proposals pin | `tools/validate.py` — `semantics_version` excludes `review`; a review with a stale digest does not count as reviewed |
+| A lowered leg matches the instance it names | `oracle/verify.py` replay — terms against the catalogue, coin against outcome and side, baseline against the contexts snapshot, size against displayed depth |
+| Retained evidence in a fixture is the retained response | `oracle/verify.py` replay — each file's SHA-256 against its own request record and against the hash in the evidence commit |
 | Documented examples cannot drift | `oracle/verify.py` parses PLAN.md and compares its example with the generated fixture |
 
 Each guard was run against a deliberate violation before it was trusted.
@@ -241,9 +268,10 @@ ARCHITECTURE.md  PLAN.md  EVIDENCE.md  Makefile
 schema/     six draft schemas. The only thing implementations share
 fixtures/   golden/   lowered proposal and its generated expected result
             vectors/  numbers and canonical JSON, generated from hand-written cases
-            drafts/   documents that validate but have not been evaluated
+            replay/   retained responses, their request records, and the real
+                      proposals lowered from them (2026-09-18)
 registry/   semantics entries as data: recurring.priceBinary, recurring.priceBucket
-oracle/     exact.py  canon.py  oracle.py (kernel, evaluate)  verify.py
+oracle/     exact.py  canon.py  oracle.py (kernel, evaluate)  lower.py  verify.py
 engine/     exact/  canon/  arch_test.go          ── built
             pwa/  ir/  lower/  evaluate/  result/  ── T2, pure
             adapter/hyperliquid/  store/  service/  cmd/hedgecheck/  ── T2, the only impure packages
