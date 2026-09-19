@@ -247,24 +247,43 @@ def band_infimum(fn, band):
     This is the reduction for a leg, or a group of legs, observed on another reference under a
     declared basis bound. For a monotone payoff it is a shift; for the middle bucket it is NOT:
     [P1, P2) shrinks from both sides to [P1 + band, P2 - band). The result is again an Fn.
-    Its breakpoints are a superset of the true ones: every original breakpoint, each shifted
-    both ways, and every crossing of two candidate lines. Extra breakpoints are harmless.
+
+    Its breakpoints must be a superset of the true ones, and getting that superset right is the
+    whole difficulty. Three families are needed, and omitting the third was a bug until 20 Sep
+    (EVIDENCE section 9):
+
+      1. every original breakpoint, shifted both ways and unshifted;
+      2. every crossing of two candidate lines, which is where the envelope switches
+         which piece attains the minimum;
+      3. every crossing of a candidate line with a *constant* equal to a jump value,
+         which is where the band slides off the end of a piece and a plateau takes over.
+
+    Extra breakpoints are harmless; a missing one makes `profile` describe a function that
+    is not this one, silently, because the affinity tripwire samples inside the span.
     """
     band = F(band)
     if band < 0:
         raise ValueError("negative band")
     marks = sorted(fn.breakpoints)
     lo, hi = (marks[0], marks[-1]) if marks else (F(0), F(1))
-    lines = []
+    lines, values = [], []
     for atom in atoms(fn, lo - 2 * band - 1, hi + 2 * band + 1):
         if atom[0] == "open":
             _, _, _, slope, intercept = atom
             lines += [(slope, intercept - slope * band), (slope, intercept + slope * band)]
+        else:
+            # A point's value becomes a plateau of the envelope wherever the band covers it.
+            values.append(atom[2])
     cuts = {m + d for m in marks for d in (-band, F(0), band)}
     for i, (a1, c1) in enumerate(lines):
         for a2, c2 in lines[i + 1:]:
             if a1 != a2:
                 cuts.add((c2 - c1) / (a1 - a2))
+    # Where a sloped candidate meets a plateau value, the envelope changes which one wins.
+    for slope, intercept in lines:
+        if slope != 0:
+            for value in values:
+                cuts.add((value - intercept) / slope)
     return Fn(cuts, lambda s: infimum(fn, s - band, s + band)[0], "band_infimum")
 
 
