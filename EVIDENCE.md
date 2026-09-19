@@ -1,6 +1,7 @@
 # Evidence
 
-Facts the plan depends on, with source and date. Revised 18 September 2026.
+Facts the plan depends on, with source and date. Revised 18 September 2026; §9
+extended 19 September.
 
 **[V]** reproduced offline by a verifier from retained bytes — API responses,
 or official documentation pages retained as Markdown. It establishes what the API
@@ -12,15 +13,16 @@ that does not establish a rule.
 A universal negative ("none exists", "cannot be done") is only as wide as the
 search behind it, so each one states its search scope.
 
-Evidence packages are committed at `085ccfb`, not in the working tree. Restore
-with `git checkout 085ccfb -- research/`, then:
+The oracle, the conformance vectors and the schema checks are in the tree:
+`make check`. Evidence packages are committed at `085ccfb`, not in the working
+tree. Restore with `git checkout 085ccfb -- research/`, then:
 
 ```sh
 python3 research/2026-09-15/verify.py             # 128 checks, 6 hashes
 python3 research/2026-09-15-settlement/verify.py  # 222 checks, 13 hashes
 python3 research/2026-09-18/verify.py             # 471 checks, 32 hashes + 14 re-verified
 python3 research/2026-09-18-decisions/verify.py   # 82 checks, 6 official pages, name sweep
-python3 research/oracle/verify.py                 # 4,077 checks: golden table, fixture, PLAN.md example
+python3 research/oracle/verify.py                 # 4,077 checks — the first oracle, as committed; superseded by oracle/ in the tree
 ```
 
 ---
@@ -337,7 +339,7 @@ the 15 Sep table and says "taken" for its controls (`payoff`, `countersign`).
 
 | Candidate | All eleven namespaces | Note |
 |---|---|---|
-| **payoffbounds** | free | The decision — [PLAN §12](./PLAN.md) |
+| payoffbounds | free | The fallback if a change is ever required — [PLAN §12](./PLAN.md) |
 | payoffbound | free | Reads as "bound to pay off" |
 | payoffproof | free | Promises a proof about the world |
 | lossbounds · pnlbounds · payoffverdict | free | Narrower than the product |
@@ -354,8 +356,9 @@ trademark register was searched. X: `@payoffbounds` returned X's not-found page
 on 18 Sep while `@colosseum` rendered a profile — observed in a browser, not
 retained.
 
-**"HedgeCheck" collides with HedgeCheck LLC (Exiger-owned)** — former codename
-only.
+**[U] "HedgeCheck" and HedgeCheck LLC (Exiger-owned).** The firm was noted on
+15 Sep and called a collision; nobody examined what it does, whether it holds a
+mark, or whether anyone would confuse the two. The owner kept the name on 19 Sep.
 
 **[U] Several tracks per submission.** Nothing authoritative found: the FAQ, the
 event page and Colosseum's `hackathon-resources` repository are silent, and the
@@ -384,7 +387,8 @@ FluxRPC.
 ## 9. Known-wrong claims
 
 Kept so they are not reintroduced. Everything from "The example result" down was
-found on 18 Sep, the last four in revisions written that same day.
+found on 18 Sep, the last four of those in revisions written that same day; the
+final four on 19 Sep, in the plan's own design and the first oracle.
 
 | Claim | Correction |
 |---|---|
@@ -410,8 +414,13 @@ found on 18 Sep, the last four in revisions written that same day.
 | Equality on the deployer path is "unconfirmed", a rule to be learned from Skew | There is no rule to learn: deployers submit the fraction (§1). The strike is disputed by construction and is owned by neither side. |
 | "A hedge purchase is a buy, so do not assume routed orders pay" | Official text says builder codes "can also be applied to buy orders for outcome orders" — on a Testnet-only page; mainnet is **[U]** (§6). |
 | "`.io` and `.ai` inconclusive" | `.ai` answers over Identity Digital's RDAP, `.io` over `whois.nic.io`. rdap.org was the wrong place to ask. |
-| "PayoffProof recommended" | It promises a proof about the world, which [PLAN §5](./PLAN.md) disclaims. PayoffBounds. |
+| "PayoffProof recommended" | It promises a proof about the world, which [PLAN §5](./PLAN.md) disclaims. |
+| "'HedgeCheck' collides with HedgeCheck LLC — codename only", then a rename to PayoffBounds | An unexamined sentence from 15 Sep was treated as a requirement, and a rename was built on it. The name is HedgeCheck. |
 | README: "189 checks" · PLAN: "no repository", "six days are gone" | 222 · a repository with no commits · four days, by the event clock. Counts and states are printed by a command, not remembered. |
+| "Every supported price family is monotone in its reference", so a basis bound is a shift | The middle bucket is not monotone. Its worst case over a band `b` is `[P1 + b, P2 − b)`; either shift credits prices where it may pay nothing. Brute-forced 19 Sep against the oracle; reproducible, and a fixture from T1. |
+| A reduced leg leaves "the verdict stands", so `fails` may rest on any bound | Only on a **tight** one. A bound no scenario attains proves nothing about failure, and a price alone is not a counterexample once a leg is bounded. |
+| Go's `big.Rat` "parses both number forms natively" — offered as a reason | It also parses `"0x10"`, `"1e3"`, `"+5"`, `"1_000"`; Python's `Fraction` disagrees on some of them. Default JSON differs too: one object, three SHA-256 digests across Go, Python and JavaScript. Both run 19 Sep; both become fixtures in T1. |
+| "An undeclared breakpoint is an error, not a wrong answer" | False for the first oracle. Its probe samples three points per interval; with a strike at 65,000 on `[60000, 110000]` omitted it raised nothing and returned failure `(60000, 67000)` for `[65000, 67000)` and infimum −4,200 for −3,700. `evaluate()` was never affected — it takes breakpoints from the legs' own constructors — but the guarantee was. Now a function cannot be separated from its breakpoints; `oracle/verify.py` asserts what the probe catches and what it cannot. |
 
 ---
 
