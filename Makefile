@@ -31,7 +31,7 @@ spike:
 
 engine:
 	@cd engine && test -z "$$(gofmt -l .)" || { echo "gofmt: unformatted files"; exit 1; }
-	@cd engine && go vet ./... && go test -count=1 ./...
+	@cd engine && go vet ./... && go test -race -count=1 ./...
 
 checker:
 	@cd checker && deno check --quiet src/*.ts
