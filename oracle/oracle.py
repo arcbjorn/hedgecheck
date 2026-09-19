@@ -326,12 +326,26 @@ def _leg(leg):
                      upper=num(on["upper"]) if "upper" in on else None, upper_inclusive=on.get("upper_inclusive", False))
 
 
+def leg_cost(leg):
+    """What one lowered leg cost, exactly.
+
+    'fixed' is a hypothetical per-unit price and multiplies by size. 'walked' is
+    already the total paid for the whole size along one path, so it is used as it
+    stands: a walk over several book levels has no single per-unit price, and its
+    average is a derived quantity, not the one that was observed.
+    """
+    premium = leg["premium"]
+    if premium["kind"] == "walked":
+        return num(premium["total"])
+    return num(leg["size"]) * num(premium["price"])
+
+
 def evaluate(lowered):
-    """Expected result for a lowered proposal (schema/ir.schema.json). Fixed premiums only."""
+    """Expected result for a lowered proposal (schema/ir.schema.json)."""
     lower, upper = num(lowered["domain"]["lower"]), num(lowered["domain"]["upper"])
     baseline = num(lowered["baseline"]["price"])
     exposure = linear(num(lowered["exposure"]["quantity"]), baseline)
-    premium = sum((num(leg["size"]) * num(leg["premium"]["price"]) for leg in lowered["legs"]), F(0))
+    premium = sum((leg_cost(leg) for leg in lowered["legs"]), F(0))
     other = num(lowered["other_costs"])
     pnl = total([exposure] + [_leg(leg) for leg in lowered["legs"]] + [cash(-premium - other)])
 
