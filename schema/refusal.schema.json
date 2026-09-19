@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "refusal.schema.json",
+  "title": "Refusal classes",
+  "$comment": "Frozen as schema v1 at T1's gate (PLAN.md section 7), after the contract met live data on 18 and 19 September. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored. Every change since 062a245 is listed in schema/CHANGES.md with the case that forced it; a change after the freeze needs a new schema_version and a row there.",
+  "description": "The closed list of reasons a checker may refuse a certificate bundle. Closed so that two independent checkers refuse the same bundle for the same stated reason: the TypeScript checker in T3 returns these exact classes, and a disagreement between it and the reference refuser is then a real disagreement rather than a wording difference. A checker that cannot place a fault in one of these classes must say ENGINE_DISAGREES rather than invent a class.",
+  "$defs": {
+    "class": {
+      "enum": [
+        "SNAPSHOT_BYTES",
+        "SNAPSHOT_NOT_CITED",
+        "SEMANTICS_PIN",
+        "TERMS_MISMATCH",
+        "COST_MISMATCH",
+        "PROFILE_COVERAGE",
+        "PROFILE_VALUE",
+        "ENDPOINT_OWNERSHIP",
+        "OBJECTIVE_MISMATCH",
+        "VERDICT_MISMATCH",
+        "INTERVAL_MISMATCH",
+        "WITNESS_INADMISSIBLE",
+        "REDUCTION_UNDECLARED",
+        "REDUCTION_UNSOUND",
+        "SIZE_WINDOW",
+        "CERTIFICATE_WEIGHTS",
+        "ENGINE_DISAGREES"
+      ]
+    },
+    "expectation": {
+      "oneOf": [
+        {
+          "const": "accept"
+        },
+        {
+          "$ref": "refusal.schema.json#/$defs/class"
+        }
+      ]
+    },
+    "refusal": {
+      "type": "object",
+      "required": [
+        "class",
+        "detail"
+      ],
+      "properties": {
+        "class": {
+          "$ref": "refusal.schema.json#/$defs/class"
+        },
+        "detail": {
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "at": {
+          "$ref": "defs.schema.json#/$defs/text"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "required": [
+    "accepted"
+  ],
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "refusal": {
+      "$ref": "refusal.schema.json#/$defs/refusal"
+    }
+  },
+  "additionalProperties": false
+}
