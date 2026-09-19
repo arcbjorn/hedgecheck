@@ -1,0 +1,13 @@
+{
+  "endpoint": "https://api.hyperliquid.xyz/info",
+  "method": "POST",
+  "request_body": {
+    "type": "metaAndAssetCtxs"
+  },
+  "requested_at": "2026-09-19T18:23:14.977836+00:00",
+  "retrieved_at": "2026-09-19T18:23:15.600718+00:00",
+  "http_status": 200,
+  "response_file": "b9f72f04346322fd2af8270430e8617f903efdb796e190846c4788873c72685d.json",
+  "response_sha256": "b9f72f04346322fd2af8270430e8617f903efdb796e190846c4788873c72685d",
+  "server_date": "Sat, 19 Sep 2026 18:23:15 GMT"
+}

@@ -1,0 +1,333 @@
+{
+  "schema_version": "1",
+  "options": {
+    "underlying": "BTC",
+    "quantity": "0.1",
+    "cap": "1000",
+    "floor": "60000",
+    "ceiling": "110000",
+    "baseline": "81520",
+    "baseline_kind": "analysis_time",
+    "valuation_time": "2026-09-20T06:00:00Z"
+  },
+  "expiry": "20260920-0600",
+  "observation_time": "2026-09-20T06:00:00Z",
+  "valuation_time": "2026-09-20T06:00:00Z",
+  "digests": {
+    "catalogue": "c3d24a549b06e07a908d5c6b469bf374b0842bda9e854c23de54668c6f4d498e",
+    "contexts": "b9f72f04346322fd2af8270430e8617f903efdb796e190846c4788873c72685d",
+    "binary-no": "e6d25d8f07a008fcb700759bc3e2fb86fcdbaa33e91669e92ffc596617230aaf",
+    "bucket0-yes": "6671e3764f5bd9ee28978a64b2fa8f8a7db99e39c27abd4673d53784f9311842"
+  },
+  "skew": {
+    "binary-no": {
+      "book_venue_ms": 1789842196804,
+      "local_retrieved_ms": 1789842197425,
+      "skew_ms": -621,
+      "contexts_gap_ms": 1825
+    },
+    "bucket0-yes": {
+      "book_venue_ms": 1789842198556,
+      "local_retrieved_ms": 1789842199245,
+      "skew_ms": -689,
+      "contexts_gap_ms": 3645
+    }
+  },
+  "results": {
+    "binary-no": {
+      "schema_version": "1",
+      "units": {
+        "money": "USDC",
+        "price": "USDC per BTC",
+        "exposure": "BTC",
+        "size": "contracts"
+      },
+      "model_result": "needs_review",
+      "execution_readiness": "not_evaluated",
+      "evaluation_scope": "exhaustive_supported_terminal_model",
+      "baseline": {
+        "kind": "analysis_time",
+        "price": "81520",
+        "source": {
+          "snapshot": "b9f72f04346322fd2af8270430e8617f903efdb796e190846c4788873c72685d",
+          "coin": "BTC"
+        }
+      },
+      "objective_valuation_time": "2026-09-20T06:00:00Z",
+      "leg_observation_times": [
+        "2026-09-20T06:00:00Z"
+      ],
+      "worst_case": {
+        "pnl": "-2640.69285",
+        "attained": true,
+        "price": "60000"
+      },
+      "failing_intervals": [],
+      "profile": [
+        {
+          "lower": "60000",
+          "lower_inclusive": true,
+          "upper": "110000",
+          "upper_inclusive": true,
+          "slope": "0.1",
+          "intercept": "-8640.69285"
+        }
+      ],
+      "cost": {
+        "premium": "488.69285",
+        "other_costs": "0",
+        "pnl_at_baseline": "-488.69285",
+        "breakevens": [
+          "86406.9285"
+        ]
+      },
+      "comparisons": {
+        "no_hedge": {
+          "worst_case": {
+            "pnl": "-2152",
+            "price": "60000"
+          },
+          "failing_intervals": [
+            {
+              "lower": "60000",
+              "lower_inclusive": true,
+              "upper": "71520",
+              "upper_inclusive": false
+            }
+          ],
+          "proposal_better": [],
+          "proposal_worse": [
+            {
+              "lower": "60000",
+              "lower_inclusive": true,
+              "upper": "110000",
+              "upper_inclusive": true
+            }
+          ]
+        },
+        "smallest_reduction": {
+          "keep_quantity": "25/538",
+          "sell_quantity": "72/1345",
+          "sell_at": "81520",
+          "worst_case": {
+            "pnl": "-1000",
+            "price": "60000"
+          },
+          "proposal_better": [
+            {
+              "lower": "26106927533/288000",
+              "lower_inclusive": false,
+              "upper": "110000",
+              "upper_inclusive": true
+            }
+          ],
+          "proposal_worse": [
+            {
+              "lower": "60000",
+              "lower_inclusive": true,
+              "upper": "26106927533/288000",
+              "upper_inclusive": false
+            }
+          ]
+        }
+      },
+      "reason_codes": [
+        "UNREVIEWED_FAMILY"
+      ],
+      "assumptions": [
+        "common_reference",
+        "zero_base_fee"
+      ],
+      "checks_not_performed": [
+        "LIVE_EXECUTION",
+        "PATH_RISK"
+      ],
+      "engine_version": "reference-oracle-3",
+      "ir_digest": "95c3307f8cc8df9105abbc4b7c1774d080a5f4cc544bba0e0a07127f16e6b476",
+      "undecided_intervals": [
+        {
+          "lower": "60000",
+          "lower_inclusive": true,
+          "upper": "76406.9285",
+          "upper_inclusive": false,
+          "clause": "loss_cap",
+          "witness": {
+            "price": "60000",
+            "pnl": "-2640.69285"
+          },
+          "responsible_legs": [
+            "binary-no"
+          ]
+        }
+      ],
+      "reductions": [
+        {
+          "leg": "binary-no",
+          "rule": "unreviewed_family",
+          "tight": false,
+          "reason_code": "UNREVIEWED_FAMILY"
+        }
+      ],
+      "upper_profile": [
+        {
+          "lower": "60000",
+          "lower_inclusive": true,
+          "upper": "110000",
+          "upper_inclusive": true,
+          "slope": "0.1",
+          "intercept": "-6999.69285"
+        }
+      ]
+    },
+    "bucket0-yes": {
+      "schema_version": "1",
+      "units": {
+        "money": "USDC",
+        "price": "USDC per BTC",
+        "exposure": "BTC",
+        "size": "contracts"
+      },
+      "model_result": "needs_review",
+      "execution_readiness": "not_evaluated",
+      "evaluation_scope": "exhaustive_supported_terminal_model",
+      "baseline": {
+        "kind": "analysis_time",
+        "price": "81520",
+        "source": {
+          "snapshot": "b9f72f04346322fd2af8270430e8617f903efdb796e190846c4788873c72685d",
+          "coin": "BTC"
+        }
+      },
+      "objective_valuation_time": "2026-09-20T06:00:00Z",
+      "leg_observation_times": [
+        "2026-09-20T06:00:00Z"
+      ],
+      "worst_case": {
+        "pnl": "-2197.636",
+        "attained": true,
+        "price": "60000"
+      },
+      "failing_intervals": [],
+      "profile": [
+        {
+          "lower": "60000",
+          "lower_inclusive": true,
+          "upper": "110000",
+          "upper_inclusive": true,
+          "slope": "0.1",
+          "intercept": "-8197.636"
+        }
+      ],
+      "cost": {
+        "premium": "45.636",
+        "other_costs": "0",
+        "pnl_at_baseline": "-45.636",
+        "breakevens": [
+          "81976.36"
+        ]
+      },
+      "comparisons": {
+        "no_hedge": {
+          "worst_case": {
+            "pnl": "-2152",
+            "price": "60000"
+          },
+          "failing_intervals": [
+            {
+              "lower": "60000",
+              "lower_inclusive": true,
+              "upper": "71520",
+              "upper_inclusive": false
+            }
+          ],
+          "proposal_better": [],
+          "proposal_worse": [
+            {
+              "lower": "60000",
+              "lower_inclusive": true,
+              "upper": "110000",
+              "upper_inclusive": true
+            }
+          ]
+        },
+        "smallest_reduction": {
+          "keep_quantity": "25/538",
+          "sell_quantity": "72/1345",
+          "sell_at": "81520",
+          "worst_case": {
+            "pnl": "-1000",
+            "price": "60000"
+          },
+          "proposal_better": [
+            {
+              "lower": "98847007/1200",
+              "lower_inclusive": false,
+              "upper": "110000",
+              "upper_inclusive": true
+            }
+          ],
+          "proposal_worse": [
+            {
+              "lower": "60000",
+              "lower_inclusive": true,
+              "upper": "98847007/1200",
+              "upper_inclusive": false
+            }
+          ]
+        }
+      },
+      "reason_codes": [
+        "UNREVIEWED_FAMILY"
+      ],
+      "assumptions": [
+        "common_reference",
+        "zero_base_fee"
+      ],
+      "checks_not_performed": [
+        "LIVE_EXECUTION",
+        "PATH_RISK"
+      ],
+      "engine_version": "reference-oracle-3",
+      "ir_digest": "93a3642db54e5191bb830177cdd056a89b237757bb654a750c4cb586a6e164ee",
+      "undecided_intervals": [
+        {
+          "lower": "60000",
+          "lower_inclusive": true,
+          "upper": "71976.36",
+          "upper_inclusive": false,
+          "clause": "loss_cap",
+          "witness": {
+            "price": "60000",
+            "pnl": "-2197.636"
+          },
+          "responsible_legs": [
+            "bucket0-yes"
+          ]
+        }
+      ],
+      "reductions": [
+        {
+          "leg": "bucket0-yes",
+          "rule": "unreviewed_family",
+          "tight": false,
+          "reason_code": "UNREVIEWED_FAMILY"
+        }
+      ],
+      "upper_profile": [
+        {
+          "lower": "60000",
+          "lower_inclusive": true,
+          "upper": "110000",
+          "upper_inclusive": true,
+          "slope": "0.1",
+          "intercept": "-6999.636"
+        }
+      ]
+    }
+  },
+  "input_digests": {
+    "binary-no": "cb795b0d4d18ad0536eb44f5998b6eb9a5ce86d0a468ccdab64ea9e3704151e6",
+    "bucket0-yes": "bcab35249c6b98b6645789921b8de7cb2b6124ee82001d74f4aced8104656902"
+  },
+  "leg": "binary-no"
+}
