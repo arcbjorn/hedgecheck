@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bundle-manifest.schema.json",
+  "title": "Certificate bundle manifest",
+  "$comment": "Frozen as schema v1 at T1's gate (PLAN.md section 7), after the contract met live data on 18 and 19 September. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored. Every change since 062a245 is listed in schema/CHANGES.md with the case that forced it; a change after the freeze needs a new schema_version and a row there.",
+  "description": "Everything a checker needs to accept or refuse one result, and nothing it would have to fetch: the proposal, the snapshots it cites, the registry entries it pins, the lowered proposal and the result. A bundle is self-contained on purpose, so refusing it never depends on the state of the tree it was built from. A corrupted bundle names the class it must be refused with, so a fixture that stops being refused, or starts being refused for a different reason, fails loudly.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "name",
+    "expects",
+    "files"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "name": {
+      "description": "The bundle's directory name. Free text rather than a slug: these read as names, with hyphens, and are never used as keys.",
+      "$ref": "defs.schema.json#/$defs/text"
+    },
+    "expects": {
+      "description": "accept for the good bundle; otherwise the one refusal class this corruption must produce.",
+      "$ref": "refusal.schema.json#/$defs/expectation"
+    },
+    "corruption": {
+      "description": "Present on every corrupted bundle: what single change was made, and where. Generated, never hand-written.",
+      "type": "object",
+      "required": [
+        "of",
+        "change",
+        "target"
+      ],
+      "properties": {
+        "of": {
+          "description": "Which good bundle, and which document within it, the single change was made to.",
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "change": {
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "target": {
+          "$ref": "defs.schema.json#/$defs/text"
+        }
+      },
+      "additionalProperties": false
+    },
+    "files": {
+      "type": "object",
+      "required": [
+        "proposal",
+        "lowered",
+        "result",
+        "registry",
+        "snapshots"
+      ],
+      "properties": {
+        "proposal": {
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "lowered": {
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "result": {
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "registry": {
+          "description": "The registry entries this bundle carries, each naming its family and file. A bundle carries its own copy, so a review on disk cannot change what a stored bundle means. A list, not a map: the canonical JSON profile forbids a dot in a key, and a family name has one.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "family",
+              "path"
+            ],
+            "properties": {
+              "family": {
+                "$ref": "defs.schema.json#/$defs/family"
+              },
+              "path": {
+                "$ref": "defs.schema.json#/$defs/text"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "snapshots": {
+          "description": "Retained response bytes, each naming the SHA-256 the proposal cites and the file holding them. A file that does not hash to its stated digest is the first thing a checker catches.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "sha256",
+              "path"
+            ],
+            "properties": {
+              "sha256": {
+                "$ref": "defs.schema.json#/$defs/sha256"
+              },
+              "path": {
+                "$ref": "defs.schema.json#/$defs/text"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
