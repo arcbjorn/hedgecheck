@@ -1,12 +1,15 @@
-# PayoffBounds: plan
+# HedgeCheck: plan
 
-Formerly codenamed HedgeCheck; the directory keeps the codename. Authoritative:
-this file and [EVIDENCE.md](./EVIDENCE.md) are the only planning documents.
+Authoritative for what is built, why, and in what order. [EVIDENCE.md](./EVIDENCE.md) holds the
+facts; [ARCHITECTURE.md](./ARCHITECTURE.md) says how it is built.
 Earlier revisions and the superseded 14–15 September documents were deleted on
 18 September; their corrections survive in [EVIDENCE.md §9](./EVIDENCE.md).
 
-18 Sep 2026. Status: four evidence packages and a reference oracle, each with a
-verifier. **No engine, no application.** A Git repository with no commits.
+19 Sep 2026. Status: four evidence packages with verifiers, committed at
+`085ccfb` and deliberately kept out of the working tree. In the tree: the
+architecture as a running skeleton — draft schemas, the oracle kernel, the
+number and canonical-JSON spine in Python, Go and TypeScript, two draft registry
+entries — behind one command, `make check`. **No engine, no application.**
 
 **Sequencing is by dependency and risk, never by calendar.** The Colosseum close
 is a fact ([EVIDENCE §7](./EVIDENCE.md)) that decides what is *submitted* (§11).
@@ -69,7 +72,7 @@ sums, so a portfolio of any number of legs is evaluated exactly.
 | Baseline | **Required, no default**: `analysis_time` (a retained mark) or `explicit` (labeled; `strike_reference` is one explicit value) |
 | Price | Explicit premium, or the cost of walking displayed asks at the size requested. The cost **names its acquisition path**: the direct book first; split-and-sell and `negate` paths later ([EVIDENCE §4](./EVIDENCE.md)) |
 | Other costs | Explicit, or a reviewed bound with conservative semantics. Fees: `base rate × (scale + max(scale, 1))` with the outcome's own `deployerFeeScale`; the base rate, zero today, is a dated assumption with an ID |
-| Sizes | Whole contracts, as observed; the lot rule is confirmed in T2 |
+| Sizes | Whole contracts, as observed; the lot rule is confirmed in T1 |
 
 **Reductions.** Each is one reviewable rule, sound by construction, surfaced as a
 reason code — never applied silently.
@@ -77,13 +80,18 @@ reason code — never applied silently.
 | Case | Reduction | Why it is sound |
 |---|---|---|
 | Leg observed at a time other than the objective's valuation time | Value the leg at its worst admissible payoff: **zero** | A long, fully collateralized token pays within `[0, size]`. One settling earlier may have paid nothing; one settling later has no guaranteed value yet |
-| Leg or exposure on another reference, declared basis bound `b` | Shift the leg's payoff by `b` against the holder: a digital below `K` becomes a digital below `K − b`; a linear exposure loses `q·b` | Every supported price family is monotone in its reference, so the adverse end of the band is the worst case. No bound declared: worst-case the leg to zero |
+| Legs or exposure on another reference, declared basis bound `b` | Group legs by reference and take the **infimum of the group's summed payoff over the band** `[S − b, S + b]`. For a monotone payoff that is a shift — a digital below `K` becomes one below `K − b`; a linear exposure loses `q·b`. For the middle bucket it is not: `[P1, P2)` **shrinks from both sides** to `[P1 + b, P2 − b)` | The infimum over a declared band is a lower bound by definition, and piecewise affine again. A plain shift over-credits the middle bucket at prices where it may pay nothing (checked by brute force, 19 Sep). No bound declared: zero |
 | Deployer-settled leg | Evaluate as written **only** under the assumption `deployer_settles_as_written`; at the strike itself the leg pays the holder **nothing, on either side**. Without the assumption: zero | The deployer submits the fraction; nothing computes it ([EVIDENCE §1](./EVIDENCE.md)). "Above" is theirs to read, so the strike is owned by neither side |
-| `priceTouch`, long YES | Lower-bound by the terminal digital at the target, on the same TWAP | A terminal observation at or through the target implies a touch |
-| Isolated perp with a liquidation price inside the declared **path** domain | The leg is worth minus its isolated margin at **every** terminal price | The path may reach the liquidation price and recover. A terminal digital cannot hedge that, and the result says so exactly (T6) |
+| `priceTouch`, long YES, **touch window covering the valuation time** | Lower-bound by the inclusive terminal digital at the target, on the same TWAP. Direction is the side the reference sits on while the market is still unsettled | A terminal observation at or through the target implies a touch. A window that ends before the valuation time falls under the first row instead |
+| Isolated perp with a liquidation price inside the declared **path** domain — every price between now and the valuation time, so it contains the current price and the terminal domain | The leg is worth minus its isolated margin at **every** terminal price | The path may reach the liquidation price and recover. A terminal digital cannot hedge that, and the result says so exactly (T6) |
 | Unreviewed or ambiguous family | Zero, or `needs_review` if the proposal cannot be represented at all | Same bound as the first row |
 
-A reduced leg can never help a proposal pass; it can only fail to help.
+Every reduction is a **lower bound**, so it can never turn a failing proposal
+into a passing one. Each also declares whether it is **tight** — attained by a
+nameable admissible state: the other price the leg observes, the adverse end of
+the band, the deployer's adverse reading, the path that touches and recovers — or
+**loose**, like valuing an unreviewed family at zero. §4 needs the distinction: a
+bound nobody can attain proves nothing about failure.
 
 ---
 
@@ -101,20 +109,33 @@ Premium applies **once**. Cash from selling exposure stays in.
 Collect breakpoints; split the domain into atoms — each breakpoint, and each open
 interval between neighbours; solve every affine inequality exactly; emit maximal
 intervals with endpoint ownership and one admissible witness each: the attained
-minimum, else the midpoint. **Never round before comparing, and never sample** —
-sampling cannot see the 999.90 cliff at the strike. An undeclared breakpoint is
-an error, not a wrong answer.
+minimum, else the midpoint. **A witness is a price plus the adverse state of every
+reduced leg**, so that the unreduced payoff can be evaluated there; a price alone
+is not a counterexample once any leg has been bounded. **Never round before comparing, and never sample** —
+sampling cannot see the 999.90 cliff at the strike. **A function is never
+separated from its breakpoints:** nothing accepts them as a separate argument,
+so a strike cannot be omitted. The first oracle did accept them, and the claim
+made here — that an undeclared breakpoint is an error — was false: its probe
+missed a strike in the outer third of the domain and returned a wrong answer
+silently ([EVIDENCE §9](./EVIDENCE.md)).
 
 **Numbers** are exact strings: a terminating decimal when one exists, otherwise
 `"p/q"` — a comparison boundary can be `268000/3`. Rounding is a display concern,
-outward, and labeled.
+outward, and labeled. **One grammar, enforced before any library parser sees the
+string:** `-?(0|[1-9][0-9]*)(\.[0-9]+)?` or `-?(0|[1-9][0-9]*)/[1-9][0-9]*`, then
+reduced to canonical form before digesting. The libraries disagree with the
+grammar and with each other (checked 19 Sep): Go's `big.Rat` reads `"0x10"` as 16
+and `"0b101/3"` as 5/3, Python's `Fraction` rejects both but accepts `" 5"`, and
+both accept `"1e3"`, `"+5"`, `".5"`, `"1_000"`, `"05"`. An approval gate whose two
+halves parse the same string differently is a defect, not a nuance.
 
 Interval length is **not a probability**. Axis label: "scenario price."
 
 ### Golden cases
 
 `S ∈ [60000, 110000]`, `P&L(S,n) = 0.1(S − 100000) + n·I(S < 90000) − 0.2n`,
-objective `P&L ≥ −1000`. Every row is asserted by `research/oracle/verify.py` (restore from `085ccfb`).
+objective `P&L ≥ −1000`. Every row is asserted by `oracle/verify.py`, which
+`make check` runs.
 
 | Input | Expected |
 |---|---|
@@ -130,7 +151,9 @@ objective `P&L ≥ −1000`. Every row is asserted by `research/oracle/verify.py
 | YES + NO, equal size | One flat piece worth the size, strike included |
 | Three buckets, equal size | One flat piece: the buckets partition the domain |
 | `q·(high − low)` scalar Shorts on a long `q` | Flat between `low` and `high` |
-| Strike omitted from the breakpoints | Rejected |
+| A strike in the outer third of the domain, n=1,000, cap 3,500 | Failure `[65000, 67000)`; worst −3,700 at the strike. The case the first oracle got wrong |
+| Deployer reading: strict below plus strict above | At the strike neither side is paid; the strike is a piece of its own |
+| Band infimum, band `b` | Below `K` → below `K − b` · at or above `K` → at or above `K + b` · `[P1, P2)` → `[P1 + b, P2 − b)` · linear loses `q·b` · on an asymmetric tent it equals the hand-derived form, whose breakpoint at 102 is a crossing of two lines, not a shifted strike |
 
 Plus the live cases in [EVIDENCE §3](./EVIDENCE.md), asserted by
 `research/2026-09-18/verify.py`: 3061 at 0.942, 3253 at 0.975 under
@@ -154,14 +177,16 @@ priced, and about nothing larger. Never call a window executable.
 from strikes, not sizes, so "cheapest sizes meeting the envelope" is a linear
 program with finitely many constraints, solved in exact arithmetic. Its dual
 gives an infeasibility certificate the checker verifies by one multiplication.
-It answers a stated objective; it is not advice.
+Sizes are whole contracts, so the program is a relaxation: round, **re-check the
+rounded structure with the evaluator**, and claim infeasibility only when the
+relaxation itself is infeasible. It answers a stated objective; it is not advice.
 
 ---
 
 ## 4. Result contract
 
-The example is a projection of `research/oracle/fixtures/golden-1000-contracts.result.json`.
-It is generated, and `research/oracle/verify.py` fails if any field here differs.
+The example is a projection of `fixtures/golden/1000-contracts.result.json`. It
+is generated, and `make check` fails if any field here differs.
 
 ```json
 {
@@ -192,9 +217,20 @@ It is generated, and `research/oracle/verify.py` fails if any field here differs
 The engine adds `comparisons` (no hedge; smallest exposure reduction; each other
 supported instrument, with the exact intervals where the proposal is better and
 worse), `size_window` with its binding constraints or its infeasibility
-certificate, snapshot hashes, `semantics_version`, `engine_version`,
-`input_digest`, `proposal_digest`. The result is immutable; an idempotent
+certificate, snapshot hashes, `semantics_version`, `engine_version`, and three
+digests — `proposal_digest` of what was asked, `ir_digest` of what it was lowered
+to, `input_digest` of everything that determines the result
+([ARCHITECTURE §2](./ARCHITECTURE.md)). The result is immutable; an idempotent
 response does not refresh its evidence.
+
+**Digests are SHA-256 over RFC 8785 canonical JSON**, and every value is a string,
+so number serialization never arises. The defaults do not agree (checked 19 Sep):
+for `{"label": "cap <1000 & é"}` Go escapes `<` and `&`, Python escapes `é`,
+JavaScript escapes neither — three digests for one object. The golden fixture is
+plain ASCII and would never notice, so `fixtures/vectors/` carries 48 cases with
+exactly those characters, and all three implementations reproduce them. The
+profile is stricter than the RFC, each restriction closing a measured
+disagreement ([ARCHITECTURE §5](./ARCHITECTURE.md)).
 
 **Reason codes:** `LOSS_BOUND_EXCEEDED` · `COST_BOUND_EXCEEDED` ·
 `NO_FEASIBLE_SIZE_AT_PRICED_DEPTH` · `INSUFFICIENT_DEPTH` ·
@@ -211,9 +247,10 @@ the contract's time for the user's and report it as satisfying the request.**
 
 | Situation | Behavior |
 |---|---|
-| Proven violation in the supported model | `fails`, a witness per failing interval |
-| Objective met | `passes` — with the cost, the profile and the alternatives beside it |
-| A leg was reduced (§2) | The verdict stands; the reason code names the leg and the rule |
+| The lower-bound profile meets the objective everywhere | `passes` — proven, with the cost, the profile and the alternatives beside it |
+| A scenario violates it using only **tight** bounds (§2) | `fails` — proven, a witness per failing interval, each carrying its adverse states |
+| The only violations depend on a **loose** bound | `needs_review`, with the undecided intervals and the legs responsible. **`fails` is never asserted from a bound no scenario attains** |
+| Any leg was reduced | The reason code names the leg and the rule, whatever the verdict |
 | Proposal cannot be represented | `needs_review` plus the missing fields |
 | Invalid request or computation failure | Technical error; **never** a fabricated verdict |
 | Too little displayed depth | Execution blocked; the unknown remainder stays unknown |
@@ -230,7 +267,8 @@ assumptions and reviewed semantics, and independently establishes: domain
 coverage with no gap or overlap · endpoint ownership, including the strict
 inequality at each strike · correspondence between proposal and pieces · the cost,
 by re-walking the snapshot bytes · every comparison interval · every reduction,
-against the registry rule it cites.
+against the registry rule it cites · every witness, by evaluating the
+**unreduced** payoff at its price and adverse states.
 
 Asymmetric: **refuting a `fails` needs one counterexample; confirming a `passes`
 needs exhaustive coverage.** Neither shows the venue data or our reading of the
@@ -240,8 +278,11 @@ The checker shares the schema with the engine and nothing else: separate code,
 ideally a separate author. Acceptance is behavioural: it must **reject corrupted
 certificates**, and those fixtures come first — omitted strike · altered premium ·
 changed objective · swapped endpoint ownership · truncated book · stale snapshot
-hash · wrong semantics version · a reduction applied without its reason code · an
-infeasibility certificate with a negative weight.
+hash · wrong semantics version · a reduction applied without its reason code · a
+witness whose adverse state is inadmissible · a middle bucket shifted instead of
+shrunk · an infeasibility certificate with a negative weight. Beside them, the
+**rejected inputs**: every number string above that a library accepts and the
+grammar does not.
 
 ---
 
@@ -282,32 +323,52 @@ Each tier ships only through its gate. No tier has a date.
 
 | | Deliverable | Gate |
 |---|---|---|
-| **T0** done | Evidence packages, reference oracle, fixtures | Five verifiers pass |
-| **T1** | Engine and independent checker: multi-leg, envelope objective, profile, comparisons, sizing | Every fixture; every corrupted certificate rejected; engine, checker and oracle agree on generated cases |
-| **T2** | Canonical live path: discover instances → preserve snapshots → cost at size → replay → one result screen ranking binary, bucket and exposure reduction | No hard-coded ids; replay reproduces bytes and digests; the 18 Sep case reproduces from its package |
-| **T3** | A consumer: simulated approval gate, then a testnet order behind it with the order envelope the cost bound assumes, and a re-check after any partial fill | Anything but `passes` produces zero downstream calls, asserted; a partial fill triggers the re-check |
-| **T4** | Deployer families, the reference registry, basis-shift reduction, `priceTouch` bound | Each reference string reviewed; Skew's written confirmation, or an explicit assumption with an ID |
-| **T5** | Exact synthesis with infeasibility certificates | The checker verifies optimal structures and certificates alike |
-| **T6** | Path reductions: isolated perps | Liquidation semantics reviewed from official text; every **[U]** it touches resolved |
-| **T7** | Certificate checker on HyperEVM, gating CoreWriter orders | Both **[U]** items in [EVIDENCE §6](./EVIDENCE.md) resolved on testnet; the seconds-long order delay priced in |
+| **T0** done | Evidence packages, reference oracle, one fixture — at `085ccfb` | Five verifiers pass after the restore |
+| **T1** Contract, on real data | The live canonical check end to end **on the oracle**: discover instances → coherent snapshots → proposal → lowering → verdict, cost, alternatives → replay. From it, schema v1 frozen. Fixtures: the 18 Sep replay, corrupted certificates. *Already in the tree, 19 Sep:* oracle kernel, golden fixture, draft schemas, number and digest vectors, two registry entries awaiting review | No hard-coded ids; snapshots in one result retrieved within a stated skew, recorded in it; replaying the 18 Sep package reproduces the table in [EVIDENCE §3](./EVIDENCE.md); every fixture validates against the schema; each expected result is pinned by hand-derived assertions; one command runs everything, this file's guard included |
+| **T2** Engine | Go. A **pure evaluator** — library and CLI, proposal and snapshots in, result out, no I/O — then the live adapter, the service, and one result screen ordering binary, bucket and exposure reduction by the cost of the smallest passing size | Byte-identical results to the fixtures; agreement with the oracle on generated primitives; replay from stored snapshots reproduces the result byte for byte; T1's adapter deleted |
+| **T3** Checker and consumer | TypeScript checker, run by the result screen on every view. Then a simulated approval gate, then a **testnet** order behind it, with the order envelope the cost bound assumes, and a re-check after any partial fill | Every corrupted certificate and rejected input refused; engine and checker agree on every fixture; anything but `passes` produces zero downstream calls, asserted; a partial fill triggers the re-check, whose result — top up as a new proposal, or unwind — is the consumer's policy and never the gate's |
+| **T4** | Deployer families, the reference registry, the band reduction, the `priceTouch` bound | Each reference string reviewed; Skew's written confirmation, or an explicit assumption with an ID; fixtures for the shrunk middle bucket and for mixed legs on one foreign reference |
+| **T5** | Exact synthesis with infeasibility certificates | The checker verifies optimal structures and certificates alike; every rounded structure re-checked |
+| **T6** | Path reductions: isolated perps | Liquidation semantics reviewed from official text, portfolio margin included; every **[U]** it touches resolved |
+| **T7** | Certificate checker on HyperEVM, gating CoreWriter orders. On-chain the cost is bounded by `limit price × size`, so **no book read is needed** | An outcome limit order through CoreWriter accepted on testnet; the seconds-long delay priced in; stated plainly that an `Ioc` order can fill partly and no on-chain gate can undo that |
 
-T1 precedes T2 because the checker is what makes a live result worth showing. T3
-precedes T4 because a real consumer tests the thesis, and the bucket family means
-T2 already offers an instrument someone could want. **Demand evidence may reorder
-T4–T7 (§8); nothing reorders T1–T3.**
+**Why T1 runs on the oracle.** A contract frozen before it meets live data gets
+frozen wrong, and then implemented wrong three times. The oracle is already exact
+and is the most-verified thing here; `capture.py` and the 18 Sep verifier are
+most of a live path already. So the first tier is a spike that does two jobs:
+it fixes the schema against real catalogues, books and holdings, and it puts a
+real check in front of a qualified user (§8) before two more implementations
+exist. Its adapter is throwaway and T2 deletes it; the oracle stays. The earlier
+order — engine and checker first, "because the checker is what makes a live
+result worth showing" — was wrong: a person needs a correct result, which the
+oracle gives; a *machine* needs the checker, and the machine arrives in T3.
+**Demand evidence may reorder T4–T7 (§8); nothing reorders T1–T3.**
 
-**Three implementations, three languages, no shared code.** The engine in **Go**:
-`math/big.Rat` is in the standard library and parses both number forms of §3
-natively (`"0.17399"`, `"268000/3"` — checked), and it is the owner's most-used
-language. The checker in **TypeScript** with native `BigInt`: the HIP-4 consumers
-are TypeScript (hip4-kit, Outcome-xyz/hip4), and the only SDK that knows
-`outcomeMeta` is `nktkas/hyperliquid`, which the T3 consumer uses for signing.
-The oracle stays **Python**. All three must agree on every fixture. **The server
-computes and the client verifies**: every result screen runs the checker in the
-browser, so the certificate is exercised on every view and the engine never needs
-to ship to the client. Rust was the alternative; its sum types and WASM target
-are real advantages, but the second disappears under this split and the first
-costs third-party crates in the evaluation path.
+**Two full implementations and one oracle, three languages, no shared code.** The
+engine in **Go**: `math/big.Rat` is in the standard library, behind the grammar
+of §3, and Go is the owner's most-used language. The checker in **TypeScript**
+with native `BigInt`: the HIP-4 consumers are TypeScript (hip4-kit,
+Outcome-xyz/hip4), and the only SDK that knows `outcomeMeta` is
+`nktkas/hyperliquid`, which the T3 consumer uses for signing. The oracle stays
+**Python** and stays small: it owns the kernel — failing sets, infima, profiles,
+size windows, the band infimum — and lowering for the canonical families only,
+which is what T1 needs to fix expected results. Its scope stops there. Generated
+cases are compared across all three at the level of the kernel; whole results are
+compared between engine and checker ([ARCHITECTURE §6](./ARCHITECTURE.md)). **The server computes and
+the client verifies**, so the certificate is exercised on every view and the
+engine never ships to the client. Rust was the alternative; its sum types and
+WASM target are real advantages, but the second disappears under this split and
+the first costs third-party crates in the evaluation path.
+
+**Shape of the tree**, and of the system, is in [ARCHITECTURE.md](./ARCHITECTURE.md):
+a proposal written in contract families is *lowered* to four exact primitives and
+a kernel evaluates those; every reduction of §2 is one lowering rule. Evidence
+packages stay in history; a fixture copied from one cites the source file's
+SHA-256, so its provenance is checkable against `085ccfb`.
+
+**Keys.** T3 is the first tier that signs anything. Testnet only, an agent wallet
+only, never a main-wallet key on disk; `ApproveBuilderFee` needs the main wallet
+and is done by hand.
 
 ---
 
@@ -401,8 +462,8 @@ inspection. Record a day with a non-empty window and a day with an empty one.
 Register on colosseum.com; every team member needs an account before submitting.
 **Hyperliquid track only**, whatever the form allows: it is the one chain the
 product integrates, the general pool is automatic, and claiming a track for a
-deferred integration would break §13. Submit the tiers that are complete and verified at the close, with everything else
-labeled proposed. Public repository, permissive license. Scope is never cut to
+deferred integration would break §13. Submit the tiers that are complete and
+verified at the close, with everything else labeled proposed. Public repository, permissive license. Scope is never cut to
 fit the date, and nothing unverified is presented as working.
 
 ---
@@ -413,8 +474,10 @@ Decided 18 Sep, each on retained evidence ([EVIDENCE §1, §4, §6, §7](./EVIDE
 
 | Decision | Outcome | Why |
 |---|---|---|
-| Name | **PayoffBounds** | "Proof" promises what §5 disclaims. "Bound" is the design's own noun — lower envelope, basis bound, bounded legs, "the certificate bounds the engine". The plural kills the reading "bound to pay off" that the singular invites. Free in all eleven namespaces; no product of that name found |
+| Name | **HedgeCheck** | The owner's call, 19 Sep: it says what the product does, and this is a hackathon project. A firm called HedgeCheck LLC exists ([EVIDENCE §7](./EVIDENCE.md)); that was noted on 15 Sep and never examined. If Colosseum asks for a change, PayoffBounds was free everywhere on 18 Sep |
 | Languages | Engine Go · checker TypeScript · oracle Python | §7 |
+| Build order, revised 19 Sep | The contract is frozen on real data, on the oracle, before the engine and the checker exist | §7. It reverses the 18 Sep order |
+| Architecture, 19 Sep | A compiler: proposal → lowered proposal → result. One digital primitive whose endpoint ownership is data. A function never separated from its breakpoints | [ARCHITECTURE.md](./ARCHITECTURE.md). The conformance spine exists in all three languages before any engine does, because that seam was the measured risk |
 | Strike on the deployer path | Owned by neither side | It was never a rule to discover: deployers submit the fraction (§2) |
 | Skew's written confirmation | Wanted, no longer blocking | It upgrades a reference mapping from interpreted to confirmed (§6); T4 proceeds under explicit assumptions without it |
 | Reference identifiers and reviewer | `source:series:statistic[:window]`; the owner reviews, deployers confirm | §6 |
@@ -427,8 +490,7 @@ Still open, and not decidable from this repository:
 | Open | Owner | Blocks |
 |---|---|---|
 | How this entry shares time with Credence (Monad Metropolis, closing 13 Oct) and any other parallel entry | You | Everything |
-| Register `payoffbounds` on GitHub, npm, crates.io, PyPI, `.com` and `.xyz`, and the X handle. A trademark search has not been done | You | Public repository |
-| Testnet: an outcome limit order through CoreWriter action 1; whether any precompile exposes an outcome book; whether builder fees are charged on outcome buys | T3, T7 | T7 |
+| Testnet: an outcome limit order through CoreWriter action 1; whether builder fees are charged on outcome buys. Whether a precompile exposes an outcome book no longer matters (§7, T7) | T3, T7 | T7 |
 
 ---
 
@@ -440,6 +502,10 @@ Still open, and not decidable from this repository:
 - Run a command before documenting it. **Counts and example outputs in documents are printed or checked by a command, never remembered.**
 - Every holder in an example is hypothetical and is called so.
 - **No third-party dependency in the evaluation path of any implementation**: Python `fractions`, Go `math/big`, TypeScript `BigInt`.
+- **One number grammar and one canonical JSON form across every implementation**, fixed by vectors, never by a library's defaults.
+- The evaluator performs no I/O. Adapters fetch and normalize; the evaluator only computes. **Boundaries are held by tests, and a guard is trusted only after it has been seen to fail.**
+- A function is never separated from its breakpoints.
+- A rule that lowers a leg's value is a reduction: it is a lower bound, it says whether it is tight, and it can construct its adverse state.
 - Instance IDs rotate: discover, never hard-code.
 - Snapshots keep response bytes, endpoint, request body, retrieval time, hash.
 - Assumptions and reductions carry IDs and surface in the result.
