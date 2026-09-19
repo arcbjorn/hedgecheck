@@ -143,7 +143,16 @@
         "PATH_RISK"
       ],
       "engine_version": "reference-oracle-3",
-      "ir_digest": "95c3307f8cc8df9105abbc4b7c1774d080a5f4cc544bba0e0a07127f16e6b476",
+      "ir_digest": "615f6d5f2655c0ca2b6620beaef9173003cba0b67bc67a37dfe1564189dce176",
+      "snapshots": [
+        "b9f72f04346322fd2af8270430e8617f903efdb796e190846c4788873c72685d",
+        "e6d25d8f07a008fcb700759bc3e2fb86fcdbaa33e91669e92ffc596617230aaf"
+      ],
+      "capture": {
+        "skew_ms": "-689",
+        "max_skew_ms": "5000",
+        "measured_by": "spike/live.py check"
+      },
       "undecided_intervals": [
         {
           "lower": "60000",
@@ -288,7 +297,16 @@
         "PATH_RISK"
       ],
       "engine_version": "reference-oracle-3",
-      "ir_digest": "93a3642db54e5191bb830177cdd056a89b237757bb654a750c4cb586a6e164ee",
+      "ir_digest": "b5834d571e3bf5a4404df09b9479a1c1d069ca46c64b653115cc813dfabd7f90",
+      "snapshots": [
+        "6671e3764f5bd9ee28978a64b2fa8f8a7db99e39c27abd4673d53784f9311842",
+        "b9f72f04346322fd2af8270430e8617f903efdb796e190846c4788873c72685d"
+      ],
+      "capture": {
+        "skew_ms": "-689",
+        "max_skew_ms": "5000",
+        "measured_by": "spike/live.py check"
+      },
       "undecided_intervals": [
         {
           "lower": "60000",
@@ -326,8 +344,13 @@
     }
   },
   "input_digests": {
-    "binary-no": "cb795b0d4d18ad0536eb44f5998b6eb9a5ce86d0a468ccdab64ea9e3704151e6",
-    "bucket0-yes": "bcab35249c6b98b6645789921b8de7cb2b6124ee82001d74f4aced8104656902"
+    "binary-no": "2597bbb14c713a127621645cde13be2aa5fdeee603a81b627e10a4b02efd947e",
+    "bucket0-yes": "a3e67d18c24d4ff3b4a981a19cdc2c8b9383ca4323182dfd3ab49094e35d55d3"
   },
-  "leg": "binary-no"
+  "leg": "binary-no",
+  "capture": {
+    "skew_ms": "-689",
+    "max_skew_ms": "5000",
+    "measured_by": "spike/live.py check"
+  }
 }
