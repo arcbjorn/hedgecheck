@@ -457,8 +457,38 @@
     "upper_profile": {
       "description": "The best the proposal could be: every reduced leg credited with its full size, which a long fully collateralized token can never exceed. Present only when a reduction applied. A violation the upper profile does not share is undecided, never a failure.",
       "type": "array",
+      "minItems": 1,
       "items": {
-        "$ref": "defs.schema.json#/$defs/interval"
+        "type": "object",
+        "required": [
+          "lower",
+          "lower_inclusive",
+          "upper",
+          "upper_inclusive",
+          "slope",
+          "intercept"
+        ],
+        "properties": {
+          "lower": {
+            "$ref": "defs.schema.json#/$defs/number"
+          },
+          "lower_inclusive": {
+            "type": "boolean"
+          },
+          "upper": {
+            "$ref": "defs.schema.json#/$defs/number"
+          },
+          "upper_inclusive": {
+            "type": "boolean"
+          },
+          "slope": {
+            "$ref": "defs.schema.json#/$defs/number"
+          },
+          "intercept": {
+            "$ref": "defs.schema.json#/$defs/number"
+          }
+        },
+        "additionalProperties": false
       }
     }
   },
