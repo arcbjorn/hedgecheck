@@ -197,7 +197,186 @@ def main():
     for key, value in shown.items():
         check(value == expected[key], f"PLAN.md example field '{key}' equals the verified fixture")
 
-    print(f"{CHECKS} checks passed; vectors, golden table and the PLAN.md example all agree.")
+    replay()
+
+    print(f"{CHECKS} checks passed; vectors, golden table, the PLAN.md example and the 18 September replay all agree.")
+
+
+# --------------------------------------------------------------------------- the 18 September replay
+#
+# Two real hedges, lowered from family-level proposals against the retained catalogue,
+# contexts and books, then evaluated. Every expected value below is transcribed by hand
+# from `git show 085ccfb:research/2026-09-18/verify.py`, where it was hand-derived. None
+# of it comes from lower.py or oracle.evaluate, the code under test here.
+
+REPLAY = PROJECT / "fixtures" / "replay" / "2026-09-18"
+
+RETAINED = {
+    "outcome-meta": "a1692390028fdbfa2f81df15768431347fab42faa8add5e96b24a8813e9f99ac",
+    "meta-and-asset-ctxs": "ed779f0670253d58214b98a18efe79bf08e65312b5364ebd9b49a5fd708ee1d1",
+    "book-3965-no": "d62ba1359f45abc313840ed63deef8d705fcc9bd988ca0f29e9412d8e2cd1ef1",
+    "book-bucket0-3971-yes": "00118f3902a1a8c491d1dd22782527524e71eea68f610918fa5495d5105b1218",
+}
+
+# (premium, pnl at baseline, at strike, at floor, pieces, break-evens)
+PINNED = {
+    "binary": ("645.76904", "-645.76904", "-663.20904", "-999.90904",
+               [("0.1", "-6999.90904"), ("0.1", "-8408.90904")], ["69999.0904", "84089.0904"]),
+    "bucket0": ("160.76676", "-160.76676", "-333.10676", "-999.90676",
+                [("0.1", "-6999.90676"), ("0.1", "-7923.90676")], ["69999.0676", "79239.0676"]),
+}
+STRIKES = {"binary": "77457", "bucket0": "75908"}
+
+
+def replay():
+    import lower
+
+    # ---- the retained bytes are byte-identical to the evidence commit
+    snapshots = {}
+    for stem, expected_hash in RETAINED.items():
+        raw = (REPLAY / f"{stem}.json").read_bytes()
+        digest, document = lower.snapshot(raw)
+        check(digest == expected_hash, f"replay: {stem}.json is the retained response")
+        record = json.loads((REPLAY / f"{stem}.request.json").read_text())
+        check(record["response_sha256"] == digest, f"replay: {stem} matches its own request record")
+        snapshots[digest] = document
+    # A one-cent edit anywhere in a retained file must be detected.
+    tampered = (REPLAY / "book-3965-no.json").read_bytes().replace(b'"0.451"', b'"0.452"', 1)
+    check(sha256(tampered).hexdigest() != RETAINED["book-3965-no"], "replay: a one-cent change in a retained byte is detected")
+
+    registry = {}
+    for path in sorted((PROJECT / "registry").glob("*.json")):
+        entry = canon.loads(path.read_bytes())
+        registry[entry["family"]] = entry
+
+    proposals = {name: canon.loads((REPLAY / f"{name}.proposal.json").read_bytes()) for name in PINNED}
+
+    # ---- on disk the entries are drafts, so the replay refuses rather than answering
+    unreviewed = []
+    for name, proposal in proposals.items():
+        try:
+            lower.lower(proposal, registry, snapshots)
+        except lower.Refused as refusal:
+            check(refusal.code == "UNREVIEWED_FAMILY", f"replay: {name} refuses an unreviewed family")
+            unreviewed.append(name)
+    check(len(unreviewed) == len(proposals), "replay: every on-disk entry is still a draft")
+
+    # ---- the numbers are pinned against in-memory reviewed copies, never written to disk
+    reviewed = {}
+    for family, entry in registry.items():
+        copy = json.loads(json.dumps(entry))
+        copy["review"] = {"state": "reviewed", "drafted_by": "model", "reviewed_by": "owner",
+                          "reviewed_on": "2026-09-19", "digest": canon.semantics_version(entry)}
+        check(canon.reviewed(copy) and canon.semantics_version(copy) == canon.semantics_version(entry),
+              f"replay: the in-memory copy of {family} is reviewed and pins the same semantics")
+        reviewed[family] = copy
+
+    for name, (premium, at_baseline, at_strike, at_floor, pieces, breakevens) in PINNED.items():
+        lowered, versions = lower.lower(proposals[name], reviewed, snapshots)
+        check(not validate_ir(lowered), f"replay: {name} lowers to a document valid against ir.schema.json")
+        check(versions == [canon.semantics_version(reviewed[proposals[name]["legs"][0]["family"]])],
+              f"replay: {name} reports the semantics it used")
+        cost = lowered["legs"][0]["premium"]
+        check(cost["kind"] == "walked" and cost["total"] == premium and cost["snapshot"] == proposals[name]["legs"][0]["acquisition"]["snapshot"],
+              f"replay: {name} cost is the walked total, citing the book it walked")
+
+        result = O.evaluate(lowered)
+        check(result["cost"]["premium"] == premium, f"replay: {name} premium")
+        check(result["cost"]["pnl_at_baseline"] == at_baseline, f"replay: {name} P&L at the baseline")
+        check(result["cost"]["breakevens"] == breakevens, f"replay: {name} break-even prices")
+        check([(p["slope"], p["intercept"]) for p in result["profile"]] == pieces, f"replay: {name} affine pieces")
+        check(result["model_result"] == "passes", f"replay: {name} passes the cap")
+
+        # P&L at the strike and at the floor, evaluated from the profile the result carries.
+        strike, floor = exact.parse(STRIKES[name]), exact.parse(lowered["domain"]["lower"])
+        check(O.fmt(_at(result["profile"], strike)) == at_strike, f"replay: {name} P&L at the strike")
+        check(O.fmt(_at(result["profile"], floor)) == at_floor, f"replay: {name} P&L at the domain floor")
+
+        # The strike is owned by the piece above it: NO pays strictly below the target.
+        lower_piece = [p for p in result["profile"] if exact.parse(p["upper"]) == strike]
+        check(lower_piece and lower_piece[0]["upper_inclusive"] is False, f"replay: {name} strike belongs to the upper piece")
+
+    # ---- a leg whose terms disagree with the catalogue is refused
+    wrong = json.loads(json.dumps(proposals["binary"]))
+    wrong["legs"][0]["terms"]["target_price"] = "77458"
+    try:
+        lower.lower(wrong, reviewed, snapshots)
+        check(False, "replay: refuses terms that disagree with the catalogue")
+    except lower.Refused as refusal:
+        check(refusal.code == "TERMS_MISMATCH", "replay: refuses terms that disagree with the catalogue")
+
+    # ---- a hand-edited baseline cannot reach the kernel
+    wrong = json.loads(json.dumps(proposals["binary"]))
+    wrong["baseline"]["price"] = "77631.5"
+    try:
+        lower.lower(wrong, reviewed, snapshots)
+        check(False, "replay: refuses a baseline the snapshot does not support")
+    except lower.Refused as refusal:
+        check(refusal.code == "BASELINE_MISMATCH", "replay: refuses a baseline the snapshot does not support")
+
+    # ---- a stale pin is refused, and so is a size the displayed book cannot fill
+    wrong = json.loads(json.dumps(proposals["binary"]))
+    wrong["legs"][0]["semantics_version"] = "0" * 64
+    try:
+        lower.lower(wrong, reviewed, snapshots)
+        check(False, "replay: refuses a stale semantics pin")
+    except lower.Refused as refusal:
+        check(refusal.code == "SEMANTICS_PIN_MISMATCH", "replay: refuses a stale semantics pin")
+
+    # An instance the catalogue does not list. The coin is moved with it, so the coin
+    # check passes and the catalogue check is the one that refuses.
+    absent = json.loads(json.dumps(proposals["binary"]))
+    absent["legs"][0]["instance"]["outcome"] = "9999"
+    absent["legs"][0]["instance"]["coin"] = "#99991"
+    try:
+        lower.lower(absent, reviewed, snapshots)
+        check(False, "replay: refuses an instance the cited catalogue does not list")
+    except lower.Refused as refusal:
+        check(refusal.code == "INSTANCE_NOT_IN_CATALOGUE", "replay: refuses an instance the cited catalogue does not list")
+
+    # The coin must encode outcome and side, so a leg cannot be priced on another book.
+    swapped = json.loads(json.dumps(proposals["binary"]))
+    swapped["legs"][0]["instance"]["coin"] = "#39650"
+    try:
+        lower.lower(swapped, reviewed, snapshots)
+        check(False, "replay: refuses a coin that does not encode outcome and side")
+    except lower.Refused as refusal:
+        check(refusal.code == "COIN_MISMATCH", "replay: refuses a coin that does not encode outcome and side")
+
+    # Pricing at displayed asks rests on a dated assumption; without it there is no result.
+    unassumed = json.loads(json.dumps(proposals["binary"]))
+    unassumed["assumptions"] = ["common_reference"]
+    try:
+        lower.lower(unassumed, reviewed, snapshots)
+        check(False, "replay: refuses book pricing without the zero_base_fee assumption")
+    except lower.Refused as refusal:
+        check(refusal.code == "ASSUMPTION_REQUIRED", "replay: refuses book pricing without the zero_base_fee assumption")
+
+    deep = json.loads(json.dumps(proposals["bucket0"]))
+    deep["legs"][0]["size"] = "999999999"
+    try:
+        lower.lower(deep, reviewed, snapshots)
+        check(False, "replay: refuses a size the displayed book cannot fill")
+    except lower.Refused as refusal:
+        check(refusal.code == "INSUFFICIENT_DEPTH", "replay: refuses a size the displayed book cannot fill")
+
+    print(f"replay: {len(proposals)} real proposals refused as drafts on disk; "
+          f"pinned values verified against in-memory reviewed copies")
+
+
+def _at(profile, price):
+    """P&L at `price`, from the piece that owns it."""
+    for piece in profile:
+        low, high = exact.parse(piece["lower"]), exact.parse(piece["upper"])
+        if (low < price < high or (price == low and piece["lower_inclusive"]) or (price == high and piece["upper_inclusive"])):
+            return exact.parse(piece["slope"]) * price + exact.parse(piece["intercept"])
+    raise AssertionError(f"no piece owns {price}")
+
+
+def validate_ir(document):
+    sys.path.insert(0, str(PROJECT / "tools"))
+    import validate
+    return validate.valid(document, "ir.schema.json")
 
 
 if __name__ == "__main__":
