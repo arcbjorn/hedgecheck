@@ -188,7 +188,8 @@
     "comparisons": {
       "type": "object",
       "required": [
-        "no_hedge"
+        "no_hedge",
+        "smallest_reduction"
       ],
       "properties": {
         "no_hedge": {
@@ -221,6 +222,58 @@
               "items": {
                 "$ref": "defs.schema.json#/$defs/interval"
               }
+            },
+            "proposal_better": {
+              "type": "array",
+              "items": {
+                "$ref": "defs.schema.json#/$defs/interval"
+              }
+            },
+            "proposal_worse": {
+              "type": "array",
+              "items": {
+                "$ref": "defs.schema.json#/$defs/interval"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "smallest_reduction": {
+          "description": "The smallest exposure reduction meeting the same clauses: keep this much, sell the rest at the baseline, hold the cash. It costs no premium, so it is the benchmark a paid hedge has to beat.",
+          "type": "object",
+          "required": [
+            "keep_quantity",
+            "sell_quantity",
+            "sell_at",
+            "worst_case",
+            "proposal_better",
+            "proposal_worse"
+          ],
+          "properties": {
+            "keep_quantity": {
+              "$ref": "defs.schema.json#/$defs/number"
+            },
+            "sell_quantity": {
+              "$ref": "defs.schema.json#/$defs/number"
+            },
+            "sell_at": {
+              "$ref": "defs.schema.json#/$defs/number"
+            },
+            "worst_case": {
+              "type": "object",
+              "required": [
+                "pnl",
+                "price"
+              ],
+              "properties": {
+                "pnl": {
+                  "$ref": "defs.schema.json#/$defs/number"
+                },
+                "price": {
+                  "$ref": "defs.schema.json#/$defs/number"
+                }
+              },
+              "additionalProperties": false
             },
             "proposal_better": {
               "type": "array",
@@ -277,6 +330,135 @@
       "type": "array",
       "items": {
         "$ref": "defs.schema.json#/$defs/sha256"
+      }
+    },
+    "size_windows": {
+      "description": "For each book-walked leg, the sizes that would have met every clause on the book the walk saw. Exact bounds, the whole-contract window inside them, and which site binds each end. An empty window at a flat price carries the Farkas weights that prove no size works.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "leg",
+          "status",
+          "binding"
+        ],
+        "properties": {
+          "leg": {
+            "$ref": "defs.schema.json#/$defs/leg_id"
+          },
+          "status": {
+            "enum": [
+              "nonempty",
+              "empty"
+            ]
+          },
+          "lower_bound": {
+            "$ref": "defs.schema.json#/$defs/number"
+          },
+          "upper_bound": {
+            "$ref": "defs.schema.json#/$defs/number"
+          },
+          "smallest": {
+            "$ref": "defs.schema.json#/$defs/number"
+          },
+          "largest": {
+            "$ref": "defs.schema.json#/$defs/number"
+          },
+          "binding": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "price",
+                "side"
+              ],
+              "properties": {
+                "price": {
+                  "$ref": "defs.schema.json#/$defs/number"
+                },
+                "side": {
+                  "enum": [
+                    "at",
+                    "above",
+                    "below"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "certificate": {
+            "type": "object",
+            "required": [
+              "kind",
+              "weights"
+            ],
+            "properties": {
+              "kind": {
+                "const": "farkas"
+              },
+              "weights": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                  "$ref": "defs.schema.json#/$defs/number"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false,
+        "dependentRequired": {
+          "smallest": [
+            "largest"
+          ],
+          "largest": [
+            "smallest"
+          ],
+          "lower_bound": [
+            "upper_bound"
+          ],
+          "upper_bound": [
+            "lower_bound"
+          ]
+        }
+      }
+    },
+    "reductions": {
+      "description": "Every lowering rule that lowered a leg's value, copied from the lowered proposal so the result is self-contained. A rule that is not tight can never produce a failing interval.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "leg",
+          "rule",
+          "tight",
+          "reason_code"
+        ],
+        "properties": {
+          "leg": {
+            "$ref": "defs.schema.json#/$defs/leg_id"
+          },
+          "rule": {
+            "$ref": "defs.schema.json#/$defs/slug"
+          },
+          "tight": {
+            "type": "boolean"
+          },
+          "reason_code": {
+            "$ref": "defs.schema.json#/$defs/code"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "upper_profile": {
+      "description": "The best the proposal could be: every reduced leg credited with its full size, which a long fully collateralized token can never exceed. Present only when a reduction applied. A violation the upper profile does not share is undecided, never a failure.",
+      "type": "array",
+      "items": {
+        "$ref": "defs.schema.json#/$defs/interval"
       }
     }
   },
