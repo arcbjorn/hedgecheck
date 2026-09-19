@@ -3,7 +3,7 @@
   "$id": "registry-entry.schema.json",
   "title": "Semantics registry entry",
   "$comment": "DRAFT. Frozen as schema v1 only at T1's gate (PLAN.md section 7), after the contract has met live data. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored.",
-  "description": "One reviewed reading of one contract family, as data. Lowering refuses an entry whose review state is not 'reviewed'.",
+  "description": "One reviewed reading of one contract family, as data. semantics_version is the canonical digest of the entry WITHOUT its 'review' key, so review state and pins are independent. An entry counts as reviewed only when review.state is 'reviewed' AND review.digest equals its current semantics_version; editing the semantics therefore silently un-reviews it. Lowering refuses an entry that is not reviewed by that rule.",
   "type": "object",
   "required": [
     "schema_version",
@@ -68,9 +68,18 @@
         },
         "reviewed_on": {
           "$ref": "defs.schema.json#/$defs/date"
+        },
+        "digest": {
+          "$ref": "defs.schema.json#/$defs/sha256"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "dependentRequired": {
+        "digest": [
+          "reviewed_by",
+          "reviewed_on"
+        ]
+      }
     },
     "sources": {
       "type": "array",
