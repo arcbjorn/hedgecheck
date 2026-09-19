@@ -63,6 +63,39 @@ func TestPurePackagesStayPure(t *testing.T) {
 	}
 }
 
+// math/big mutates its receivers. Exactly one package may hold that, and it wraps it
+// in an immutable value type; everywhere else a shared number would be a silent wrong
+// answer rather than a crash.
+func TestOnlyExactImportsMathBig(t *testing.T) {
+	checked := 0
+	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
+			return err
+		}
+		slashed := filepath.ToSlash(path)
+		if strings.HasPrefix(slashed, "exact/") {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		checked++
+		for _, spec := range file.Imports {
+			if strings.Trim(spec.Path.Value, `"`) == "math/big" {
+				t.Errorf("%s imports math/big; only exact may, and it hands out immutable values", slashed)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked == 0 {
+		t.Fatal("no files outside exact were checked; the test is not looking where it should")
+	}
+}
+
 func TestNoThirdPartyModules(t *testing.T) {
 	raw, err := os.ReadFile("go.mod")
 	if err != nil {
