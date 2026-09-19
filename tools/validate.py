@@ -221,46 +221,24 @@ def main():
         "engine_version": "reference-oracle-3",
     }
     check(not valid(comparison, "comparison.schema.json"), "a comparison of two results is valid")
-    refused = [
-        ("ir.schema.json", mutate(lowered, ["legs", 0, "size"], "1e3"), "an exponent"),
-        ("ir.schema.json", mutate(lowered, ["legs", 0, "size"], "5\n"), "a trailing newline, which Python's own $ would let through"),
-        ("ir.schema.json", mutate(lowered, ["legs", 0, "size"], "0x10"), "a hexadecimal number"),
-        ("ir.schema.json", mutate(lowered, ["domain", "lower"], "05"), "a leading zero"),
-        ("ir.schema.json", mutate(lowered, ["legs", 0, "pays_on", "upper_inclusive"]), "a bound that does not say who owns it"),
-        ("ir.schema.json", mutate(lowered, ["legs", 0, "pays_on"], {}), "an indicator that pays nowhere in particular"),
-        ("ir.schema.json", mutate(lowered, ["baseline"]), "a missing baseline"),
-        ("ir.schema.json", mutate(lowered, ["baseline", "kind"], "strike_reference"), "an unknown baseline kind"),
-        ("ir.schema.json", mutate(lowered, ["objective"], []), "an empty objective"),
-        ("ir.schema.json", mutate(lowered, ["breakpoints"], ["90000"]), "breakpoints passed beside the function"),
-        ("ir.schema.json", mutate(lowered, ["objective_valuation_time"], "2026-01-02T06:00:00+00:00"), "a time that is not UTC 'Z'"),
-        ("ir.schema.json", mutate(lowered, ["legs", 0, "premium"], {"kind": "walked", "total": "645.76904", "path": "direct_book"}), "a walked cost that does not cite the book it walked"),
-        ("ir.schema.json", mutate(lowered, ["legs", 0, "premium"], {"kind": "walked", "total": "645.76904", "path": "guessed", "snapshot": "d62ba1359f45abc313840ed63deef8d705fcc9bd988ca0f29e9412d8e2cd1ef1"}), "a walked cost on an unnamed acquisition path"),
-        ("ir.schema.json", mutate(lowered, ["legs", 0, "premium"], {"kind": "walked", "price": "0.2", "path": "direct_book", "snapshot": "d62ba1359f45abc313840ed63deef8d705fcc9bd988ca0f29e9412d8e2cd1ef1"}), "a walked cost carrying a per-unit price instead of a total"),
-        ("result.schema.json", mutate(result, ["model_result"], "unproven"), "an unknown verdict"),
-        ("result.schema.json", mutate(result, ["reason_codes"], ["loss_bound_exceeded"]), "a lowercase reason code"),
-        ("result.schema.json", mutate(result, ["failing_intervals", 0, "witness"]), "a failing interval without a witness"),
-        ("result.schema.json", mutate(result, ["profile", 0, "lower_inclusive"]), "a piece without endpoint ownership"),
-        ("result.schema.json", mutate(result, ["ir_digest"], "09B3"), "a malformed digest"),
-        ("registry-entry.schema.json", mutate(entry, ["review", "state"], "approved"), "an unknown review state"),
-        ("registry-entry.schema.json", mutate(entry, ["sources"], []), "an entry without a source"),
-        ("registry-entry.schema.json", mutate(entry, ["evidence", 0, "label"], "verified"), "an evidence label outside V, T, U"),
-        ("registry-entry.schema.json", mutate(entry, ["review", "digest"], canon.semantics_version(entry)), "a review digest without a reviewer and a date"),
-        ("ir.schema.json", mutate(lowered, ["reductions"], [{"leg": "put", "rule": "horizon_mismatch", "reason_code": "LEG_WORST_CASED_HORIZON"}]), "a reduction that does not say whether it is tight"),
-        ("ir.schema.json", mutate(lowered, ["reductions"], [{"leg": "put", "rule": "horizon_mismatch", "tight": "yes", "reason_code": "LEG_WORST_CASED_HORIZON"}]), "a tightness that is a string rather than a boolean"),
-        ("result.schema.json", mutate(result, ["size_windows"], [{"leg": "put", "status": "nonempty", "binding": [], "smallest": "1409"}]), "a size window with a smallest size but no largest"),
-        ("result.schema.json", mutate(result, ["size_windows"], [{"leg": "put", "status": "maybe", "binding": []}]), "a size window that is neither empty nor nonempty"),
-        ("result.schema.json", mutate(result, ["size_windows"], [{"leg": "put", "status": "empty", "binding": [{"price": "60000", "side": "near"}]}]), "a binding site that is not at, above or below a price"),
-        ("result.schema.json", mutate(result, ["size_windows"], [{"leg": "put", "status": "empty", "binding": [], "certificate": {"kind": "farkas", "weights": ["0.8"]}}]), "an infeasibility certificate with one weight instead of two"),
-        ("result.schema.json", mutate(result, ["comparisons", "smallest_reduction", "keep_quantity"]), "an alternative that does not say how much to keep"),
-        ("result.schema.json", mutate(result, ["comparisons", "smallest_reduction"]), "a result without the no-premium alternative"),
-        ("result.schema.json", mutate(result, ["reductions"], [{"leg": "put", "rule": "horizon_mismatch", "tight": True}]), "a reduction in a result without its reason code"),
-        ("comparison.schema.json", mutate(comparison, ["candidates"], comparison["candidates"][:1]), "a comparison of one candidate"),
-        ("comparison.schema.json", mutate(comparison, ["candidates", 0, "ir_digest"], "not-a-digest"), "a candidate cited by something other than a digest"),
-        ("comparison.schema.json", mutate(comparison, ["ranked_by"], "cheapest"), "an unknown ranking rule"),
-        ("comparison.schema.json", mutate(comparison, ["shared"]), "a comparison that does not state the terms its candidates share"),
-    ]
-    for schema, document, what in refused:
-        check(valid(document, schema), f"refuses {what}")
+    # ---- "valid" means something: every document under fixtures/rejected/ must be refused
+    #
+    # These live as files rather than as mutations in this source, so the Go decoder and
+    # the TypeScript checker are held to the same documents. A mutation only Python can
+    # run proves only that Python refuses it.
+    rejected_root = PROJECT / "fixtures" / "rejected"
+    check(rejected_root.is_dir(), "the rejected fixtures exist")
+    refused = 0
+    for directory in sorted(path for path in rejected_root.iterdir() if path.is_dir()):
+        schema = f"{directory.name}.schema.json"
+        check(schema in names, f"{directory.name}/ names a schema that exists")
+        for path in sorted(directory.glob("*.json")):
+            why = (path.with_suffix(".why")).read_text().strip()
+            check(why, f"{directory.name}/{path.stem} says why it must be refused")
+            document = json.loads(path.read_text())
+            check(valid(document, schema), f"refuses {why} ({directory.name}/{path.stem})")
+            refused += 1
+    check(refused >= 40, f"only {refused} rejected documents; the set is meant to be broad")
 
     # ---- "reviewed with a stale digest" is a cross-field rule no schema keyword can express
     genuine = mutate(entry, ["review"], {"state": "reviewed", "drafted_by": "model", "reviewed_by": "owner",
@@ -355,7 +333,7 @@ def main():
     for top in ("oracle", "engine", "checker", "tools", "schema", "spike", "research"):
         check(f"| `{top}/` |" in readme, f"README's layout table has a row for {top}/")
 
-    print(f"{CHECKS} checks passed; {len(documents)} contract documents valid, {len(refused)} mutations refused.")
+    print(f"{CHECKS} checks passed; {len(documents)} contract documents valid, {refused} documents refused.")
 
 
 if __name__ == "__main__":
