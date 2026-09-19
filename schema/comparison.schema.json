@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "comparison.schema.json",
+  "title": "Comparison of independent results",
+  "$comment": "DRAFT. Frozen as schema v1 only at T1's gate (PLAN.md section 7). Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored.",
+  "description": "Ranks N proposals that were each evaluated on their own. It cites results by digest and never restates their numbers, so a result stays about one proposal and stays independently checkable: a checker re-verifies each result, then re-derives this ranking from them. Only results sharing an objective, domain, baseline and valuation time may be compared, and those shared terms are repeated here so a checker can confirm it without opening the results.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "shared",
+    "candidates",
+    "ranked_by",
+    "engine_version"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "shared": {
+      "description": "The terms every candidate must agree on for the ranking to mean anything.",
+      "type": "object",
+      "required": [
+        "domain",
+        "baseline",
+        "objective",
+        "objective_valuation_time"
+      ],
+      "properties": {
+        "domain": {
+          "$ref": "defs.schema.json#/$defs/domain"
+        },
+        "baseline": {
+          "$ref": "defs.schema.json#/$defs/baseline"
+        },
+        "objective": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "defs.schema.json#/$defs/clause"
+          }
+        },
+        "objective_valuation_time": {
+          "$ref": "defs.schema.json#/$defs/time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": [
+          "label",
+          "ir_digest",
+          "model_result",
+          "cost"
+        ],
+        "properties": {
+          "label": {
+            "$ref": "defs.schema.json#/$defs/slug"
+          },
+          "ir_digest": {
+            "$ref": "defs.schema.json#/$defs/sha256"
+          },
+          "model_result": {
+            "enum": [
+              "passes",
+              "fails",
+              "needs_review"
+            ]
+          },
+          "cost": {
+            "$ref": "defs.schema.json#/$defs/number"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "ranked_by": {
+      "description": "Only passing candidates are ranked, cheapest first. A candidate that fails or needs review has no place in an ordering by cost, because its cost bought something the model has not established.",
+      "enum": [
+        "cost_of_smallest_passing_size"
+      ]
+    },
+    "ranking": {
+      "description": "Labels of passing candidates, cheapest first. Absent when none passes.",
+      "type": "array",
+      "items": {
+        "$ref": "defs.schema.json#/$defs/slug"
+      }
+    },
+    "engine_version": {
+      "$ref": "defs.schema.json#/$defs/text"
+    }
+  },
+  "additionalProperties": false
+}
