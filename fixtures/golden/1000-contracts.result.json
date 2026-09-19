@@ -155,5 +155,6 @@
     "PATH_RISK"
   ],
   "engine_version": "reference-oracle-3",
-  "ir_digest": "09b39606fddeb6e64d48090b8025cfdcce51c215c1128fa340091595d26b1264"
+  "ir_digest": "09b39606fddeb6e64d48090b8025cfdcce51c215c1128fa340091595d26b1264",
+  "snapshots": []
 }
