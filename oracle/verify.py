@@ -116,6 +116,24 @@ def main():
           "a strike in the outer third of the domain is evaluated correctly; nothing can omit it")
     check("breakpoints" not in O.below.__code__.co_varnames and "breakpoints" not in O.infimum.__code__.co_varnames and "breakpoints" not in O.profile.__code__.co_varnames,
           "no evaluation function accepts breakpoints")
+
+    # ---- an attaining price is a price the function actually attains
+    #
+    # A flat open piece attains its value everywhere inside, but at neither excluded end.
+    # Reporting the excluded end would hand a witness a price where the payoff is higher,
+    # which is inadmissible. The rule: the smallest attaining price when the attaining set
+    # has a minimum, otherwise the midpoint of the first attaining open piece.
+    for label, probe in (
+        ("flat above an owned strike", O.indicator(F(700), upper=F(90000), upper_inclusive=True) + O.cash(-F(100))),
+        ("flat below an owned strike", O.indicator(F(700), lower=F(90000), lower_inclusive=True) + O.cash(-F(100))),
+        ("flat between two owned strikes", O.digital_range(F(700), F(80000), F(90000)) + O.cash(-F(100))),
+        ("unowned strike", O.indicator(F(700), upper=F(90000), upper_inclusive=False) + O.indicator(F(700), lower=F(90000), lower_inclusive=False)),
+        ("sloped", O.linear(F("0.1"), F(100000))),
+    ):
+        value, attained, where = O.infimum(probe, L, U)
+        check(L <= where <= U, f"infimum: {label} reports a price inside the domain")
+        if attained:
+            check(probe(where) == value, f"infimum: {label} reports a price the function attains")
     # The probe is a tripwire for a constructor that hides a kink. It fires only between its probe points.
     hidden_mid = O.Fn([], lambda s: F(1) if s < 90000 else F(0))
     hidden_edge = O.Fn([], lambda s: F(1) if s < 65000 else F(0))

@@ -167,17 +167,37 @@ def profile(fn, lower, upper, cuts=()):
 
 
 def infimum(fn, lower, upper):
-    """(infimum, attained, location). Location is the smallest attaining price, else the limit point."""
+    """(infimum, attained, location).
+
+    `location` is a price the function **actually attains** whenever `attained` is
+    true: the smallest such price when the attaining set has a minimum, otherwise the
+    midpoint of the first attaining open piece. An open piece's excluded endpoints are
+    limit points, not members — reporting one would hand a witness a price where the
+    payoff is higher than the value claimed, which is inadmissible.
+
+    When the infimum is only approached, `attained` is false and `location` is the
+    limit point it is approached at.
+    """
     best, attained, where = None, False, None
+
+    def offer(value, is_attained, location):
+        nonlocal best, attained, where
+        if best is None or value < best or (value == best and is_attained and not attained):
+            best, attained, where = value, is_attained, location
+
     for atom in atoms(fn, lower, upper):
         if atom[0] == "point":
-            candidates = [(atom[2], True, atom[1])]
-        else:
-            _, lo, hi, slope, intercept = atom
-            candidates = [(slope * lo + intercept, slope == 0, lo), (slope * hi + intercept, slope == 0, hi)]
-        for value, is_attained, location in candidates:
-            if best is None or value < best or (value == best and is_attained and not attained):
-                best, attained, where = value, is_attained, location
+            offer(atom[2], True, atom[1])
+            continue
+        _, lo, hi, slope, intercept = atom
+        if slope == 0:
+            # Flat and open: every interior price attains the value, no endpoint does.
+            # The attaining set has no minimum, so the midpoint stands for it.
+            offer(intercept + slope * lo, True, (lo + hi) / 2)
+            continue
+        # Sloped: the value is approached at an excluded end and never attained there.
+        offer(slope * lo + intercept, False, lo)
+        offer(slope * hi + intercept, False, hi)
     return best, attained, where
 
 
