@@ -223,6 +223,45 @@ def determinism():
         check(left["input_digest"] == right["input_digest"], f"spike: {left['leg']['id']} has a stable input_digest")
 
 
+def replay_offline():
+    """The retained 19 September run replays byte-identically, offline.
+
+    The `replay` command is the claim that a stored result can be recomputed from
+    stored bytes alone. Until now that rested on one manual run; this exercises the
+    same pure path inside `make check`, so a regression is visible immediately.
+    """
+    retained = PROJECT / "fixtures" / "replay" / "2026-09-19"
+    runs = sorted(retained.glob("*.run.json"))
+    check(runs, "spike: a retained live run exists to replay")
+    for path in runs:
+        document = json.loads(path.read_text())
+        raw, digests = {}, document["digests"]
+        for name, digest in digests.items():
+            data = (retained / f"{name}.json").read_bytes()
+            check(sha256(data).hexdigest() == digest,
+                  f"spike: {name}.json is the byte the run cites")
+            raw[digest] = data
+        options = dict(document["options"])
+        for key in ("quantity", "cap", "floor", "ceiling", "baseline"):
+            options[key] = exact.parse(options[key])
+        capture = checking.parse_capture(raw, digests, document["expiry"])
+        evaluated = checking.evaluate_candidates(capture, options,
+                                                 provenance=document.get("capture"))
+        leg_id = document["leg"]
+        row = next(r for r in evaluated["rows"] if r["leg"]["id"] == leg_id)
+        before = canon.canonical(document["results"][leg_id])
+        after = canon.canonical(row["result"])
+        check(before == after, f"spike: replaying {leg_id} reproduces the stored result byte for byte")
+        check(row["input_digest"] == document["input_digests"][leg_id],
+              f"spike: replaying {leg_id} reproduces its input_digest")
+        # A single changed byte must break the replay, or the check proves nothing.
+        tampered = dict(raw)
+        book = digests[leg_id]
+        tampered[book] = raw[book].replace(b'"sz"', b'"sZ"', 1)
+        check(sha256(tampered[book]).hexdigest() != book,
+              f"spike: a one-byte change to {leg_id}'s book changes its hash")
+
+
 def network_isolation():
     """All network code lives in one module, checked on the import graph, not on prose.
 
@@ -259,6 +298,7 @@ def network_isolation():
 def main():
     no_literal_instruments()
     discovery_offline()
+    replay_offline()
     evaluation_offline()
     determinism()
     network_isolation()

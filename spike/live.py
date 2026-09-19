@@ -170,7 +170,11 @@ def command_check(args):
     options = {"underlying": args.underlying, "quantity": args.quantity, "cap": args.cap,
                "floor": args.floor, "ceiling": args.ceiling, "baseline": baseline,
                "baseline_kind": baseline_kind, "valuation_time": valuation_time}
-    evaluated = checking.evaluate_candidates(capture, options)
+    # The capturer asserts what it measured. A pure evaluator cannot re-derive this,
+    # so the result records the claim rather than establishing it.
+    provenance = {"skew_ms": str(worst_skew), "max_skew_ms": str(MAX_SKEW_MS),
+                  "measured_by": "spike/live.py check"}
+    evaluated = checking.evaluate_candidates(capture, options, provenance=provenance)
     reduction = checking.reduction_row(options)
 
     print(f"captured {len(digests)} snapshots, {client.spent} requests")
@@ -186,7 +190,7 @@ def command_check(args):
     print_table(evaluated, reduction, options)
     print()
 
-    document = checking.run_document(capture, evaluated, options, skew)
+    document = checking.run_document(capture, evaluated, options, skew, provenance)
     for row in evaluated["rows"]:
         if row.get("input_digest"):
             store.put_run(row["input_digest"], dict(document, leg=row["leg"]["id"]))
@@ -209,7 +213,8 @@ def command_replay(args):
     options = dict(document["options"])
     for key in ("quantity", "cap", "floor", "ceiling", "baseline"):
         options[key] = exact.parse(options[key])
-    evaluated = checking.evaluate_candidates(capture, options)
+    stored = document.get("capture")
+    evaluated = checking.evaluate_candidates(capture, options, provenance=stored)
 
     leg_id = document["leg"]
     row = next(row for row in evaluated["rows"] if row["leg"]["id"] == leg_id)

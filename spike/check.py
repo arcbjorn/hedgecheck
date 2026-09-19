@@ -57,7 +57,8 @@ def smallest_passing_size(leg, book, quantity, baseline, cap, floor, ceiling, st
 
 
 def build_proposal(leg, size, digests, quantity, baseline, baseline_kind, cap,
-                   floor, ceiling, valuation_time, observation_time, semantics_version):
+                   floor, ceiling, valuation_time, observation_time, semantics_version,
+                   capture=None):
     """One proposal, in terms of families and instances, citing snapshots by hash."""
     terms = dict(leg["terms"], expiry=observation_time)
     baseline_block = {"kind": baseline_kind, "price": exact.format(baseline)}
@@ -65,7 +66,7 @@ def build_proposal(leg, size, digests, quantity, baseline, baseline_kind, cap,
         baseline_block["source"] = {"snapshot": digests["contexts"], "coin": leg["terms"]["underlying"]}
     else:
         baseline_block["label"] = "operator-supplied"
-    return {
+    out = {
         "schema_version": SCHEMA_VERSION,
         "units": UNITS,
         "domain": {"lower": exact.format(floor), "upper": exact.format(ceiling)},
@@ -88,6 +89,9 @@ def build_proposal(leg, size, digests, quantity, baseline, baseline_kind, cap,
         "other_costs": "0",
         "assumptions": ["common_reference", "zero_base_fee"],
     }
+    if capture:
+        out["capture"] = capture
+    return out
 
 
 def strike_of(leg, terms):
@@ -105,7 +109,7 @@ def registry(entries_dir=None):
     return entries
 
 
-def evaluate_candidates(capture, options, entries=None):
+def evaluate_candidates(capture, options, entries=None, provenance=None):
     """Size, build, lower and evaluate every candidate in one captured set.
 
     `capture` carries the parsed snapshots and their digests. Returns one row per
@@ -137,7 +141,8 @@ def evaluate_candidates(capture, options, entries=None):
             raise Unusable(f"the registry has no entry for {leg['family']}")
         proposal = build_proposal(leg, size, capture["digests"], quantity, baseline,
                                   options["baseline_kind"], cap, floor, ceiling,
-                                  valuation_time, observation_time, canon.semantics_version(entry))
+                                  valuation_time, observation_time, canon.semantics_version(entry),
+                                  provenance)
         lowered, versions = lowering.lower(proposal, entries, capture["snapshots"])
         row["proposal"] = proposal
         row["lowered"] = lowered
@@ -159,7 +164,7 @@ def reduction_row(options):
             "pnl_at_baseline": kept(baseline), "fn": kept}
 
 
-def run_document(capture, evaluated, options, skew):
+def run_document(capture, evaluated, options, skew, provenance=None):
     """Everything a replay needs, and nothing a replay would have to fetch."""
     return {
         "schema_version": SCHEMA_VERSION,
@@ -170,6 +175,7 @@ def run_document(capture, evaluated, options, skew):
         "valuation_time": evaluated["valuation_time"],
         "digests": capture["digests"],
         "skew": skew,
+        "capture": provenance,
         "results": {row["leg"]["id"]: row["result"] for row in evaluated["rows"] if row.get("result")},
         "input_digests": {row["leg"]["id"]: row["input_digest"] for row in evaluated["rows"] if row.get("input_digest")},
     }
