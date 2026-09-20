@@ -346,6 +346,10 @@ checker in the browser on every view; a consumer runs it before it signs.
 | The capture assertion keeps its sign | `spike/verify.py` — the recorded worst skew is re-measured from the retained bytes. The bound is about distance from zero; the record keeps the sign, because it says which clock was ahead, and it feeds the input digest |
 | Only `cmd` and `service` may reach the network | `engine/arch_test.go` — an import scan for `engine/adapter`, so "pure" cannot come to depend on what the adapter happens to do |
 | Only the adapter's own package can redirect it | `adapter/hyperliquid` — the endpoint field is unexported and empty by default, so a zero client calls the real venue; a request type outside the closed set never opens a connection |
+| A name is refused as a name, before it reaches a path | `service` — every path parameter is matched against its pattern and answered **400**, not 404. A 404 is what a handler with no validation also returns, so the status is what proves the check happened. Percent-encoded traversal is used in the test, because a plain `../..` is cleaned away by the client and the mux and never reaches a handler |
+| A refusal never names a path on this machine | `service` — the shape of the message is asserted across every error route, so a new route that forwards a raw `os` error is caught too |
+| A refusal is not a verdict | `service` — a proposal that cannot be lowered is 422 with its refusal **class**, and is never readable as a result. Missing evidence and a lowering refusal are separate routes and separately tested |
+| Concurrent writes agree and are served whole | `service` — twelve simultaneous posts of one proposal under `-race` must file one location and identical bytes; the store renames into place, so a reader never sees a partial result |
 | The validator's one deviation from JSON Schema 2020-12 stays deliberate | `tools/validate.py` — 1.0 is not an integer here, and `integer` is asserted to appear only in `snapshot-record` |
 
 Each guard was run against a deliberate violation before it was trusted.
@@ -366,8 +370,8 @@ registry/   semantics entries as data: recurring.priceBinary, recurring.priceBuc
 oracle/     exact.py  canon.py  oracle.py (kernel, evaluate)  lower.py  verify.py
 engine/     exact/  canon/  arch_test.go          ── built
             pwa/  doc/  lower/  evaluate/  discover/  run/  ── pure
-            adapter/hyperliquid/  store/  cmd/hedgecheck/   ── the only impure packages
-            service/                                        ── T2, not yet built
+            adapter/hyperliquid/  store/  service/  cmd/hedgecheck/
+                                                            ── the only impure packages
 checker/    src/exact.ts  src/canon.ts            ── built
             src/pwa.ts  src/lower.ts  src/verify.ts ── T3
 tools/      make_vectors.py  validate.py
@@ -376,9 +380,14 @@ tools/      make_vectors.py  validate.py
 **Engine (T2).** The evaluator is a library and a CLI — proposal, snapshots and
 registry in; result out; no I/O. Around it: the Hyperliquid adapter discovers
 instances and retains responses with their records; the store is
-content-addressed files, `snapshots/<sha256>` and
-`results/<input_digest>/<engine_version>.json`, and gains an index only when a
-query needs one; the service is three reads and one write, all idempotent:
+content-addressed files, `snapshots/<sha256>`,
+`results/<input_digest>/<engine_version>.json` and `runs/<input_digest>.json`, and
+gains an index only when a query needs one. The engine version is part of the
+result path rather than something that overwrites: two engines may answer the same
+question, and a store keeping only the newest would silently lose the comparison.
+Every name is matched against its pattern **before** it becomes a path, so a
+traversal is refused as a name rather than sanitised as a path. The service is
+three reads and one write, all idempotent:
 `POST /v1/checks`, `GET /v1/checks/{input_digest}`, `GET /v1/snapshots/{sha256}`,
 `GET /v1/registry/{semantics_version}` — everything the browser needs to verify
 without trusting the server.
