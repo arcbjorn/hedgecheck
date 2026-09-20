@@ -208,3 +208,62 @@ func TestWritesLeaveNoTemporaryFiles(t *testing.T) {
 		}
 	}
 }
+
+// A result is filed under its input digest AND the engine that produced it, so two
+// engines answering the same question both survive.
+func TestResultsAreKeptPerEngineVersion(t *testing.T) {
+	store := New(t.TempDir())
+	digest := strings.Repeat("a", 64)
+	if err := store.PutResult(digest, "go-engine-1", []byte(`{"v":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutResult(digest, "py-oracle-1", []byte(`{"v":2}`)); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.Result(digest, "go-engine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != `{"v":1}` {
+		t.Errorf("go-engine-1 result is %q", first)
+	}
+	second, err := store.Result(digest, "py-oracle-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(second) != `{"v":2}` {
+		t.Errorf("a second engine overwrote the first: %q", second)
+	}
+	versions, err := store.ResultVersions(digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"go-engine-1", "py-oracle-1"}
+	if len(versions) != len(want) {
+		t.Fatalf("got %v, want %v", versions, want)
+	}
+	for index := range want {
+		if versions[index] != want[index] {
+			t.Errorf("versions are %v, want %v sorted", versions, want)
+		}
+	}
+}
+
+// An engine version reaches a path, so it is validated as strictly as a digest.
+func TestEngineVersionsAreValidatedBeforeTheyReachAPath(t *testing.T) {
+	store := New(t.TempDir())
+	digest := strings.Repeat("a", 64)
+	bad := []string{
+		"../../etc/passwd", "", "/absolute", "go-engine-1/../../escaped",
+		"Go-Engine-1", "1-leading-digit", strings.Repeat("v", 65),
+		"go engine 1", "go.engine.1",
+	}
+	for _, version := range bad {
+		if err := store.PutResult(digest, version, []byte("{}")); err == nil {
+			t.Errorf("PutResult accepted %q as an engine version", version)
+		}
+		if _, err := store.Result(digest, version); err == nil {
+			t.Errorf("Result accepted %q as an engine version", version)
+		}
+	}
+}
