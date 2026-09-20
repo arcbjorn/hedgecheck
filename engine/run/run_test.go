@@ -357,3 +357,76 @@ func retrievedAtForTest(record []byte) (int64, bool) {
 	}
 	return moment.UnixMilli(), true
 }
+
+// A cap the unhedged position already meets needs no hedge, and a zero-size leg is
+// not a hedge: it is the unhedged position wearing a proposal's clothes.
+//
+// Found live on 20 September. With quantity 0.1, a baseline of 80247 and a floor of
+// 60000, the unhedged worst case is -2024.70. Against a cap of 2100 that already
+// passes, so the smallest feasible whole size is 0 -- and the engine built a proposal
+// with a zero-size leg, which lowering then refused with SIZE_NOT_WHOLE. The refusal
+// was correct and the proposal should never have been built.
+func TestACapTheHoldingAlreadyMeetsNeedsNoHedge(t *testing.T) {
+	options := spikeOptions(t)
+	// Chosen so the unhedged position passes: 0.1 * (60000 - 81520) = -2152.
+	options.Cap = mustQ(t, "3000")
+	answer, err := Run(loadCapture(t), options, loadRegistry(t))
+	if err != nil {
+		t.Fatalf("a cap the holding already meets was an error, not an answer: %v", err)
+	}
+	for _, row := range answer.Rows {
+		if row.Sized && row.Size.Sign() <= 0 {
+			t.Errorf("%s: sized at %s; a leg of zero contracts is not a hedge",
+				row.ID, row.Size)
+		}
+	}
+	// Every leg is left unsized, which here means "no hedge is needed" rather than
+	// "no hedge is possible". The window itself still reports 0 as feasible, and it
+	// is right to: pwa answers what the arithmetic says, and run decides what is
+	// worth proposing.
+	for _, row := range answer.Rows {
+		if row.Sized {
+			t.Errorf("%s: sized at %s against a cap the holding already meets",
+				row.ID, row.Size)
+		}
+		if !row.Window.HasWhole {
+			t.Errorf("%s: pwa should still report 0 as feasible here", row.ID)
+		}
+	}
+	if answer.Comparison != nil {
+		t.Error("a comparison was made between candidates that were never sized")
+	}
+}
+
+// The two reasons a row carries no size are opposite answers and must not be
+// confused: "no hedge is needed" and "no hedge is possible" would have a reader do
+// opposite things.
+func TestUnsizedRowsSayWhichReason(t *testing.T) {
+	needed := spikeOptions(t)
+	needed.Cap = mustQ(t, "3000") // the holding already passes
+	answer, err := Run(loadCapture(t), needed, loadRegistry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range answer.Rows {
+		if !row.NotNeeded {
+			t.Errorf("%s: not marked as needing no hedge", row.ID)
+		}
+	}
+
+	// A cap nothing can meet is the other reason, and must not be marked NotNeeded.
+	impossible := spikeOptions(t)
+	impossible.Cap = mustQ(t, "1")
+	answer, err = Run(loadCapture(t), impossible, loadRegistry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range answer.Rows {
+		if row.Sized {
+			continue
+		}
+		if row.NotNeeded {
+			t.Errorf("%s: an impossible cap was reported as needing no hedge", row.ID)
+		}
+	}
+}
