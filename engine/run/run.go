@@ -372,6 +372,33 @@ func slug(id string) string {
 	return out
 }
 
+// BookTime reads an l2Book's venue timestamp, in milliseconds.
+//
+// Pure: it reads a number out of retained bytes and does no timekeeping, so it lives
+// here rather than in the adapter and a replay can call it without touching the
+// network package. Its counterpart, the LOCAL retrieval time, is an RFC 3339 instant
+// that needs a clock library to parse, so that one stays in the adapter and is handed
+// to Measure as a function.
+func BookTime(raw []byte) (int64, bool) {
+	value, err := parseVenue(raw)
+	if err != nil {
+		return 0, false
+	}
+	book, ok := value.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	number, ok := book["time"].(json.Number)
+	if !ok {
+		return 0, false
+	}
+	milliseconds, err := number.Int64()
+	if err != nil {
+		return 0, false
+	}
+	return milliseconds, true
+}
+
 // Skew is the worst |book venue time - local retrieval| across a capture, and the
 // bound it was refused above.
 type Skew struct {
@@ -416,3 +443,28 @@ func abs(value int64) int64 {
 
 // FormatMs renders a whole number of milliseconds as the documents carry it.
 func FormatMs(value int64) string { return strconv.FormatInt(value, 10) }
+
+// TooSkewed reports a capture whose snapshots were taken too far apart to be treated
+// as one moment.
+type TooSkewed struct{ WorstMs, MaxMs int64 }
+
+func (e *TooSkewed) Error() string {
+	return fmt.Sprintf("worst book-to-local skew %d ms exceeds the %d ms bound",
+		e.WorstMs, e.MaxMs)
+}
+
+// Assert turns a measured skew into the assertion a result carries, refusing a
+// capture that is too spread out to be one moment.
+//
+// Two questions are asked of one number and only one is about magnitude. Whether the
+// capture is trustworthy is about distance from zero, so the bound compares the
+// absolute value. What the document RECORDS keeps its sign, because the sign is the
+// content: it says which clock was ahead. The assertion is carried inside the result,
+// so it feeds the input digest -- dropping the sign would change the digest and lose
+// the only readable fact in the claim.
+func (s Skew) Assert(measuredBy string) (*doc.Capture, error) {
+	if abs(s.WorstMs) > MaxSkewMs {
+		return nil, &TooSkewed{WorstMs: s.WorstMs, MaxMs: MaxSkewMs}
+	}
+	return doc.NewCapture(FormatMs(s.WorstMs), FormatMs(MaxSkewMs), measuredBy), nil
+}
