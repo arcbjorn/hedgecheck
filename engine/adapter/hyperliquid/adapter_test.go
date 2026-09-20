@@ -1,8 +1,11 @@
 package hyperliquid
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -173,5 +176,81 @@ func TestRetrievedAtRefusesWhatItCannotRead(t *testing.T) {
 		if _, ok := RetrievedAt([]byte(raw)); ok {
 			t.Errorf("RetrievedAt accepted %q", raw)
 		}
+	}
+}
+
+// A request record's timestamps match snapshot-record.schema.json, which is frozen at
+// v1 and describes the fifty records retained at 085ccfb.
+//
+// Found on 20 September: the adapter wrote RFC 3339 with a Z, the schema requires an
+// explicit +00:00, and the first Go-captured records failed validation. The schema is
+// the specification, so the engine conforms to the evidence.
+func TestRequestRecordTimestampsMatchTheSchema(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"time":1}`))
+	}))
+	defer server.Close()
+
+	client := &Client{HTTP: server.Client(), Pace: 0, Budget: 1}
+	client.endpoint = server.URL
+	response, err := client.Fetch(map[string]any{"type": "outcomeMeta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(response.Record, &record); err != nil {
+		t.Fatal(err)
+	}
+	// The schema's own pattern, transcribed by hand from the frozen file.
+	pattern := regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+\+00:00$`)
+	for _, field := range []string{"requested_at", "retrieved_at"} {
+		value, _ := record[field].(string)
+		if !pattern.MatchString(value) {
+			t.Errorf("%s is %q, which snapshot-record.schema.json refuses", field, value)
+		}
+		if strings.HasSuffix(value, "Z") {
+			t.Errorf("%s ends in Z; the retained records all use +00:00", field)
+		}
+	}
+}
+
+// What the adapter writes, RetrievedAt reads back.
+func TestRetrievedAtReadsWhatTheAdapterWrites(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"time":1}`))
+	}))
+	defer server.Close()
+
+	client := &Client{HTTP: server.Client(), Pace: 0, Budget: 1}
+	client.endpoint = server.URL
+	before := time.Now().UTC().Add(-time.Second).UnixMilli()
+	response, err := client.Fetch(map[string]any{"type": "outcomeMeta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now().UTC().Add(time.Second).UnixMilli()
+	milliseconds, ok := RetrievedAt(response.Record)
+	if !ok {
+		t.Fatal("the adapter wrote a retrieval time it cannot read back")
+	}
+	if milliseconds < before || milliseconds > after {
+		t.Errorf("read %d, which is outside the second this call took", milliseconds)
+	}
+}
+
+// The retained Python records are read too: they use the same +00:00 form, and a
+// replay must be able to measure skew from evidence either implementation captured.
+func TestRetrievedAtReadsRetainedPythonRecords(t *testing.T) {
+	raw, err := os.ReadFile("../../../fixtures/replay/2026-09-19/binary-no.request.json")
+	if err != nil {
+		t.Skipf("no retained record: %v", err)
+	}
+	milliseconds, ok := RetrievedAt(raw)
+	if !ok {
+		t.Fatal("a retained Python record could not be read")
+	}
+	// Pinned from the run document the spike wrote for this capture.
+	if milliseconds != 1789842197425 {
+		t.Errorf("read %d, the run recorded 1789842197425", milliseconds)
 	}
 }
