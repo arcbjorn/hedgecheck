@@ -215,6 +215,86 @@ def main():
     for key, value in shown.items():
         check(value == expected[key], f"PLAN.md example field '{key}' equals the verified fixture")
 
+    # ---- a clause that applies to a sub-interval is evaluated on that sub-interval
+    #
+    # The schema says "P&L >= min_pnl on the interval; the whole domain when 'on' is
+    # absent", and PLAN section 2 calls the objective a lower envelope of
+    # (interval, min_pnl) clauses. Evaluating a clause outside its own interval reports
+    # a failure the objective never asked about.
+    narrow = {
+        "schema_version": "1", "units": {"money": "USDC", "price": "USDC per BTC",
+                                         "exposure": "BTC", "size": "contracts"},
+        "domain": {"lower": "60000", "upper": "110000"},
+        "baseline": {"kind": "explicit", "price": "100000", "label": "synthetic"},
+        "exposure": {"kind": "linear", "quantity": "0.1"},
+        "legs": [{"id": "put", "kind": "indicator", "size": "0",
+                  "pays_on": {"upper": "90000", "upper_inclusive": False},
+                  "premium": {"kind": "fixed", "price": "0"},
+                  "observation_time": "2026-01-02T06:00:00Z", "semantics": "synthetic"}],
+        # P&L is 0.1*(S - 100000): -4000 at the floor, 0 at 100000, +1000 at the ceiling.
+        # A -1000 cap is breached below 90000 and met above it.
+        "objective": [{"id": "high_only", "min_pnl": "-1000",
+                       "on": {"lower": "95000", "lower_inclusive": True,
+                              "upper": "110000", "upper_inclusive": True}}],
+        "objective_valuation_time": "2026-01-02T06:00:00Z",
+        "other_costs": "0", "assumptions": ["common_reference"],
+    }
+    narrow_result = O.evaluate(narrow)
+    check(narrow_result["failing_intervals"] == [],
+          "a clause on [95000, 110000] is not failed by prices below 95000")
+    check(narrow_result["model_result"] == "passes",
+          "a clause that holds on its own interval passes")
+
+    # ---- a size window is sized against the profile the verdict uses
+    #
+    # Every smallest size a result reports must actually meet the objective on the
+    # lower profile. Sizing against full value where a leg was reduced produced a size
+    # whose worst P&L was -4923.49676 against a -4000 cap (EVIDENCE section 9).
+    generated = PROJECT / "fixtures" / "generated" / "ir"
+    if generated.is_dir():
+        checked_sizes = 0
+        for ir_path in sorted(generated.glob("*.ir.json")):
+            lowered = canon.loads(ir_path.read_bytes())
+            if not lowered.get("reductions"):
+                continue
+            result = canon.loads(Path(str(ir_path).replace(".ir.json", ".result.json")).read_bytes())
+            zeroed = {reduction["leg"] for reduction in lowered["reductions"]}
+            domain_lower = exact.parse(lowered["domain"]["lower"])
+            domain_upper = exact.parse(lowered["domain"]["upper"])
+            cap = min(exact.parse(clause["min_pnl"]) for clause in lowered["objective"])
+            for window in result.get("size_windows", []):
+                if "smallest" not in window:
+                    continue
+                size = exact.parse(window["smallest"])
+                premium, parts = F(0), []
+                usable = True
+                for leg in lowered["legs"]:
+                    own = leg["id"] == window["leg"]
+                    leg_size = size if own else exact.parse(leg["size"])
+                    if own and leg["premium"]["kind"] == "walked":
+                        levels = [(exact.parse(price), exact.parse(available))
+                                  for price, available in leg["premium"]["levels"]]
+                        walked = O.ask_cost(levels, leg_size)
+                        if walked is None:
+                            usable = False
+                            break
+                        premium += walked
+                    else:
+                        premium += O.leg_cost(leg)
+                    if leg["id"] not in zeroed:
+                        parts.append(O._leg(dict(leg, size=O.fmt(leg_size))))
+                if not usable:
+                    continue
+                pnl = O.total([O.linear(exact.parse(lowered["exposure"]["quantity"]),
+                                        exact.parse(lowered["baseline"]["price"]))]
+                              + parts + [O.cash(-premium - exact.parse(lowered["other_costs"]))])
+                worst = O.infimum(pnl, domain_lower, domain_upper)[0]
+                check(worst >= cap,
+                      f"{ir_path.name}: the smallest passing size {window['smallest']} meets the cap "
+                      f"on the lower profile ({O.fmt(worst)} against {O.fmt(cap)})")
+                checked_sizes += 1
+        print(f"size windows: {checked_sizes} reported sizes verified against the lower profile")
+
     replay()
 
     print(f"{CHECKS} checks passed; vectors, golden table, the PLAN.md example and the 18 September replay all agree.")
