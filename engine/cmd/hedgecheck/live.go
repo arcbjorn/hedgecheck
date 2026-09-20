@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 
 	"hedgecheck/engine/adapter/hyperliquid"
 	"hedgecheck/engine/doc"
@@ -35,6 +36,17 @@ func convert(response hyperliquid.Response, err error) (Retrieved, error) {
 	}
 	return Retrieved{Digest: response.Digest, Raw: response.Raw, Record: response.Record}, nil
 }
+
+// valuationTimePattern is the grammar a contract document requires: a UTC instant
+// ending in Z. The CLI checks it HERE, before anything is built, because the
+// document readers only check on the way IN -- an engine that builds a document and
+// writes it without reading it back never passes through that check.
+var valuationTimePattern = regexp.MustCompile(`\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\z`)
+
+// NextExpiry asks for the contract's own expiry instant, which is only known once the
+// catalogue has been fetched. It is resolved after discovery, never carried into a
+// document: "next-expiry" is a request, not a time.
+const NextExpiry = "next-expiry"
 
 // liveOptions are the question a live check answers. None of them has a default:
 // each decides what the answer MEANS, and a default would be this tool choosing the
@@ -95,6 +107,12 @@ func parseLiveOptions(flags options, errOut *os.File) (liveOptions, bool) {
 			fmt.Fprintf(errOut, "%s %q is not in the number grammar\n", field.named, field.text)
 			return out, false
 		}
+	}
+
+	if flags.valuationTime != NextExpiry && !valuationTimePattern.MatchString(flags.valuationTime) {
+		fmt.Fprintf(errOut, "--valuation-time %q is not a UTC instant like 2026-09-21T06:00:00Z, nor %s\n",
+			flags.valuationTime, NextExpiry)
+		return out, false
 	}
 
 	// analysis_time reads the mark from the captured contexts; explicit:<price> is
@@ -159,6 +177,14 @@ func commandCheckLive(flags options, out, errOut *os.File) int {
 	fmt.Fprintf(out, "capture skew %s ms, within the %s ms bound\n",
 		assertion.SkewMs, assertion.MaxSkewMs)
 
+	// "next-expiry" is a request for the contract's own instant, which is only known
+	// now that the catalogue has been read. Resolving it here means no document ever
+	// carries the sentinel.
+	valuation := settings.valuationTime
+	if valuation == NextExpiry {
+		valuation = ""
+	}
+
 	answer, err := runner.Run(captured.Capture, runner.Options{
 		Underlying:    settings.underlying,
 		Quantity:      settings.quantity,
@@ -167,7 +193,7 @@ func commandCheckLive(flags options, out, errOut *os.File) int {
 		Ceiling:       settings.ceiling,
 		BaselineKind:  settings.baselineKind,
 		BaselinePrice: settings.baselinePrice,
-		ValuationTime: settings.valuationTime,
+		ValuationTime: valuation,
 		Capture:       assertion,
 	}, registry)
 	if err != nil {
