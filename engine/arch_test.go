@@ -192,6 +192,86 @@ func TestOnlyCmdAndServiceImportTheAdapter(t *testing.T) {
 	}
 }
 
+// Exactly one package makes outbound requests, and it is the adapter.
+//
+// TestPurePackagesStayPure keeps `net` out of the pure packages, but says nothing
+// about the impure ones: without this, `store` or `cmd` could call the venue
+// directly and slip the pace, the budget and the closed set of request types, which
+// live in the adapter and nowhere else.
+//
+// A server is not a client. The service listens on loopback and must import net/http
+// to do it, so it is allowed the package but not the outbound calls.
+func TestOnlyTheAdapterMakesOutboundRequests(t *testing.T) {
+	// Ways to start an outbound request with the standard library.
+	callers := []string{
+		"http.Get", "http.Post", "http.PostForm", "http.Head", "http.NewRequest",
+		"http.NewRequestWithContext", "net.Dial", "net.DialTimeout", "url.Parse",
+	}
+	checked, seen := 0, 0
+	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		slashed := filepath.ToSlash(path)
+		if strings.HasPrefix(slashed, "adapter/") {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		checked++
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			receiver, ok := selector.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			name := receiver.Name + "." + selector.Sel.Name
+			for _, banned := range callers {
+				if name == banned {
+					t.Errorf("%s calls %s; only the adapter reaches the venue, and it is where the pace, the budget and the closed set of request types live", slashed, name)
+				}
+			}
+			// A client's Do is the other way out.
+			if selector.Sel.Name == "Do" && strings.Contains(receiver.Name, "lient") {
+				t.Errorf("%s calls %s.Do; only the adapter reaches the venue", slashed, receiver.Name)
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked == 0 {
+		t.Fatal("no sources were scanned")
+	}
+	// The adapter really does make the calls, so this is not vacuous.
+	adapter, err := parser.ParseFile(token.NewFileSet(), "adapter/hyperliquid/adapter.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ast.Inspect(adapter, func(node ast.Node) bool {
+		if call, ok := node.(*ast.CallExpr); ok {
+			if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "Do" {
+				seen++
+			}
+		}
+		return true
+	})
+	if seen == 0 {
+		t.Error("the adapter makes no request; this test would pass on an engine that cannot fetch at all")
+	}
+}
+
 func TestNoThirdPartyModules(t *testing.T) {
 	raw, err := os.ReadFile("go.mod")
 	if err != nil {
