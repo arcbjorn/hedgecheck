@@ -38,6 +38,34 @@ for byte, and runs the Go and TypeScript suites, architecture tests included.
 A schema file cannot change unless [schema/CHANGES.md](./schema/CHANGES.md)
 changes with it: `make check` fails on a one-character edit otherwise.
 
+## Run the engine
+
+```sh
+cd engine && go build -o hedgecheck ./cmd/hedgecheck
+```
+
+```text
+hedgecheck lower    --proposal P --registry DIR --snapshots DIR
+hedgecheck evaluate --lowered L
+hedgecheck check    --proposal P --registry DIR --snapshots DIR
+hedgecheck bundle   --proposal P --registry DIR --snapshots DIR --out DIR
+hedgecheck compare  --result R --result R [--result R ...]
+hedgecheck replay   --input-digest D --store DIR --registry DIR
+hedgecheck retain   --input-digest D --store DIR --out DIR
+hedgecheck serve    --store DIR --registry DIR [--address 127.0.0.1:8787]
+```
+
+Exit status is the answer, so a caller can branch without parsing output: `0`
+passes, `1` fails, `2` needs review, `3` refused with the class on stderr, `4` a
+usage or technical error. **A refusal is not a verdict** — status `3` never means
+the objective was evaluated and found wanting.
+
+`serve` binds loopback and nothing else. It offers one write and three reads, all
+idempotent, which together are everything a browser needs to verify a result
+without trusting the server: post a proposal, then fetch the result, every
+snapshot it cites, and every registry entry it pins, and re-derive the answer
+yourself.
+
 ## Check the evidence
 
 The evidence packages are **not in the working tree**. They are committed at
