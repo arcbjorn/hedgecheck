@@ -195,6 +195,24 @@ cites. It has four steps.
 
 4. **Normalize.** Canonical numbers, sorted where order is not meaning, digests.
 
+**Every array's order is decided, and the decision is here.** Two implementations
+must agree byte for byte, so an order left to whichever loop happened to run first is
+a disagreement waiting to happen.
+
+| Array | Order | Why |
+|---|---|---|
+| `profile`, `upper_profile` | ascending price | It *is* the function, read left to right |
+| `failing_intervals`, `undecided_intervals` | clause order, then ascending price | A reader walks the domain upward, one clause at a time |
+| `cost.breakevens` | ascending price | Follows the profile |
+| `reductions` | leg order, then rule order within a leg | Follows the legs; lowering emits them that way |
+| `adverse_states` | the reductions' order | Follows the reductions |
+| `size_windows` | leg order | Follows the legs |
+| `assumptions` | the proposal's own order | The proposal states them; a result does not reorder what it was asked |
+| `responsible_legs`, `snapshots`, `semantics_version` | **sorted** | Sets, with no order of their own |
+| `reason_codes` | **sorted** | A verdict code and reduction codes concatenated: the join order was an accident of the loop, so it is sorted (changed 20 Sep; see EVIDENCE §9) |
+| comparison `candidates` | caller order | The caller's list |
+| comparison `ranking` | ascending cost | The ranking is the point |
+
 Every reduction gives two profiles. The **lower** profile values each reduced leg
 at zero and is what a verdict rests on; the **upper** profile credits it with its
 full size, which a long fully collateralized token can never exceed
