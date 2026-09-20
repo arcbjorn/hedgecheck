@@ -1,9 +1,9 @@
 # One command runs everything: `make check`. Every target is offline and needs no install step.
 # Requires python3, go, node (>= 23.6, which runs TypeScript natively) and deno (type-check only).
 
-.PHONY: check vectors bundles kernel rejected ircases refusals schema oracle spike engine checker clean
+.PHONY: check vectors bundles kernel rejected ircases refusals schema oracle spike engine checker cross clean
 
-check: vectors bundles kernel rejected ircases refusals schema oracle spike engine checker clean
+check: vectors bundles kernel rejected ircases refusals schema oracle spike engine checker cross clean
 	@echo "all checks passed"
 
 # Vector files are generated from hand-written cases; a stale file is an error.
@@ -29,6 +29,10 @@ ircases:
 # One proposal per refusal code lowering can raise, so both sides refuse alike.
 refusals:
 	@python3 tools/make_refusals.py --check
+
+# Whole-result agreement: Go writes a bundle, the Python refuser reads it.
+cross:
+	@python3 tools/cross_accept.py
 
 schema:
 	@python3 tools/validate.py
