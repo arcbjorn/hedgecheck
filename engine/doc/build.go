@@ -139,3 +139,8 @@ func (e *Entry) SetReviewed(by, on, digest string) {
 	e.Review.ReviewedOn, e.Review.hasOn = on, true
 	e.Review.Digest, e.Review.hasDigest = digest, true
 }
+
+// EncodeResult renders a result as the plain values canonical encoding takes. A run
+// document embeds whole results, so it needs the same encoding WriteResult uses
+// rather than a second one that could drift from it.
+func EncodeResult(result Result) map[string]any { return encodeResult(result) }
