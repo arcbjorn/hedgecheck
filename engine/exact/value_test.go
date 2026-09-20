@@ -117,3 +117,56 @@ func TestParseQEnforcesTheGrammar(t *testing.T) {
 		}
 	}
 }
+
+// DecimalPlaces is the one lossy rendering in the codebase. Every expectation here is
+// worked out by hand, not taken from the function.
+func TestDecimalPlaces(t *testing.T) {
+	cases := []struct {
+		text   string
+		places int
+		want   string
+	}{
+		{"0", 2, "0.00"},
+		{"1", 0, "1"},
+		{"1/2", 0, "1"},   // half away from zero, not to even
+		{"-1/2", 0, "-1"}, // and the sign is kept
+		{"3/2", 0, "2"},
+		{"-3/2", 0, "-2"},
+		{"1/3", 4, "0.3333"},
+		{"2/3", 4, "0.6667"},
+		{"-2/3", 4, "-0.6667"},
+		{"1/8", 2, "0.13"}, // 0.125 rounds away from zero
+		{"-1/8", 2, "-0.13"},
+		{"26106927533/288000", 2, "90649.05"},
+		{"25/538", 6, "0.046468"},
+		// A negative that rounds to zero renders "0.00", not "-0.00": at this
+		// precision it IS zero, and a minus sign in front of a zero coordinate names
+		// a number the drawing does not have. Ask for more places to see the sign.
+		{"-1/1000", 2, "0.00"},
+		{"-1/1000", 4, "-0.0010"},
+		{"488.69285", 2, "488.69"},
+		{"-2640.69285", 1, "-2640.7"},
+		{"1000", 3, "1000.000"},
+		{"1/2", -1, "1"}, // a negative precision is read as zero
+	}
+	for _, testCase := range cases {
+		value := MustParseQ(testCase.text)
+		if got := value.DecimalPlaces(testCase.places); got != testCase.want {
+			t.Errorf("%s to %d places is %q, want %q",
+				testCase.text, testCase.places, got, testCase.want)
+		}
+	}
+}
+
+// Rendering never changes the value: the number a later calculation sees is the one
+// that was there before anything was drawn.
+func TestDecimalPlacesDoesNotMutate(t *testing.T) {
+	value := MustParseQ("26106927533/288000")
+	before := value.String()
+	for places := 0; places < 8; places++ {
+		value.DecimalPlaces(places)
+	}
+	if after := value.String(); after != before {
+		t.Errorf("rendering changed the value from %s to %s", before, after)
+	}
+}
