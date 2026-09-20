@@ -74,6 +74,17 @@ func (s Snapshots) Add(raw []byte) (string, error) {
 	return snapshot.Digest, nil
 }
 
+// Bytes returns the exact retained bytes a digest was stored under. A citation that
+// finds nothing is an error rather than empty bytes, so a missing snapshot cannot be
+// read as an empty response.
+func (s Snapshots) Bytes(digest string) ([]byte, error) {
+	snapshot, ok := s[digest]
+	if !ok {
+		return nil, refuse("SNAPSHOT_NOT_SUPPLIED", "%s was not supplied", short(digest))
+	}
+	return snapshot.Raw, nil
+}
+
 func (s Snapshots) cited(digest, what string) (any, error) {
 	snapshot, ok := s[digest]
 	if !ok {
