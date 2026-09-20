@@ -254,7 +254,11 @@ func printAnswer(out *os.File, answer runner.Answer) {
 	fmt.Fprintf(out, "%-14s %-14s %-12s %-14s %s\n", "leg", "verdict", "size", "premium", "worst case")
 	for _, row := range answer.Rows {
 		if !row.Sized {
-			fmt.Fprintf(out, "%-14s %s\n", row.ID, "no size on the displayed book meets the cap")
+			why := "no size on the displayed book meets the cap"
+			if row.NotNeeded {
+				why = "no hedge needed: the holding already meets the cap"
+			}
+			fmt.Fprintf(out, "%-14s %s\n", row.ID, why)
 			continue
 		}
 		fmt.Fprintf(out, "%-14s %-14s %-12s %-14s %s\n", row.ID, row.Result.ModelResult,
