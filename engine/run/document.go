@@ -27,7 +27,11 @@ type Document struct {
 	Capture      *doc.Capture
 	Results      map[string]doc.Result
 	InputDigests map[string]string
-	Leg          string
+	// Sizes is how many contracts of each leg the run priced. The result carries the
+	// premium but not the size that bought it, and a page showing a cost without the
+	// quantity behind it invites the reader to supply their own.
+	Sizes map[string]string
+	Leg   string
 }
 
 // DocumentOptions is the question, as the document records it.
@@ -84,6 +88,10 @@ func encodeDocument(document Document) map[string]any {
 	for name, digest := range document.InputDigests {
 		inputs[name] = digest
 	}
+	sizes := map[string]any{}
+	for name, size := range document.Sizes {
+		sizes[name] = size
+	}
 	skew := map[string]any{}
 	for name, detail := range document.Skew {
 		skew[name] = map[string]any{
@@ -112,6 +120,7 @@ func encodeDocument(document Document) map[string]any {
 		"skew":             skew,
 		"results":          results,
 		"input_digests":    inputs,
+		"sizes":            sizes,
 		"leg":              document.Leg,
 	}
 	if document.Capture != nil {
@@ -142,7 +151,7 @@ func Decode(raw []byte) (Document, error) {
 	known := map[string]bool{
 		"schema_version": true, "options": true, "expiry": true, "observation_time": true,
 		"valuation_time": true, "digests": true, "skew": true, "capture": true,
-		"results": true, "input_digests": true, "leg": true,
+		"results": true, "input_digests": true, "sizes": true, "leg": true,
 	}
 	unknown := []string{}
 	for key := range root {
@@ -161,6 +170,7 @@ func Decode(raw []byte) (Document, error) {
 	out := Document{
 		Digests: map[string]string{}, InputDigests: map[string]string{},
 		Skew: map[string]SkewDetail{}, Results: map[string]doc.Result{},
+		Sizes: map[string]string{},
 	}
 	out.Expiry, _ = root["expiry"].(string)
 	out.Observation, _ = root["observation_time"].(string)
@@ -186,6 +196,10 @@ func Decode(raw []byte) (Document, error) {
 	inputs, _ := root["input_digests"].(map[string]any)
 	for name, value := range inputs {
 		out.InputDigests[name] = text(value)
+	}
+	sizes, _ := root["sizes"].(map[string]any)
+	for name, value := range sizes {
+		out.Sizes[name] = text(value)
 	}
 	skew, _ := root["skew"].(map[string]any)
 	for name, value := range skew {
