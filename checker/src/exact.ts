@@ -68,3 +68,111 @@ export function format(value: Rational): string {
   const text = places > 0 ? `${digits.slice(0, cut)}.${digits.slice(cut)}` : digits;
   return value.num < 0n ? `-${text}` : text;
 }
+
+// ---------------------------------------------------------------- arithmetic
+//
+// Every operation returns a NEW value and touches neither operand. The interface is
+// readonly, which the type checker enforces, but the discipline matters beyond the
+// types: a shared rational that one caller normalised in place would be a silent
+// wrong answer rather than a crash, and this kernel stores coefficients in pieces and
+// reuses them across sums.
+
+export const ZERO: Rational = { num: 0n, den: 1n };
+export const ONE: Rational = { num: 1n, den: 1n };
+
+export function fromInt(value: bigint): Rational {
+  return { num: value, den: 1n };
+}
+
+export function add(a: Rational, b: Rational): Rational {
+  return rational(a.num * b.den + b.num * a.den, a.den * b.den);
+}
+
+export function sub(a: Rational, b: Rational): Rational {
+  return rational(a.num * b.den - b.num * a.den, a.den * b.den);
+}
+
+export function mul(a: Rational, b: Rational): Rational {
+  return rational(a.num * b.num, a.den * b.den);
+}
+
+/** Division. Dividing by zero is an error, never an infinity. */
+export function div(a: Rational, b: Rational): Rational {
+  if (b.num === 0n) throw new NumberError("division by zero");
+  return rational(a.num * b.den, a.den * b.num);
+}
+
+export function neg(a: Rational): Rational {
+  return { num: -a.num, den: a.den };
+}
+
+/** -1, 0 or 1 as a is less than, equal to or greater than b. */
+export function cmp(a: Rational, b: Rational): number {
+  const left = a.num * b.den;
+  const right = b.num * a.den;
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export function sign(a: Rational): number {
+  return a.num < 0n ? -1 : a.num > 0n ? 1 : 0;
+}
+
+export function equals(a: Rational, b: Rational): boolean {
+  return a.num === b.num && a.den === b.den;
+}
+
+export function lt(a: Rational, b: Rational): boolean {
+  return cmp(a, b) < 0;
+}
+
+export function lte(a: Rational, b: Rational): boolean {
+  return cmp(a, b) <= 0;
+}
+
+export function min(a: Rational, b: Rational): Rational {
+  return lte(a, b) ? a : b;
+}
+
+export function max(a: Rational, b: Rational): Rational {
+  return lte(a, b) ? b : a;
+}
+
+export function abs(a: Rational): Rational {
+  return a.num < 0n ? neg(a) : a;
+}
+
+/** The midpoint of two values, exactly. */
+export function midpoint(a: Rational, b: Rational): Rational {
+  return div(add(a, b), fromInt(2n));
+}
+
+// floorLot and ceilLot round to a multiple of a lot.
+//
+// BigInt division truncates toward zero, so a negative quotient needs a correction:
+// -7n / 2n is -3n, and the floor is -4n. Sizes are nonnegative in practice, but a
+// rounding function that is wrong on half its domain is a trap for the first caller
+// who passes a difference.
+
+function floorDiv(num: bigint, den: bigint): bigint {
+  const quotient = num / den;
+  return num % den !== 0n && (num < 0n) !== (den < 0n) ? quotient - 1n : quotient;
+}
+
+function ceilDiv(num: bigint, den: bigint): bigint {
+  const quotient = num / den;
+  return num % den !== 0n && (num < 0n) === (den < 0n) ? quotient + 1n : quotient;
+}
+
+/** The largest multiple of lot that is at most value. */
+export function floorLot(value: Rational, lot: Rational): Rational {
+  if (sign(lot) <= 0) throw new NumberError("the lot must be positive");
+  const steps = div(value, lot);
+  return mul(fromInt(floorDiv(steps.num, steps.den)), lot);
+}
+
+/** The smallest multiple of lot that is at least value. */
+export function ceilLot(value: Rational, lot: Rational): Rational {
+  if (sign(lot) <= 0) throw new NumberError("the lot must be positive");
+  const steps = div(value, lot);
+  return mul(fromInt(ceilDiv(steps.num, steps.den)), lot);
+}
