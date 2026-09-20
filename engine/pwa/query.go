@@ -203,7 +203,10 @@ type Site struct {
 
 // SizeWindow is the set of sizes meeting a floor on the whole window.
 type SizeWindow struct {
-	Empty             bool
+	Empty bool
+	// NoBounds marks the early return above: not merely an empty whole-contract
+	// window, but a site no size satisfies, where the real bounds do not exist.
+	NoBounds          bool
 	LowerBound        exact.Q
 	UpperBound        exact.Q
 	Smallest, Largest exact.Q
@@ -274,7 +277,11 @@ func SizeWindowFor(base, unit Fn, levels []Level, floorPnl, lower, upper, lot ex
 			start, spent = end, spent.Add(level.Price.Mul(level.Size))
 		}
 		if len(spans) == 0 {
-			return SizeWindow{Empty: true, Binding: []Site{{Price: s.price, Side: s.side}}}, nil
+			// No size works at this site, so there are no bounds to report: the window
+			// is empty for a reason, not empty between two numbers. The oracle returns
+			// lower_bound and upper_bound as None here, and a result omits them.
+			return SizeWindow{Empty: true, NoBounds: true,
+				Binding: []Site{{Price: s.price, Side: s.side}}}, nil
 		}
 		for index := 0; index+1 < len(spans); index++ {
 			if !spans[index][1].Equal(spans[index+1][0]) {
