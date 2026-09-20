@@ -53,9 +53,13 @@ type Capture struct {
 
 // Row is one candidate instrument, answered.
 type Row struct {
-	ID          string
-	Size        exact.Q
-	Sized       bool
+	ID    string
+	Size  exact.Q
+	Sized bool
+	// NotNeeded distinguishes the two reasons a row carries no size. "No hedge is
+	// needed" and "no hedge is possible" are opposite answers, and a reader told the
+	// wrong one would act on it.
+	NotNeeded   bool
 	Proposal    doc.Proposal
 	IR          doc.IR
 	Result      doc.Result
@@ -134,7 +138,12 @@ func Run(capture Capture, options Options, registry map[string]doc.Entry) (Answe
 			return Answer{}, err
 		}
 		row.Window = window
-		if !window.HasWhole {
+		// A hedge of zero contracts is not a hedge, it is the unhedged position. The
+		// feasible set genuinely contains 0 whenever the holding already meets the
+		// cap, so pwa is right to report it; building a proposal from it is what
+		// would be wrong, and lowering refuses a zero-size leg downstream.
+		if !window.HasWhole || size.Sign() <= 0 {
+			row.NotNeeded = window.HasWhole && size.Sign() <= 0
 			answer.Rows = append(answer.Rows, row)
 			continue
 		}
