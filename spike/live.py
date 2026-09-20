@@ -81,6 +81,21 @@ def measure_skew(record, book_records, books):
     return out
 
 
+def worst_signed_skew(skew):
+    """The measured skew furthest from zero, KEEPING its sign.
+
+    Two different questions are asked of this number and only one of them is about
+    magnitude. Whether a capture is too spread out to trust is a question about
+    distance from zero, so the threshold compares abs(). What the run RECORDS is an
+    assertion about the capture, and there the sign is the content: it says which
+    clock was ahead. Discarding it would turn "the venue read 689 ms behind us" into
+    "something was 689 ms away from something", which no reader can act on.
+    """
+    if not skew:
+        return 0
+    return max(skew.values(), key=lambda entry: abs(entry["skew_ms"]))["skew_ms"]
+
+
 def capture_live(client, underlying, expiry=None):
     """One coherent set: catalogue, contexts, then a book per candidate leg.
 
@@ -158,8 +173,8 @@ def command_check(args):
     snapshots, digests, expiry, skew, _records = capture_live(client, args.underlying)
     capture = checking.parse_capture(snapshots, digests, expiry)
 
-    worst_skew = max(abs(entry["skew_ms"]) for entry in skew.values()) if skew else 0
-    if worst_skew > MAX_SKEW_MS:
+    worst_skew = worst_signed_skew(skew)
+    if abs(worst_skew) > MAX_SKEW_MS:
         print(f"refused: worst book-to-local skew {worst_skew} ms exceeds MAX_SKEW {MAX_SKEW_MS} ms", file=sys.stderr)
         return 2
 
