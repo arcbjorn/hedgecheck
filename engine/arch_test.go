@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -93,6 +94,93 @@ func TestOnlyExactImportsMathBig(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no files outside exact were checked; the test is not looking where it should")
+	}
+}
+
+// An outcome id or a coin in non-test source is configuration, and configuration goes
+// stale the moment the venue rolls the series over. Tests may name them: that is where
+// the expectations live.
+func TestNoLiteralInstrumentsOutsideTests(t *testing.T) {
+	coin := regexp.MustCompile(`"#[0-9]+"`)
+	ident := regexp.MustCompile(`(?:^|[^\w.#/-])([0-9]{4,5})(?:[^\w.]|$)`)
+	allowed := map[string]bool{"0644": true, "0755": true, "1000": true, "1024": true, "1500": true, "2026": true, "5000": true, "8785": true}
+	checked := 0
+	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
+		if err != nil {
+			return err
+		}
+		checked++
+		// Comments may cite a historical id as evidence; code may not.
+		var code strings.Builder
+		ast.Inspect(file, func(node ast.Node) bool {
+			if literal, ok := node.(*ast.BasicLit); ok {
+				code.WriteString(literal.Value)
+				code.WriteString("\n")
+			}
+			return true
+		})
+		text := code.String()
+		if coin.MatchString(text) {
+			t.Errorf("%s: contains a literal coin", path)
+		}
+		for _, match := range ident.FindAllStringSubmatch(text, -1) {
+			if !allowed[match[1]] {
+				t.Errorf("%s: contains the literal %s, which is the shape of an outcome id", path, match[1])
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked == 0 {
+		t.Fatal("no non-test sources were scanned")
+	}
+}
+
+// The adapter is the only package that speaks HTTP, and only the two packages that
+// orchestrate may reach it. If a pure package could import it, "pure" would depend on
+// what the adapter happened to do rather than on anything this test can see.
+func TestOnlyCmdAndServiceImportTheAdapter(t *testing.T) {
+	mayImport := map[string]bool{"cmd": true, "service": true, "adapter": true}
+	checked, seen := 0, false
+	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
+			return err
+		}
+		slashed := filepath.ToSlash(path)
+		top := strings.Split(slashed, "/")[0]
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		checked++
+		for _, spec := range file.Imports {
+			name := strings.Trim(spec.Path.Value, `"`)
+			if !strings.Contains(name, "hedgecheck/engine/adapter") {
+				continue
+			}
+			seen = true
+			if !mayImport[top] {
+				t.Errorf("%s imports the adapter; only cmd and service may", slashed)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked == 0 {
+		t.Fatal("no sources were scanned")
+	}
+	// Guards against the test passing because nothing imports the adapter at all,
+	// which would make it vacuous the day the import is added.
+	if !seen {
+		t.Skip("nothing imports the adapter yet")
 	}
 }
 
