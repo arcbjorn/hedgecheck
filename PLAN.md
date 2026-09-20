@@ -364,7 +364,7 @@ Each tier ships only through its gate. No tier has a date.
 
 | Gate line | Command | What it prints |
 |---|---|---|
-| No hard-coded ids | `python3 spike/verify.py` | `discovery finds the live instruments unaided and spike/ names no ids` — it finds 3965 and 3971 in a retained catalogue without being told, and refuses any outcome id or coin literal in `spike/` |
+| No hard-coded ids | `cd engine && go test ./discover/... .` | discovery finds the live instruments in a retained catalogue without being told which they are, and `TestNoLiteralInstrumentsOutsideTests` refuses any outcome id or coin literal in non-test source |
 | Snapshots in one result retrieved within a stated skew, recorded in it | `python3 oracle/verify.py` | The good bundle's result carries `capture`: −687 ms against a 5,000 ms bound, over the 2 snapshots it lists. **It is an assertion, not a derivation** — see §4 |
 | Replaying the 18 Sep package reproduces the table in [EVIDENCE §3](./EVIDENCE.md) | `python3 oracle/verify.py` | `the 18 September replay` agrees: both premiums, P&L at baseline, strike and floor, both size windows, both crossovers |
 | Every fixture validates against the schema | `python3 tools/validate.py` | `27 contract documents valid, 36 mutations refused` |
