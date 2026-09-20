@@ -287,6 +287,11 @@ func smallestReduction(quantity, baseline, cap, lower exact.Q) exact.Q {
 
 // ---------------------------------------------------------------- venue reading
 
+// ParseVenue reads venue JSON with UseNumber, so a quantity never passes through a
+// float. Venue JSON is not a contract document: it is read leniently here and every
+// quantity is taken from a string field.
+func ParseVenue(raw []byte) (any, error) { return parseVenue(raw) }
+
 func parseVenue(raw []byte) (any, error) {
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.UseNumber()
