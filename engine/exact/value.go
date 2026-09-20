@@ -2,6 +2,7 @@ package exact
 
 import (
 	"math/big"
+	"strings"
 )
 
 // Q is an exact rational, immutable by construction.
@@ -144,4 +145,50 @@ func ceilInt(r *big.Rat) *big.Int {
 		quotient.Add(quotient, big.NewInt(1))
 	}
 	return quotient
+}
+
+// DecimalPlaces returns q rounded to places decimal digits, half away from zero.
+//
+// This is a LOSSY rendering and the only one in the codebase. Nothing in an
+// evaluation path may call it: a rounded number that flowed back into arithmetic
+// would make the answer depend on how it was displayed. It exists so a drawing can
+// have pixel coordinates -- an SVG cannot accept "26106927533/288000", and a chart is
+// a picture of the answer, never the answer.
+//
+// Rounding is half away from zero rather than to even, so -1/2 renders "-1" and not
+// "0": a reader should never see a loss drawn as nothing. A value that genuinely
+// rounds to zero loses its sign, because "-0.00" names a number the drawing does not
+// have; ask for more places to see which side of zero it was on.
+func (q Q) DecimalPlaces(places int) string {
+	if places < 0 {
+		places = 0
+	}
+	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(places)), nil)
+	scaled := new(big.Rat).Mul(q.rat(), new(big.Rat).SetInt(scale))
+
+	// Round half away from zero: add or subtract a half, then truncate.
+	half := big.NewRat(1, 2)
+	if scaled.Sign() < 0 {
+		scaled.Sub(scaled, half)
+	} else {
+		scaled.Add(scaled, half)
+	}
+	whole := new(big.Int).Quo(scaled.Num(), scaled.Denom())
+
+	negative := whole.Sign() < 0
+	digits := new(big.Int).Abs(whole).String()
+	if places == 0 {
+		if negative {
+			return "-" + digits
+		}
+		return digits
+	}
+	if len(digits) < places+1 {
+		digits = strings.Repeat("0", places+1-len(digits)) + digits
+	}
+	text := digits[:len(digits)-places] + "." + digits[len(digits)-places:]
+	if negative {
+		return "-" + text
+	}
+	return text
 }
