@@ -100,7 +100,6 @@ catalogue — so `085ccfb` is the only copy.
 | `engine/` | Go. So far the conformance spine and the architecture test |
 | `checker/` | TypeScript, no dependencies. So far the conformance spine and the architecture test |
 | `tools/` | The vector generator, the corruption generator and the schema validator |
-| `spike/` | The T1 live spike: discovery, capture, replay. Throwaway; T2 deletes it |
 | `research/` | Evidence packages and verifiers. **Restore from `085ccfb`** (above) |
 
 Market snapshots are historical observations, not prices to trade on.
