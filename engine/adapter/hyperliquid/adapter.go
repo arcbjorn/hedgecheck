@@ -127,8 +127,8 @@ func (c *Client) Fetch(body map[string]any) (Response, error) {
 		"endpoint":        c.url(),
 		"method":          http.MethodPost,
 		"request_body":    body,
-		"requested_at":    requestedAt.Format(time.RFC3339Nano),
-		"retrieved_at":    retrievedAt.Format(time.RFC3339Nano),
+		"requested_at":    isoUTC(requestedAt),
+		"retrieved_at":    isoUTC(retrievedAt),
 		"http_status":     response.StatusCode,
 		"response_file":   digest + ".json",
 		"response_sha256": digest,
@@ -162,6 +162,16 @@ func (c *Client) Book(coin string) (Response, error) {
 // measured against a book and asserted rather than derived (EVIDENCE section 4).
 func BookTime(raw []byte) (int64, bool) { return run.BookTime(raw) }
 
+// isoUTC formats an instant the way snapshot-record.schema.json requires:
+// "2026-09-20T08:47:19.415522+00:00", with an explicit +00:00 rather than a Z.
+//
+// The schema is frozen at v1 and the fifty records retained at 085ccfb are all in
+// this form, so the engine conforms to the evidence rather than the evidence to the
+// engine. Microseconds, because that is what the retained records carry.
+func isoUTC(moment time.Time) string {
+	return moment.UTC().Format("2006-01-02T15:04:05.000000") + "+00:00"
+}
+
 // RetrievedAt reads a request record's local retrieval time, in milliseconds.
 func RetrievedAt(record []byte) (int64, bool) {
 	var value struct {
@@ -170,9 +180,12 @@ func RetrievedAt(record []byte) (int64, bool) {
 	if err := json.Unmarshal(record, &value); err != nil {
 		return 0, false
 	}
-	moment, err := time.Parse(time.RFC3339Nano, value.RetrievedAt)
-	if err != nil {
-		return 0, false
+	// Both forms are read: the retained records use +00:00 and RFC 3339 allows Z.
+	// Writing is strict, reading is lenient, because the records already exist.
+	for _, layout := range []string{"2006-01-02T15:04:05.999999-07:00", time.RFC3339Nano} {
+		if moment, err := time.Parse(layout, value.RetrievedAt); err == nil {
+			return moment.UnixMilli(), true
+		}
 	}
-	return moment.UnixMilli(), true
+	return 0, false
 }
