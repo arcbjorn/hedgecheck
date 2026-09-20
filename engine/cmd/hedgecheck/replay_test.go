@@ -6,15 +6,25 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
 
-const replayFixtures = "../../../fixtures/replay/2026-09-19"
+const (
+	// The 19 September capture, taken by the PYTHON spike.
+	replayFixtures = "../../../fixtures/replay/2026-09-19"
+	// The 20 September capture, taken by THIS engine's own live path.
+	goFixtures = "../../../fixtures/replay/2026-09-20"
+)
 
 // seedStore files the retained 19 September capture into a store laid out the way the
 // spike's store lays one out, so the Go replay reads exactly what a Python run wrote.
 func seedStore(t *testing.T) (root, inputDigest string) {
+	return seedFrom(t, replayFixtures, "binary-no.run.json")
+}
+
+func seedFrom(t *testing.T, fixtures, runFile string) (root, inputDigest string) {
 	t.Helper()
 	root = t.TempDir()
 	snapshots := filepath.Join(root, "snapshots")
@@ -24,7 +34,7 @@ func seedStore(t *testing.T) (root, inputDigest string) {
 			t.Fatal(err)
 		}
 	}
-	raw, err := os.ReadFile(filepath.Join(replayFixtures, "binary-no.run.json"))
+	raw, err := os.ReadFile(filepath.Join(fixtures, runFile))
 	if err != nil {
 		t.Skipf("no retained run to replay: %v", err)
 	}
@@ -37,7 +47,7 @@ func seedStore(t *testing.T) (root, inputDigest string) {
 		t.Fatal(err)
 	}
 	for name, digest := range document.Digests {
-		snapshot, err := os.ReadFile(filepath.Join(replayFixtures, name+".json"))
+		snapshot, err := os.ReadFile(filepath.Join(fixtures, name+".json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -48,7 +58,7 @@ func seedStore(t *testing.T) (root, inputDigest string) {
 		if err := os.WriteFile(filepath.Join(snapshots, digest+".json"), snapshot, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if record, err := os.ReadFile(filepath.Join(replayFixtures, name+".request.json")); err == nil {
+		if record, err := os.ReadFile(filepath.Join(fixtures, name+".request.json")); err == nil {
 			if err := os.WriteFile(filepath.Join(snapshots, digest+".request.json"), record, 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -234,5 +244,64 @@ func TestRetainCopiesBytesUnchanged(t *testing.T) {
 		if hex.EncodeToString(sum[:]) != digest {
 			t.Errorf("%s: the retained bytes no longer hash to the cited digest", name)
 		}
+	}
+}
+
+// The engine replays its OWN live capture, offline, byte for byte.
+//
+// Taken on 20 September by `check --live`: one coherent set from the venue,
+// discovered, sized, evaluated and stored. Replaying it recomputes the same result
+// and the same input digest from the retained bytes alone -- which is the whole claim
+// the live path makes, and the last thing the Python spike was still needed to prove.
+func TestReplayReproducesTheGoLiveRun(t *testing.T) {
+	root, inputDigest := seedFrom(t, goFixtures, "binary-no.run.json")
+	status, stdout, stderr := invoke(t, "replay",
+		"--input-digest", inputDigest, "--store", root, "--registry", "../../../registry")
+	if status != exitNeedsReview {
+		t.Fatalf("status %d, want %d (needs_review, the entries are drafts)\n%s",
+			status, exitNeedsReview, stderr)
+	}
+	if !strings.Contains(stdout, "byte-identical") {
+		t.Errorf("stdout does not report byte identity: %q", stdout)
+	}
+}
+
+// The Go-captured run document carries instants, never the sentinel that asked for
+// one. "next-expiry" is a request; a document records the time it resolved to.
+func TestGoLiveRunRecordsInstants(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(goFixtures, "binary-no.run.json"))
+	if err != nil {
+		t.Skipf("no Go live run retained: %v", err)
+	}
+	if strings.Contains(string(raw), "next-expiry") {
+		t.Error("the run document carries the sentinel instead of the instant it resolved to")
+	}
+	var document struct {
+		ValuationTime string `json:"valuation_time"`
+		Observation   string `json:"observation_time"`
+		Capture       struct {
+			SkewMs     string `json:"skew_ms"`
+			MaxSkewMs  string `json:"max_skew_ms"`
+			MeasuredBy string `json:"measured_by"`
+		} `json:"capture"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	instant := regexp.MustCompile(`\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\z`)
+	for name, value := range map[string]string{
+		"valuation_time": document.ValuationTime, "observation_time": document.Observation,
+	} {
+		if !instant.MatchString(value) {
+			t.Errorf("%s is %q, not a UTC instant ending in Z", name, value)
+		}
+	}
+	if document.Capture.MeasuredBy == "" {
+		t.Error("the capture assertion does not say who measured it")
+	}
+	// The assertion keeps its sign: it says which clock was ahead.
+	if !strings.HasPrefix(document.Capture.SkewMs, "-") {
+		t.Errorf("skew_ms is %q; every measurement so far has been negative, as latency predicts",
+			document.Capture.SkewMs)
 	}
 }
