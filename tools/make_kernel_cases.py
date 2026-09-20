@@ -261,6 +261,18 @@ def forced_cases():
     return out
 
 
+def random_ladder(rng):
+    """An ask ladder: non-decreasing prices in (0, 1), with sizes that may be zero.
+
+    Prices are bounded by one because an outcome token pays at most one. A ladder
+    that is not sorted is not a book, so the prices are sorted here rather than left
+    to chance: the question is whether the two implementations walk the same book the
+    same way, not whether they both reject nonsense.
+    """
+    prices = sorted(rng.rational(0, 1) for _ in range(1 + rng.below(5)))
+    return [[str(price), str(rng.rational(0, 3000))] for price in prices]
+
+
 def random_cases(rng, count):
     prices = [60000, 65000, 70000, 75908, 77457, 80000, 90000, 100000, 105000, 110000]
     out = []
@@ -277,9 +289,33 @@ def random_cases(rng, count):
                 legs.append(leg_indicator(rng, prices))
             else:
                 legs.append(leg_ramp(rng, prices))
-        query = rng.pick(["profile", "infimum", "below", "witness", "band"])
+        # Sizing is in this pool because it is where the money is: an earlier
+        # session found legs being sized against their FULL value rather than their
+        # reduced one, and only one of seven hand-written cases caught it. A query
+        # exercised by three fixtures is a query nobody is really checking.
+        query = rng.pick(["profile", "infimum", "below", "witness", "band",
+                          "size_window", "ask_cost"])
         case = {"name": f"random-{index:04d}", "legs": legs, "query": query,
                 "lower": "60000", "upper": "110000"}
+        if query in ("size_window", "ask_cost"):
+            case["levels"] = random_ladder(rng)
+        if query == "ask_cost":
+            # No legs: a ladder walk is about the book alone.
+            case["legs"] = []
+            case["size"] = str(rng.rational(0, 5000))
+        if query == "size_window":
+            # A base the holder already has, and one contract of the thing bought.
+            case["legs"] = []
+            case["base_legs"] = [leg_linear(rng, prices)]
+            unit = {"kind": "indicator", "size": "1"}
+            if rng.below(2) == 0:
+                unit["upper"] = str(rng.pick(prices))
+                unit["upper_inclusive"] = rng.below(2) == 0
+            else:
+                unit["lower"] = str(rng.pick(prices))
+                unit["lower_inclusive"] = rng.below(2) == 0
+            case["unit_legs"] = [unit]
+            case["floor_pnl"] = str(rng.rational(-6000, 0))
         if query in ("below", "witness"):
             case["threshold"] = str(rng.rational(-4000, 1000))
             if query == "below":
