@@ -103,7 +103,15 @@ func TestOnlyExactImportsMathBig(t *testing.T) {
 func TestNoLiteralInstrumentsOutsideTests(t *testing.T) {
 	coin := regexp.MustCompile(`"#[0-9]+"`)
 	ident := regexp.MustCompile(`(?:^|[^\w.#/-])([0-9]{4,5})(?:[^\w.]|$)`)
-	allowed := map[string]bool{"0644": true, "0755": true, "1000": true, "1024": true, "1500": true, "2026": true, "5000": true, "8785": true}
+	// Four-digit numbers that are demonstrably not outcome ids: file modes, a
+	// kilobyte, the request pace, a year, the reference year in Go's date layout,
+	// the skew bound, the RFC number for canonical JSON, and the loopback port the
+	// service binds. Each is here because it means something else, not because the
+	// check was inconvenient.
+	allowed := map[string]bool{
+		"0644": true, "0755": true, "1000": true, "1024": true, "1500": true,
+		"2006": true, "2026": true, "5000": true, "8785": true, "8787": true,
+	}
 	checked := 0
 	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
