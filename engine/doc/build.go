@@ -124,6 +124,13 @@ func SharedCanonical(shared Shared) ([]byte, error) {
 	})
 }
 
+// SetObjectiveReference names the reference the objective is stated against. It is
+// optional in the schema, so setting it is how a builder says "state it" rather than
+// leaving the decoder's finding to chance.
+func (p *Proposal) SetObjectiveReference(reference string) {
+	p.ObjectiveReference, p.hasObjectiveReference = reference, true
+}
+
 // SetReviewed marks an entry reviewed against a semantics version. Callers pass the
 // version they computed, so marking cannot silently review something else.
 func (e *Entry) SetReviewed(by, on, digest string) {
