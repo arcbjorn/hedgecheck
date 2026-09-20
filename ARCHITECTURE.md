@@ -97,6 +97,17 @@ response bytes. It is evidence, not contract: hashed as a file, never
 canonicalized, and it keeps the JSON numbers the venue's API requires. The schema
 matches all 50 records retained at `085ccfb`.
 
+A **run document** (`var/store/runs/<input_digest>.json`) is the same kind of
+thing: an operational record of one capture, written so a replay can recompute it
+without fetching. It is **not** a contract document and is held to no schema. It
+could not be canonical even if it wanted to be — it keys `digests` and `skew` by
+leg id, and a leg id may contain a hyphen (`[a-z][a-z0-9-]*`) where a canonical key
+may not (`[a-z][a-z0-9_]*`), and it carries venue timestamps as JSON numbers where
+the profile demands exact strings. Both canonical readers refuse it, correctly.
+What *is* canonical is every result embedded inside it: those carry the digests a
+replay checks and go through the strict reader, so the envelope is untrusted and
+its contents are not.
+
 **The schemas are frozen at v1.** They met real data before freezing: the 18
 September replay proposals were lowered and evaluated against the retained
 catalogue, mark and books, and the certificate bundles were built from the
@@ -330,7 +341,11 @@ checker in the browser on every view; a consumer runs it before it signs.
 | Documented examples cannot drift | `oracle/verify.py` parses PLAN.md and compares its example with the generated fixture |
 | Documented counts cannot drift | `tools/validate.py` — the schema count in README and ARCHITECTURE, and a layout row per top-level directory, are compared with the filesystem |
 | Every contract document is schema-checked | `tools/validate.py` — including both good certificate bundles; corrupted bundles are the refuser's business |
-| A stored result replays byte for byte | `spike/verify.py` — the retained 19 September run is recomputed from its stored bytes, offline |
+| A stored result replays byte for byte | `spike/verify.py` and `engine/cmd/hedgecheck/replay_test.go` — the retained 19 September run is recomputed from its stored bytes, offline, by both implementations |
+| A replay checks the result, not just the files | `replay_test.go` — a book edited in place is caught by the store's hash; a genuinely different book, honestly filed under its own digest, must still fail the result comparison |
+| The capture assertion keeps its sign | `spike/verify.py` — the recorded worst skew is re-measured from the retained bytes. The bound is about distance from zero; the record keeps the sign, because it says which clock was ahead, and it feeds the input digest |
+| Only `cmd` and `service` may reach the network | `engine/arch_test.go` — an import scan for `engine/adapter`, so "pure" cannot come to depend on what the adapter happens to do |
+| Only the adapter's own package can redirect it | `adapter/hyperliquid` — the endpoint field is unexported and empty by default, so a zero client calls the real venue; a request type outside the closed set never opens a connection |
 | The validator's one deviation from JSON Schema 2020-12 stays deliberate | `tools/validate.py` — 1.0 is not an integer here, and `integer` is asserted to appear only in `snapshot-record` |
 
 Each guard was run against a deliberate violation before it was trusted.
@@ -350,8 +365,9 @@ fixtures/   golden/   lowered proposal and its generated expected result
 registry/   semantics entries as data: recurring.priceBinary, recurring.priceBucket
 oracle/     exact.py  canon.py  oracle.py (kernel, evaluate)  lower.py  verify.py
 engine/     exact/  canon/  arch_test.go          ── built
-            pwa/  ir/  lower/  evaluate/  result/  ── T2, pure
-            adapter/hyperliquid/  store/  service/  cmd/hedgecheck/  ── T2, the only impure packages
+            pwa/  doc/  lower/  evaluate/  discover/  run/  ── pure
+            adapter/hyperliquid/  store/  cmd/hedgecheck/   ── the only impure packages
+            service/                                        ── T2, not yet built
 checker/    src/exact.ts  src/canon.ts            ── built
             src/pwa.ts  src/lower.ts  src/verify.ts ── T3
 tools/      make_vectors.py  validate.py
