@@ -105,6 +105,65 @@ func (s *Store) Record(digest string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+// versionPattern is checked before an engine version reaches a path. A version is a
+// short slug and nothing else, so it cannot climb out of the store's directory any
+// more than a digest can.
+var versionPattern = regexp.MustCompile(`\A[a-z][a-z0-9-]{0,63}\z`)
+
+// resultPath is results/<input_digest>/<engine_version>.json.
+//
+// A result is immutable for one engine version, so the version is part of the path
+// rather than something that overwrites: two engines may answer the same question,
+// and a store that kept only the newest would silently lose the comparison.
+func (s *Store) resultPath(inputDigest, engineVersion string) (string, error) {
+	if !digestPattern.MatchString(inputDigest) {
+		return "", fmt.Errorf("store: %q is not a SHA-256", inputDigest)
+	}
+	if !versionPattern.MatchString(engineVersion) {
+		return "", fmt.Errorf("store: %q is not an engine version", engineVersion)
+	}
+	return filepath.Join(s.Root, "results", inputDigest, engineVersion+".json"), nil
+}
+
+// PutResult stores a result under its input digest and the engine that produced it.
+func (s *Store) PutResult(inputDigest, engineVersion string, document []byte) error {
+	path, err := s.resultPath(inputDigest, engineVersion)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return writeAtomic(path, document)
+}
+
+// Result returns a stored result.
+func (s *Store) Result(inputDigest, engineVersion string) ([]byte, error) {
+	path, err := s.resultPath(inputDigest, engineVersion)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+}
+
+// ResultVersions lists the engine versions that have answered one question, sorted so
+// the order does not depend on the filesystem.
+func (s *Store) ResultVersions(inputDigest string) ([]string, error) {
+	if !digestPattern.MatchString(inputDigest) {
+		return nil, fmt.Errorf("store: %q is not a SHA-256", inputDigest)
+	}
+	matches, err := filepath.Glob(filepath.Join(s.Root, "results", inputDigest, "*.json"))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(matches))
+	for _, path := range matches {
+		out = append(out, strings.TrimSuffix(filepath.Base(path), ".json"))
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // PutRun stores a run document under its input digest.
 func (s *Store) PutRun(inputDigest string, document []byte) error {
 	if !digestPattern.MatchString(inputDigest) {
