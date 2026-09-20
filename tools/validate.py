@@ -9,6 +9,7 @@ end of input, never "before a trailing newline" as Python's `$` does.
 """
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -292,6 +293,27 @@ def main():
         check(cited <= retained, "every snapshot a draft proposal cites is a retained response")
         print(f"{len(records)} retained snapshot records at {EVIDENCE_COMMIT} match the schema")
 
+    # ---- and the records retained in the WORKING TREE, which history cannot cover
+    #
+    # The block above reads the evidence commit, so a record written today by a
+    # capture is not checked by it. That is how the Go adapter came to write RFC 3339
+    # with a Z where the frozen schema requires +00:00: nothing looked. These are the
+    # records a replay actually reads, so they are checked where they live.
+    tree_records = sorted(PROJECT.glob("fixtures/replay/*/*.request.json"))
+    for path in tree_records:
+        problems = valid(json.loads(path.read_text()), "snapshot-record.schema.json")
+        check(not problems, f"{path.relative_to(PROJECT)}: {problems[:2]}")
+    # Every retained response hashes to the digest its own record claims.
+    for path in tree_records:
+        record = json.loads(path.read_text())
+        response = path.with_name(path.name.replace(".request.json", ".json"))
+        if not response.exists():
+            continue
+        actual = hashlib.sha256(response.read_bytes()).hexdigest()
+        check(actual == record["response_sha256"],
+              f"{response.relative_to(PROJECT)} hashes to {actual[:12]}, its record says {record['response_sha256'][:12]}")
+    print(f"{len(tree_records)} retained snapshot records in the working tree match the schema")
+
     # ---- the freeze: a schema cannot change without schema/CHANGES.md changing
     #
     # The schemas are v1. A change needs a row in CHANGES.md naming the case that
@@ -330,8 +352,20 @@ def main():
           f"ARCHITECTURE names the schema count: expected '{spelled.lower()} draft schemas'")
     for directory in sorted(p.name for p in (PROJECT / "fixtures").iterdir() if p.is_dir()):
         check(f"`{directory}/`" in readme, f"README's fixtures row mentions {directory}/")
-    for top in ("oracle", "engine", "checker", "tools", "schema", "spike", "research"):
+    # Derived from the tree, not a list written here: a hardcoded list keeps demanding
+    # a row for a directory that has been deleted, and stops demanding one for a
+    # directory that has been added. `research/` is named because it is deliberately
+    # NOT in the tree -- it lives in history, and the README says where.
+    present = sorted(p.name for p in PROJECT.iterdir()
+                     if p.is_dir() and not p.name.startswith(".")
+                     and p.name not in ("var", "node_modules"))
+    for top in present + ["research"]:
         check(f"| `{top}/` |" in readme, f"README's layout table has a row for {top}/")
+    # And no row for a directory that is gone, so a deletion updates the README.
+    import re as _re
+    rows = set(_re.findall(r"^\| `([a-z_]+)/` \|", readme, _re.M))
+    for named in sorted(rows - set(present) - {"research"}):
+        check(False, f"README's layout table has a row for {named}/, which is not in the tree")
 
     print(f"{CHECKS} checks passed; {len(documents)} contract documents valid, {refused} documents refused.")
 
