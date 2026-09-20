@@ -50,6 +50,7 @@ const usage = `hedgecheck — check whether a proposed hedge meets an explicit o
   hedgecheck replay   --input-digest D --store DIR --registry DIR
   hedgecheck retain   --input-digest D --store DIR --out DIR
   hedgecheck serve    --store DIR --registry DIR [--address 127.0.0.1:8787]
+  hedgecheck render   --input-digest D --store DIR [--out FILE]
 
 Options:
   --pretty      indent the output; canonical JSON otherwise
@@ -104,6 +105,8 @@ func run(args []string, out, errOut *os.File) int {
 		return commandRetain(flags, out, errOut)
 	case "serve":
 		return commandServe(flags, out, errOut)
+	case "render":
+		return commandRender(flags, out, errOut)
 	}
 	fmt.Fprintf(errOut, "unknown command %q\n\n%s", command, usage)
 	return exitUsage
