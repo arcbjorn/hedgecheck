@@ -1,9 +1,11 @@
 package run
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"hedgecheck/engine/doc"
 	"hedgecheck/engine/exact"
@@ -268,4 +270,90 @@ func TestTheRecordedSkewIsWithinTheBound(t *testing.T) {
 	if worst := int64(-689); abs(worst) > MaxSkewMs {
 		t.Errorf("the recorded worst skew %d exceeds the bound", worst)
 	}
+}
+
+// The assertion keeps the sign the retained 19 September run recorded, and refuses a
+// capture spread too far apart to be one moment. Pinned: the spike measured -621 and
+// -689 ms on that capture, and recorded -689.
+func TestAssertKeepsTheSignAndHoldsTheBound(t *testing.T) {
+	within := Skew{WorstMs: -689}
+	assertion, err := within.Assert("go-engine check")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assertion.SkewMs != "-689" {
+		t.Errorf("recorded skew %q, want -689 with its sign kept", assertion.SkewMs)
+	}
+	if assertion.MaxSkewMs != "5000" {
+		t.Errorf("recorded bound %q, want 5000", assertion.MaxSkewMs)
+	}
+
+	// The bound is about distance from zero, so it bites on either side.
+	for _, worst := range []int64{MaxSkewMs + 1, -(MaxSkewMs + 1)} {
+		if _, err := (Skew{WorstMs: worst}).Assert("go-engine check"); err == nil {
+			t.Errorf("a skew of %d ms was accepted", worst)
+		}
+	}
+	// Exactly at the bound is within it.
+	if _, err := (Skew{WorstMs: -MaxSkewMs}).Assert("go-engine check"); err != nil {
+		t.Errorf("a skew exactly at the bound was refused: %v", err)
+	}
+}
+
+// Measuring the retained 19 September bytes reproduces the skew the spike recorded.
+// This is the cross-implementation check on the assertion itself: the Python capturer
+// wrote -689 into the fixture, and the Go capturer measures the same bytes the same
+// way. The per-book values -621 and -689 are read from that run document.
+func TestMeasureReproducesTheRetainedSkew(t *testing.T) {
+	books, records := map[string][]byte{}, map[string][]byte{}
+	for _, name := range []string{"binary-no", "bucket0-yes"} {
+		book, err := os.ReadFile(filepath.Join(fixtures, name+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := os.ReadFile(filepath.Join(fixtures, name+".request.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		books[name], records[name] = book, record
+	}
+	skew, err := Measure(books, records, BookTime, retrievedAtForTest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int64{"binary-no": -621, "bucket0-yes": -689}
+	for name, expected := range want {
+		if skew.Details[name] != expected {
+			t.Errorf("%s: measured %d ms, the run recorded %d ms",
+				name, skew.Details[name], expected)
+		}
+	}
+	if skew.WorstMs != -689 {
+		t.Errorf("worst skew %d, want -689 exactly as recorded", skew.WorstMs)
+	}
+	assertion, err := skew.Assert("go-engine check")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assertion.SkewMs != "-689" {
+		t.Errorf("the assertion says %q, the fixture says -689", assertion.SkewMs)
+	}
+}
+
+// retrievedAtForTest parses the local retrieval time a request record carries. The
+// adapter owns the production reader because parsing an RFC 3339 instant needs a
+// clock library that a pure package may not import; this reads the same field with
+// the string handling a test can afford.
+func retrievedAtForTest(record []byte) (int64, bool) {
+	var value struct {
+		RetrievedAt string `json:"retrieved_at"`
+	}
+	if err := json.Unmarshal(record, &value); err != nil {
+		return 0, false
+	}
+	moment, err := time.Parse(time.RFC3339Nano, value.RetrievedAt)
+	if err != nil {
+		return 0, false
+	}
+	return moment.UnixMilli(), true
 }
