@@ -412,9 +412,18 @@ def _sized_leg_window(lowered, leg, lower, upper, baseline, cap):
     """
     if leg["premium"]["kind"] != "walked" or "levels" not in leg["premium"]:
         return None
+    # The base is the LOWER profile: every other leg valued exactly as the verdict
+    # values it, so a reduced leg contributes nothing while its premium still counts.
+    #
+    # Sizing against full value instead would answer a question the verdict does not
+    # ask, and the answer can be wrong in the direction that matters: on 20 Sep, with
+    # the base crediting reduced legs, a reported smallest size of one generated case
+    # gave a worst P&L of -4923.49676 against a -4000 cap. A size window that names a
+    # size which then fails is worse than no size window (EVIDENCE section 9).
+    zeroed = {reduction["leg"] for reduction in lowered.get("reductions", [])}
     others = [other for other in lowered["legs"] if other["id"] != leg["id"]]
     base = total([linear(num(lowered["exposure"]["quantity"]), baseline)]
-                 + [_leg(other) for other in others]
+                 + [_leg(other) for other in others if other["id"] not in zeroed]
                  + [cash(-sum((leg_cost(other) for other in others), F(0)) - num(lowered["other_costs"]))])
     unit = _leg(dict(leg, size="1"))
     levels = [(num(price), num(size)) for price, size in leg["premium"]["levels"]]
@@ -469,7 +478,15 @@ def evaluate(lowered):
     failing, undecided, codes = [], [], []
     for clause in lowered["objective"]:
         threshold = num(clause["min_pnl"])
-        for interval in below(pnl, threshold, lower, upper):
+        # A clause may apply to a sub-interval of the domain. Evaluating it outside its
+        # own interval would report a failure the objective never asked about.
+        clause_lower, clause_upper = lower, upper
+        if "on" in clause:
+            clause_lower = max(lower, num(clause["on"]["lower"]))
+            clause_upper = min(upper, num(clause["on"]["upper"]))
+        if clause_upper < clause_lower:
+            continue
+        for interval in below(pnl, threshold, clause_lower, clause_upper):
             shown = text_interval(interval)
             shown["clause"] = clause["id"]
             point = witness(pnl, interval)
@@ -493,6 +510,10 @@ def evaluate(lowered):
     for reduction in reductions:
         if reduction["reason_code"] not in codes:
             codes.append(reduction["reason_code"])
+    # Sorted, not joined. A verdict code and the reduction codes come from two loops,
+    # so the order they met in was an accident; two implementations would each pick a
+    # different accident. ARCHITECTURE section 4 states the rule for every array.
+    codes.sort()
     if undecided and not failing:
         verdict = "needs_review"
     else:
