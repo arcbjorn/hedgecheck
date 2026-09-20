@@ -8,12 +8,12 @@ disagree about *order or scope*, the plan wins; about *structure*, this file doe
 the oracle: the contract as **frozen v1 schemas**, discovery that names no ids,
 lowering from retained bytes, an exact result with its cost, sizing, alternatives
 and witnesses, a reference refuser that refuses fourteen certificate bundles by
-class, and a throwaway live spike that replays byte for byte. The conformance
+class, and a live path that captures and replays byte for byte. The conformance
 spine stands in three languages; **the engine and the checker do not exist yet**
 — T2 and T3 build them. Everything below marked with a tier is design.
 
 ```sh
-make check    # vectors, bundles, schemas, oracle, spike, Go, TypeScript. Offline, no install
+make check    # vectors, bundles, schemas, oracle, Go, TypeScript. Offline, no install
 ```
 
 ---
@@ -341,9 +341,12 @@ checker in the browser on every view; a consumer runs it before it signs.
 | Documented examples cannot drift | `oracle/verify.py` parses PLAN.md and compares its example with the generated fixture |
 | Documented counts cannot drift | `tools/validate.py` — the schema count in README and ARCHITECTURE, and a layout row per top-level directory, are compared with the filesystem |
 | Every contract document is schema-checked | `tools/validate.py` — including both good certificate bundles; corrupted bundles are the refuser's business |
-| A stored result replays byte for byte | `spike/verify.py` and `engine/cmd/hedgecheck/replay_test.go` — the retained 19 September run is recomputed from its stored bytes, offline, by both implementations |
+| A stored result replays byte for byte | `engine/cmd/hedgecheck/replay_test.go` — two retained runs are recomputed from their stored bytes, offline: the 19 September capture the Python spike took, and the 20 September one this engine took itself. Reproducing the spike's run is what let the spike be deleted |
 | A replay checks the result, not just the files | `replay_test.go` — a book edited in place is caught by the store's hash; a genuinely different book, honestly filed under its own digest, must still fail the result comparison |
-| The capture assertion keeps its sign | `spike/verify.py` — the recorded worst skew is re-measured from the retained bytes. The bound is about distance from zero; the record keeps the sign, because it says which clock was ahead, and it feeds the input digest |
+| The capture assertion keeps its sign | `run` — `TestMeasureReproducesTheRetainedSkew` re-measures the retained bytes and gets what the run recorded. The bound is about distance from zero; the record keeps the sign, because it says which clock was ahead, and it feeds the input digest |
+| Exactly one package reaches the venue | `engine/arch_test.go` — an AST scan for `http.Get`, `http.NewRequest`, `client.Do` and the rest outside `adapter/`. Keeping `net` out of the pure packages says nothing about the impure ones, and a direct call from `store` or `cmd` would slip the pace, the budget and the closed set of request types |
+| The capture order is catalogue, contexts, books | `engine/cmd/hedgecheck/capture_test.go` — a fake venue records the call order. A baseline fetched after the books would describe a moment the prices had not reached, and no live run could ever detect it |
+| A retained record matches the frozen schema | `tools/validate.py` — the 50 records at `085ccfb` **and** every record in the working tree. History alone missed the Go adapter writing `Z` where the schema requires `+00:00` |
 | Only `cmd` and `service` may reach the network | `engine/arch_test.go` — an import scan for `engine/adapter`, so "pure" cannot come to depend on what the adapter happens to do |
 | Only the adapter's own package can redirect it | `adapter/hyperliquid` — the endpoint field is unexported and empty by default, so a zero client calls the real venue; a request type outside the closed set never opens a connection |
 | A name is refused as a name, before it reaches a path | `service` — every path parameter is matched against its pattern and answered **400**, not 404. A 404 is what a handler with no validation also returns, so the status is what proves the check happened. Percent-encoded traversal is used in the test, because a plain `../..` is cleaned away by the client and the mux and never reaches a handler |
