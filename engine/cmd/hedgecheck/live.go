@@ -254,12 +254,14 @@ func buildRunDocument(captured Captured, answer runner.Answer, settings liveOpti
 	}
 	results := map[string]doc.Result{}
 	inputs := map[string]string{}
+	sizes := map[string]string{}
 	for _, row := range answer.Rows {
 		if !row.Sized {
 			continue
 		}
 		results[row.ID] = row.Result
 		inputs[row.ID] = row.InputDigest
+		sizes[row.ID] = row.Size.String()
 	}
 	baseline := answer.Baseline.String()
 	return runner.Document{
@@ -271,7 +273,7 @@ func buildRunDocument(captured Captured, answer runner.Answer, settings liveOpti
 		},
 		Expiry: captured.Expiry, Observation: answer.ObservationTime,
 		Valuation: answer.ValuationTime, Digests: digests, Skew: skew,
-		Capture: assertion, Results: results, InputDigests: inputs,
+		Capture: assertion, Results: results, InputDigests: inputs, Sizes: sizes,
 	}
 }
 
