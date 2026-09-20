@@ -262,6 +262,83 @@ def replay_offline():
               f"spike: a one-byte change to {leg_id}'s book changes its hash")
 
 
+def skew_assertion_is_rederivable():
+    """The recorded capture assertion is what measuring the retained bytes produces.
+
+    The replay above reads the stored `capture` block back and feeds it to the
+    evaluator, so it can never disagree with itself. That makes the replay blind to
+    how the block was DERIVED: a capturer that computed the wrong worst skew would
+    still replay byte-identically forever.
+
+    Nothing about the assertion is re-derivable at check time by design -- the
+    contexts response carries no venue timestamp -- but the per-book skews and the
+    worst of them ARE in the retained bytes, so the one number the block summarises
+    can be checked against them.
+    """
+    import live
+
+    retained = PROJECT / "fixtures" / "replay" / "2026-09-19"
+    for path in sorted(retained.glob("*.run.json")):
+        document = json.loads(path.read_text())
+        recorded = document.get("capture")
+        check(recorded, f"spike: {path.name} carries a capture assertion")
+
+        # Re-measure from the retained bytes and records, exactly as a capture does.
+        books, book_records = {}, {}
+        for name in document["digests"]:
+            if name in ("catalogue", "contexts"):
+                continue
+            books[name] = json.loads((retained / f"{name}.json").read_text())
+            book_records[name] = json.loads((retained / f"{name}.request.json").read_text())
+        contexts_record = json.loads((retained / "contexts.request.json").read_text())
+        measured = live.measure_skew(contexts_record, book_records, books)
+
+        for name, entry in measured.items():
+            check(entry["skew_ms"] == document["skew"][name]["skew_ms"],
+                  f"spike: re-measuring {name} gives the skew the run recorded")
+
+        # The block summarises those per-book numbers as one worst value. It is the
+        # WORST, so the one furthest from zero, and it keeps its sign: a signed value
+        # says which clock was ahead, which is the whole point of recording it.
+        worst = max(measured.values(), key=lambda entry: abs(entry["skew_ms"]))["skew_ms"]
+        check(recorded["skew_ms"] == str(worst),
+              f"spike: {path.name} records the worst measured skew "
+              f"({recorded['skew_ms']}), re-measured as {worst}")
+        check(abs(worst) <= int(recorded["max_skew_ms"]),
+              f"spike: the recorded worst skew is within the stated bound")
+
+        # The capturer summarises the same measurements the same way.
+        check(live.worst_signed_skew(measured) == worst,
+              f"spike: the capturer's worst skew agrees with re-measuring {path.name}")
+
+
+def worst_skew_keeps_its_sign():
+    """The recorded worst skew is signed, and the threshold is about magnitude.
+
+    These are two questions about one number. A capturer that answered both with
+    abs() would record "689" where the retained run says "-689", losing which clock
+    was ahead -- and because the assertion is carried INSIDE the result document, it
+    feeds the ir_digest, so the loss is not cosmetic.
+    """
+    import live
+
+    ahead = {"a": {"skew_ms": 120}, "b": {"skew_ms": -40}}
+    behind = {"a": {"skew_ms": -621}, "b": {"skew_ms": -689}}
+    mixed = {"a": {"skew_ms": -300}, "b": {"skew_ms": 900}}
+
+    check(live.worst_signed_skew(behind) == -689, "spike: the worst skew keeps a negative sign")
+    check(live.worst_signed_skew(ahead) == 120, "spike: the worst skew keeps a positive sign")
+    check(live.worst_signed_skew(mixed) == 900, "spike: the worst skew is the one furthest from zero")
+    check(live.worst_signed_skew({}) == 0, "spike: no books measured is a skew of zero")
+
+    # The refusal is about distance from zero, so a large negative skew is refused
+    # exactly as a large positive one would be.
+    for sign in (1, -1):
+        far = {"a": {"skew_ms": sign * (live.MAX_SKEW_MS + 1)}}
+        check(abs(live.worst_signed_skew(far)) > live.MAX_SKEW_MS,
+              f"spike: a skew of {sign * (live.MAX_SKEW_MS + 1)} ms is beyond the bound")
+
+
 def network_isolation():
     """All network code lives in one module, checked on the import graph, not on prose.
 
@@ -299,6 +376,8 @@ def main():
     no_literal_instruments()
     discovery_offline()
     replay_offline()
+    skew_assertion_is_rederivable()
+    worst_skew_keeps_its_sign()
     evaluation_offline()
     determinism()
     network_isolation()
