@@ -42,10 +42,14 @@ const usage = `hedgecheck — check whether a proposed hedge meets an explicit o
   hedgecheck lower    --proposal P --registry DIR --snapshots DIR
   hedgecheck evaluate --lowered L
   hedgecheck check    --proposal P --registry DIR --snapshots DIR
+  hedgecheck check --live --underlying BTC --quantity Q --cap C --floor F
+                          --ceiling CE --baseline analysis_time|explicit:P
+                          --valuation-time T --store DIR --registry DIR
   hedgecheck bundle   --proposal P --registry DIR --snapshots DIR --out DIR
   hedgecheck compare  --result R --result R [--result R ...]
   hedgecheck replay   --input-digest D --store DIR --registry DIR
   hedgecheck retain   --input-digest D --store DIR --out DIR
+  hedgecheck serve    --store DIR --registry DIR [--address 127.0.0.1:8787]
 
 Options:
   --pretty      indent the output; canonical JSON otherwise
@@ -86,6 +90,9 @@ func run(args []string, out, errOut *os.File) int {
 	case "evaluate":
 		return commandEvaluate(flags, out, errOut)
 	case "check":
+		if flags.live {
+			return commandCheckLive(flags, out, errOut)
+		}
 		return commandCheck(flags, out, errOut)
 	case "bundle":
 		return commandBundle(flags, out, errOut)
@@ -95,22 +102,33 @@ func run(args []string, out, errOut *os.File) int {
 		return commandReplay(flags, out, errOut)
 	case "retain":
 		return commandRetain(flags, out, errOut)
+	case "serve":
+		return commandServe(flags, out, errOut)
 	}
 	fmt.Fprintf(errOut, "unknown command %q\n\n%s", command, usage)
 	return exitUsage
 }
 
 type options struct {
-	proposal    string
-	lowered     string
-	registry    string
-	snapshots   string
-	out         string
-	results     []string
-	pretty      bool
-	reviewed    bool
-	store       string
-	inputDigest string
+	proposal      string
+	lowered       string
+	registry      string
+	snapshots     string
+	out           string
+	results       []string
+	pretty        bool
+	reviewed      bool
+	store         string
+	inputDigest   string
+	address       string
+	live          bool
+	underlying    string
+	quantity      string
+	capAmount     string
+	floor         string
+	ceiling       string
+	baseline      string
+	valuationTime string
 }
 
 func parseFlags(args []string) (options, error) {
@@ -142,6 +160,24 @@ func parseFlags(args []string) (options, error) {
 			flags.results = append(flags.results, path)
 		case "--store":
 			flags.store, err = value()
+		case "--live":
+			flags.live = true
+		case "--underlying":
+			flags.underlying, err = value()
+		case "--quantity":
+			flags.quantity, err = value()
+		case "--cap":
+			flags.capAmount, err = value()
+		case "--floor":
+			flags.floor, err = value()
+		case "--ceiling":
+			flags.ceiling, err = value()
+		case "--baseline":
+			flags.baseline, err = value()
+		case "--valuation-time":
+			flags.valuationTime, err = value()
+		case "--address":
+			flags.address, err = value()
 		case "--input-digest":
 			flags.inputDigest, err = value()
 		case "--pretty":
