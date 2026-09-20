@@ -44,6 +44,8 @@ const usage = `hedgecheck — check whether a proposed hedge meets an explicit o
   hedgecheck check    --proposal P --registry DIR --snapshots DIR
   hedgecheck bundle   --proposal P --registry DIR --snapshots DIR --out DIR
   hedgecheck compare  --result R --result R [--result R ...]
+  hedgecheck replay   --input-digest D --store DIR --registry DIR
+  hedgecheck retain   --input-digest D --store DIR --out DIR
 
 Options:
   --pretty      indent the output; canonical JSON otherwise
@@ -89,20 +91,26 @@ func run(args []string, out, errOut *os.File) int {
 		return commandBundle(flags, out, errOut)
 	case "compare":
 		return commandCompare(flags, out, errOut)
+	case "replay":
+		return commandReplay(flags, out, errOut)
+	case "retain":
+		return commandRetain(flags, out, errOut)
 	}
 	fmt.Fprintf(errOut, "unknown command %q\n\n%s", command, usage)
 	return exitUsage
 }
 
 type options struct {
-	proposal  string
-	lowered   string
-	registry  string
-	snapshots string
-	out       string
-	results   []string
-	pretty    bool
-	reviewed  bool
+	proposal    string
+	lowered     string
+	registry    string
+	snapshots   string
+	out         string
+	results     []string
+	pretty      bool
+	reviewed    bool
+	store       string
+	inputDigest string
 }
 
 func parseFlags(args []string) (options, error) {
@@ -132,6 +140,10 @@ func parseFlags(args []string) (options, error) {
 			var path string
 			path, err = value()
 			flags.results = append(flags.results, path)
+		case "--store":
+			flags.store, err = value()
+		case "--input-digest":
+			flags.inputDigest, err = value()
 		case "--pretty":
 			flags.pretty = true
 		case "--reviewed":
