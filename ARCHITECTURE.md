@@ -347,6 +347,9 @@ checker in the browser on every view; a consumer runs it before it signs.
 | Exactly one package reaches the venue | `engine/arch_test.go` — an AST scan for `http.Get`, `http.NewRequest`, `client.Do` and the rest outside `adapter/`. Keeping `net` out of the pure packages says nothing about the impure ones, and a direct call from `store` or `cmd` would slip the pace, the budget and the closed set of request types |
 | The capture order is catalogue, contexts, books | `engine/cmd/hedgecheck/capture_test.go` — a fake venue records the call order. A baseline fetched after the books would describe a moment the prices had not reached, and no live run could ever detect it |
 | A retained record matches the frozen schema | `tools/validate.py` — the 50 records at `085ccfb` **and** every record in the working tree. History alone missed the Go adapter writing `Z` where the schema requires `+00:00` |
+| The screen answers, and never advises | `engine/screen/forbidden_test.go` — the rendered page is matched against a list of words this tool has no standing to say: *recommend*, *optimal*, *guaranteed*, *risk-free*, *executable*, *proven*. Each entry carries its reason. "advice" is permitted only in the sentence disclaiming it |
+| `needs_review` is not a softer `fails` | same test — the wording is checked directly, because it is the sentence a reader acts on and the one most likely to be softened later |
+| The chart cannot mislead about the bound | `engine/screen/chart_test.go` — the vertical extent always includes the cap, and a piece crossing it is **split at the crossing**, solved exactly, so colour marks where the bound is breached and nowhere else. Coordinates are computed as rationals and rounded once, at the moment they become SVG text |
 | Only `cmd` and `service` may reach the network | `engine/arch_test.go` — an import scan for `engine/adapter`, so "pure" cannot come to depend on what the adapter happens to do |
 | Only the adapter's own package can redirect it | `adapter/hyperliquid` — the endpoint field is unexported and empty by default, so a zero client calls the real venue; a request type outside the closed set never opens a connection |
 | A name is refused as a name, before it reaches a path | `service` — every path parameter is matched against its pattern and answered **400**, not 404. A 404 is what a handler with no validation also returns, so the status is what proves the check happened. Percent-encoded traversal is used in the test, because a plain `../..` is cleaned away by the client and the mux and never reaches a handler |
@@ -372,7 +375,7 @@ fixtures/   golden/   lowered proposal and its generated expected result
 registry/   semantics entries as data: recurring.priceBinary, recurring.priceBucket
 oracle/     exact.py  canon.py  oracle.py (kernel, evaluate)  lower.py  verify.py
 engine/     exact/  canon/  arch_test.go          ── built
-            pwa/  doc/  lower/  evaluate/  discover/  run/  ── pure
+            pwa/  doc/  lower/  evaluate/  discover/  run/  screen/  ── pure
             adapter/hyperliquid/  store/  service/  cmd/hedgecheck/
                                                             ── the only impure packages
 checker/    src/exact.ts  src/canon.ts            ── built
