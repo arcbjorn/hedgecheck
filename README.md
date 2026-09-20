@@ -53,12 +53,21 @@ hedgecheck compare  --result R --result R [--result R ...]
 hedgecheck replay   --input-digest D --store DIR --registry DIR
 hedgecheck retain   --input-digest D --store DIR --out DIR
 hedgecheck serve    --store DIR --registry DIR [--address 127.0.0.1:8787]
+hedgecheck render   --input-digest D --store DIR [--out FILE]
 ```
 
 Exit status is the answer, so a caller can branch without parsing output: `0`
 passes, `1` fails, `2` needs review, `3` refused with the class on stderr, `4` a
 usage or technical error. **A refusal is not a verdict** — status `3` never means
 the objective was evaluated and found wanting.
+
+`render` writes the result screen for a stored run: the candidates ranked by the
+cost of the smallest size that met the objective, a payoff chart per candidate
+showing the stated bound and where the payoff crosses it, and a section stating
+what the answer does **not** establish. It renders what was stored rather than
+recomputing, so the page shows what was filed under that input digest. The page
+answers a stated objective and is not advice; `screen/forbidden_test.go` holds it
+to that.
 
 `serve` binds loopback and nothing else. It offers one write and three reads, all
 idempotent, which together are everything a browser needs to verify a result
