@@ -17,6 +17,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"hedgecheck/engine/run"
 )
 
 // Endpoint is the only URL this package will call.
@@ -152,26 +154,13 @@ func (c *Client) Book(coin string) (Response, error) {
 	return c.Fetch(map[string]any{"type": "l2Book", "coin": coin})
 }
 
-// BookTime reads an l2Book's venue timestamp, in milliseconds. The contexts response
-// carries none, which is why capture skew is measured against a book and asserted
-// rather than derived (EVIDENCE section 4).
-func BookTime(raw []byte) (int64, bool) {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	var value map[string]any
-	if err := decoder.Decode(&value); err != nil {
-		return 0, false
-	}
-	number, ok := value["time"].(json.Number)
-	if !ok {
-		return 0, false
-	}
-	milliseconds, err := number.Int64()
-	if err != nil {
-		return 0, false
-	}
-	return milliseconds, true
-}
+// BookTime reads an l2Book's venue timestamp, in milliseconds. It delegates to the
+// pure reader so the live path and a replay cannot drift apart: two copies of one
+// parser is two chances to disagree about what a retained byte means.
+//
+// The contexts response carries no venue timestamp, which is why capture skew is
+// measured against a book and asserted rather than derived (EVIDENCE section 4).
+func BookTime(raw []byte) (int64, bool) { return run.BookTime(raw) }
 
 // RetrievedAt reads a request record's local retrieval time, in milliseconds.
 func RetrievedAt(record []byte) (int64, bool) {
