@@ -514,8 +514,12 @@ test("the gate has no way to send an order of its own", () => {
   assert.equal(sites.length, 1, `gate.ts calls place at ${sites.length} sites`);
 });
 
-/** `place` is a parameter, and this task ships only the recording fake. */
-test("nothing in consumer/src knows how to place a real order", () => {
-  const names = readdirSync(here("../src/")).filter((name) => name.endsWith(".ts"));
-  assert.deepEqual(names, ["gate.ts"], "consumer/src holds only the gate");
+// `place` is a parameter of the gate. place.ts exists and can reach a venue, but
+// gate.ts must not import it: the gate decides, the sender sends, and a gate that
+// could construct its own sender could place without deciding.
+test("the gate cannot reach a sender of its own", () => {
+  const source = readFileSync(here("../src/gate.ts"), "utf8");
+  assert.doesNotMatch(source, /from\s*["']\.\/place\.ts["']/, "gate.ts imports place.ts");
+  const names = readdirSync(here("../src/")).filter((name) => name.endsWith(".ts")).sort();
+  assert.deepEqual(names, ["gate.ts", "place.ts"], "consumer/src holds an unexpected module");
 });
