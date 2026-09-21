@@ -50,7 +50,50 @@ A verdict alone does not answer what a person asks before approving a hedge.
 | `result.capture`, `ir.capture`, `proposal.capture`, `defs.capture`, `defs.integer_text` | T1's gate says snapshots must be "retrieved within a stated skew, **recorded in it**". Nothing recorded it. `result.snapshots` already existed and nothing populated it, so the provenance slot was there and empty. `capture` is an **assertion, not a derivation**: the contexts response carries no venue timestamp, so the spread between a book's venue clock and the baseline's retrieval cannot be re-derived from the bytes by anyone, including a checker. |
 | `result.upper_profile` re-typed from `interval` to the profile piece shape | Found the moment the validator began checking bundle documents: `$.upper_profile[0]: unexpected 'intercept'`. It had been typed as a bare interval while carrying `slope` and `intercept`. A schema too loose in one direction and too tight in the other, invisible until the fixtures were validated. |
 
+## Forced by the approval gate (T3)
+
+The first change **after** the freeze. Additive, so `schema_version` stays `"1"`
+by the rule below; the row and the refused mutations in `tools/validate.py` are
+what the freeze demands of it.
+
+| Change | Forcing case |
+|---|---|
+| `refusal.class` gains `ENVELOPE_MISMATCH` | An envelope is a new thing to be wrong about, and the list is closed so two checkers refuse alike. Every existing class names a fault in the verdict or its evidence; "the result issued an order the book does not bound" is neither. Folding it into `COST_MISMATCH` would make a re-walk disagreement and a carried-over envelope indistinguishable, which is the exact wording question the closed list exists to prevent. |
+| `result.order_envelope`, and `defs.order_envelope` | A depth-priced cost bounds **one order and no other**. The 18 September bucket cost 160.76676 for 924 contracts because the walk stopped inside the 0.17399 level; the binary cost 645.76904 for 1,409 because the walk ended in the 0.48404 level. Neither number bounds anything about 925 contracts, about a limit of 0.17400, or about an order left resting on the book. Until this row the result stated the bound and not the order it bounds, so a gate had to invent the coin, the limit and the time in force — and an invented limit is not the one the walk measured. `execution_readiness: envelope_issued` was in the enum from v1 with nothing that could ever set it. Refused by `tools/validate.py`: an envelope on a `fails`, an envelope whose `execution_readiness` disagrees, `time_in_force` other than `Ioc`, `side` other than `buy`, and `execution_readiness: envelope_issued` with no envelope. |
+
+**What it does not change.** The envelope is not emitted by the evaluator.
+`evaluate.Evaluate` is pure and the IR carries no instance id by design
+(PLAN section 6: "Instance ids are never in it"), and it has no `input_digest`,
+which is computed after it. So the envelope is issued by a separate step over the
+proposal, the IR and the finished result — `engine/envelope` — and a result that
+nobody asked to execute keeps `not_evaluated`, exactly as before.
+
 ---
+
+## Forced by testnet discovery (T3)
+
+**The forcing case.** T3's order path is exercised against testnet, so the adapter
+gained a second endpoint constant and an explicit `--network` flag. The first
+retained testnet record then failed `snapshot-record.schema.json` on two counts:
+
+    $.endpoint: expected 'https://api.hyperliquid.xyz/info'
+    $: unexpected 'network'
+
+The schema pinned `endpoint` to the mainnet URL with a `const`, which was right while
+mainnet was the only network and is wrong now. Retained evidence that cannot be
+validated is not evidence.
+
+- **`snapshot-record.endpoint` becomes an `enum` of the two info endpoints.** An enum
+  rather than a base plus a path: an arbitrary URL must stay impossible, and a record
+  naming a third one would be evidence of a request nothing here can make. The two
+  values match `hyperliquid.Mainnet` and `hyperliquid.Testnet`, and
+  `TestNetworkContract` fails if that set grows.
+- **`snapshot-record.network` is added, optional, `mainnet | testnet`.** A record must
+  say which network it came from, or a testnet capture and a mainnet one are
+  indistinguishable once retained -- and EVIDENCE section 9 already lists "testnet
+  observation establishes mainnet fees" as a known-wrong claim. Optional because the
+  50 records at `085ccfb` predate the field and are all mainnet; making it required
+  would invalidate the evidence commit.
 
 ## Not changed, and why
 
