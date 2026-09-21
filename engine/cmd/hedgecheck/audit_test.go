@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,40 @@ import (
 
 const auditFixtures = "../../../fixtures/replay/2026-09-18"
 const auditRegistry = "../../../registry"
+
+// A copy of the registry with every entry forced back to a draft.
+//
+// The cases below pin what a DRAFT registry produces, so they have to supply one.
+// Reading the live directory made the expected exit status depend on whether an owner
+// had reviewed the entries -- a fact about the working tree, not about the CLI -- so
+// reviewing them turned "check on a draft registry" into a check on a reviewed one.
+func draftRegistry(t *testing.T) string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(auditRegistry, "*.json"))
+	if err != nil || len(matches) == 0 {
+		t.Skipf("no registry entries: %v", err)
+	}
+	out := t.TempDir()
+	for _, path := range matches {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var entry map[string]any
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			t.Fatal(err)
+		}
+		entry["review"] = map[string]any{"state": "draft", "drafted_by": "model"}
+		rewritten, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(out, filepath.Base(path)), rewritten, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return out
+}
 
 // Exit status is the contract a caller branches on without parsing output:
 // 0 passes, 1 fails, 2 needs review, 3 refused, 4 usage or technical error.
@@ -27,7 +62,7 @@ func TestAuditExitStatusIsTheContract(t *testing.T) {
 		want []int
 	}{
 		{"check on a draft registry", []string{"check", "--proposal", proposal,
-			"--registry", auditRegistry, "--snapshots", auditFixtures}, []int{exitNeedsReview}},
+			"--registry", draftRegistry(t), "--snapshots", auditFixtures}, []int{exitNeedsReview}},
 		{"check with --reviewed", []string{"check", "--proposal", proposal,
 			"--registry", auditRegistry, "--snapshots", auditFixtures, "--reviewed"},
 			[]int{exitPasses, exitFails}},
@@ -126,7 +161,7 @@ func TestAuditLowerAndEvaluateComposeThroughFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := run([]string{"lower", "--proposal", proposal,
-		"--registry", auditRegistry, "--snapshots", auditFixtures}, handle, errHandle)
+		"--registry", draftRegistry(t), "--snapshots", auditFixtures}, handle, errHandle)
 	handle.Close()
 	errHandle.Close()
 	if status != exitPasses {
@@ -146,6 +181,7 @@ func TestAuditPrettyIsOnlyWhitespace(t *testing.T) {
 	if _, err := os.Stat(proposal); err != nil {
 		t.Skip(err)
 	}
+	drafts := draftRegistry(t)
 	write := func(pretty bool) string {
 		t.Helper()
 		path := filepath.Join(t.TempDir(), "ir.json")
@@ -155,7 +191,7 @@ func TestAuditPrettyIsOnlyWhitespace(t *testing.T) {
 		}
 		errHandle, _ := os.Create(filepath.Join(t.TempDir(), "e"))
 		args := []string{"lower", "--proposal", proposal,
-			"--registry", auditRegistry, "--snapshots", auditFixtures}
+			"--registry", drafts, "--snapshots", auditFixtures}
 		if pretty {
 			args = append(args, "--pretty")
 		}
