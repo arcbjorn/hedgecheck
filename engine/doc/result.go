@@ -92,6 +92,24 @@ type Comparisons struct {
 	SmallestReduction SmallestReduction
 }
 
+// OrderEnvelope is the order a depth-priced cost bound assumes.
+//
+// The bound is about ONE order. A walk of 924 contracts down the asks says what those
+// 924 cost at the prices the book displayed, and nothing whatever about 925, about a
+// limit below the last level it touched, or about an order left resting until the book
+// has moved. The envelope writes that order down so a gate places it rather than
+// guessing at it, and carries the InputDigest of the result it belongs to so it cannot
+// be carried to a different answer.
+type OrderEnvelope struct {
+	Coin        string
+	Side        string // always "buy"
+	Size        exact.Q
+	LimitPrice  exact.Q
+	TimeInForce string // always "Ioc"
+	MaxCost     exact.Q
+	InputDigest string
+}
+
 // Result is one complete answer: the verdict, what it cost, and what else was possible.
 type Result struct {
 	SchemaVersion          string
@@ -129,6 +147,7 @@ type Result struct {
 	Snapshots              []string
 	hasSnapshots           bool
 	Capture                *Capture
+	OrderEnvelope          *OrderEnvelope
 }
 
 // ReadResult decodes a result from canonical bytes.
@@ -178,7 +197,26 @@ func decodeResult(path string, value any) (Result, error) {
 	out.SemanticsVersion, out.hasSemanticsVersion = readOptionalDigests(r, "semantics_version")
 	out.Snapshots, out.hasSnapshots = readOptionalDigests(r, "snapshots")
 	out.Capture = readCapture(r)
+	out.OrderEnvelope = readOrderEnvelope(r)
 	return out, r.done()
+}
+
+func readOrderEnvelope(r *reader) *OrderEnvelope {
+	child, present := r.optionalSub("order_envelope")
+	if !present || child == nil {
+		return nil
+	}
+	out := OrderEnvelope{
+		Coin:        child.str("coin", coinPattern, "the venue's own instrument id"),
+		Side:        child.enum("side", "buy"),
+		Size:        child.number("size"),
+		LimitPrice:  child.number("limit_price"),
+		TimeInForce: child.enum("time_in_force", "Ioc"),
+		MaxCost:     child.number("max_cost"),
+		InputDigest: child.str("input_digest", digestPattern, "a SHA-256"),
+	}
+	r.finish(child)
+	return &out
 }
 
 func readTimes(r *reader, key string) []string {
@@ -537,6 +575,13 @@ func encodeResult(result Result) map[string]any {
 		out["capture"] = map[string]any{
 			"skew_ms": result.Capture.SkewMs, "max_skew_ms": result.Capture.MaxSkewMs,
 			"measured_by": result.Capture.MeasuredBy,
+		}
+	}
+	if envelope := result.OrderEnvelope; envelope != nil {
+		out["order_envelope"] = map[string]any{
+			"coin": envelope.Coin, "side": envelope.Side, "size": envelope.Size.String(),
+			"limit_price": envelope.LimitPrice.String(), "time_in_force": envelope.TimeInForce,
+			"max_cost": envelope.MaxCost.String(), "input_digest": envelope.InputDigest,
 		}
 	}
 	return out
