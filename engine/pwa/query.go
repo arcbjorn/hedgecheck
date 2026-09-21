@@ -195,6 +195,27 @@ func AskCost(levels []Level, size exact.Q) (exact.Q, bool) {
 	return exact.Q{}, false
 }
 
+// WalkLimit returns the price of the HIGHEST level the walk touched, and false when
+// the displayed depth cannot fill the size.
+//
+// It is the limit an order envelope states. Anything lower would leave part of the
+// size unfilled at a price the walk counted; anything higher would let the order pay
+// more than the walk measured, and the cost bound would stop being a bound.
+func WalkLimit(levels []Level, size exact.Q) (exact.Q, bool) {
+	remaining, limit := size, exact.Q{}
+	for _, level := range levels {
+		fill := exact.Min(remaining, level.Size)
+		if fill.Sign() > 0 {
+			limit = level.Price
+		}
+		remaining = remaining.Sub(fill)
+		if remaining.Sign() == 0 {
+			return limit, true
+		}
+	}
+	return exact.Q{}, false
+}
+
 // Site is a price and the side of it a constraint binds at.
 type Site struct {
 	Price exact.Q
