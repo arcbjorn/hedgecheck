@@ -320,6 +320,20 @@ Implementations agree with the vectors, never the other way round.
 **The server computes and the client verifies.** The result screen runs the
 checker in the browser on every view; a consumer runs it before it signs.
 
+**What that does and does not protect against.** The page fetches the result, the
+proposal, the lowered proposal, every snapshot by hash and every registry entry by
+version, hashes each one itself, and re-derives the answer with
+`checker/dist/checker.js`. This catches **a mistake in the engine that computed the
+result** — a wrong walk, a dropped piece, a verdict that does not follow. That is a
+real and common failure, and it is the one the check is for.
+
+**It does not protect against a dishonest server.** A server that serves a dishonest
+result can serve a dishonest checker beside it, and the page has no way to tell.
+Verification in the browser is a convenience for a reader who trusts the operator to
+be honest but not to be correct. **The trust boundary is the consumer**, which runs
+its own copy of the checker against bundles it fetched itself. The page says exactly
+this to the reader rather than implying more.
+
 ---
 
 ## 7. Boundaries, and what holds them
@@ -403,6 +417,34 @@ accepts a `passes` whose `input_digest` matches the order envelope — coin, sid
 size, limit price, `Ioc`, maximum cost — make zero downstream calls. Keys live
 only here: testnet, an agent wallet, never a main-wallet key on disk.
 
+`consumer/src/gate.ts` is that function, and it ships with a recording fake and no
+key of any kind. Four things about it are structural rather than conventional:
+
+- **The envelope is issued by a step outside the evaluator.** `evaluate.Evaluate`
+  is pure, the lowered form carries no instance id (§6 — instance ids are never in
+  the registry or the IR), and `input_digest` is computed after evaluation. So
+  `engine/envelope` takes the proposal, the IR, the finished result and the digest,
+  and issues or blocks. A result nobody asked to execute stays `not_evaluated`.
+- **The limit is the price of the highest level the walk touched.** Anything lower
+  leaves part of the size unfilled at a price the walk counted; anything higher lets
+  the order pay more than the walk measured, so `max_cost` would stop being a
+  maximum. `envelope-limit-raised` is the fixture, and it is the only thing that
+  catches it: no other check in the checker overlaps that one.
+- **The clock is injected.** `policy.now` is a value, so the staleness boundary is
+  testable at the millisecond. `gate.ts` names no clock at all and a test enforces
+  that by reading the source.
+- **"Approved" is unrepresentable without the check.** `Approved.brand` is typed by
+  a `unique symbol` declared in `gate.ts` and exported from nowhere, so no other
+  module can write the type. `consumer/test/unrepresentable.ts` holds four attempts
+  and `typegate.test.ts` fails if any of them compiles.
+
+The gate re-states the verdict, envelope and digest conditions the checker already
+establishes. That is deliberate, and §7's fourth lesson is why: mutation testing
+found that three of the gate's own conditions were fully shadowed by the checker
+and could be deleted without a test noticing. The table now drives each of them
+with an accepting stub in place of the checker, so the gate is held to its own
+conditions rather than to the checker's.
+
 **On-chain (T7).** The same checker logic over fixed-point integers, gating a
 CoreWriter order. Cost is bounded by `limit price × size`, so no book is read.
 
@@ -430,10 +472,20 @@ an entry; it never runs inside lowering, evaluation or checking.
 
 ## 10. Open
 
+**The checker's allowlist.** `checker/dist/allowlist.json` is DERIVED, never written
+by hand: `tools/build_checker.py` reads `registry/` and emits the
+`semantics_version` of every entry whose state is `reviewed` **and** whose
+`review.digest` still matches that version. Both entries are model drafts today, so
+the list is **empty** — which is the correct answer rather than a missing one. To
+rotate it the owner reviews an entry and rebuilds; to revoke, the review is removed
+and the next build drops the digest. Editing an entry moves its `semantics_version`,
+so a stale review stops counting without anyone having to notice. `make check`
+fails if the committed list differs from what the registry produces.
+
 | Question | Blocks |
 |---|---|
 | Module and package names (`hedgecheck/engine`, `@hedgecheck/checker`) are local; they change to the public path when the repository has one | Publishing |
 | Whether the oracle moves from `Fn` to explicit piece lists when T1 extends it. Recommended: yes | T1 |
-| How the checker's accepted registry digests are distributed and rotated | T3 |
+| ~~How the checker's accepted registry digests are distributed and rotated~~ **Answered in T3, below** | — |
 | CI. No workflow is committed because none has been run; `make check` is the contract until a remote exists | Publishing |
 | TypeScript tests are executed but not type-checked: that needs `@types/node`, a dependency. Only `src/` is type-checked | — |
