@@ -116,6 +116,12 @@ def cases():
             dict(entries, **{"template.priceTouch": touch_entry(entries)}),
             "template.priceTouch"), snapshots,
          "a family lowering has no rule for"),
+        ("family-bounded-not-computed", "UNSUPPORTED_FAMILY", *repin(
+            proposal, status_entries(entries, "bounded"), "recurring.priceBucket"), snapshots,
+         "a family the registry marks bounded, whose payoff is not a terminal function"),
+        ("family-status-refused", "UNSUPPORTED_FAMILY", *repin(
+            proposal, status_entries(entries, "refused"), "recurring.priceBucket"), snapshots,
+         "a family the registry refuses: its reading is not established"),
         ("no-payoff-for-side", "NO_PAYOFF_FOR_SIDE",
          with_leg(["side"], "long"), entries, snapshots,
          "a side the registry entry defines no payoff for"),
@@ -150,6 +156,21 @@ def touch_entry(entries):
     """A priceTouch entry, so the refusal is the family rule and not a missing entry."""
     out = copy.deepcopy(entries["recurring.priceBucket"])
     out["family"] = "template.priceTouch"
+    return out
+
+
+def status_entries(entries, status):
+    """The bucket entry with its status forced, so the refusal is the STATUS rule.
+
+    `bounded` says the payoff is not a function of the terminal price (priceTouch is
+    path-dependent); `refused` says the registry does not have a reading at all. Both
+    must refuse rather than reduce: a reduction still produces a verdict, and neither of
+    these has a verdict to produce.
+    """
+    out = copy.deepcopy(entries)
+    entry = copy.deepcopy(out["recurring.priceBucket"])
+    entry["status"] = status
+    out["recurring.priceBucket"] = entry
     return out
 
 
