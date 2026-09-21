@@ -375,6 +375,48 @@
       "type": "string",
       "maxLength": 20,
       "pattern": "^(?:-?(?:0|[1-9][0-9]*))$"
+    },
+    "order_envelope": {
+      "description": "The order the cost bound assumes. A depth-priced cost is the cost of ONE order and of no other: walking asks for 924 contracts bounds the cost only if the order that runs is a buy of exactly 924 contracts, priced no worse than the highest level the walk touched, and cancelled rather than rested. Any other order has a different cost and the result says nothing about it. `limit_price` is the price of the highest level the walk touched, `max_cost` the walked total, and `input_digest` the result this envelope belongs to, so an envelope cannot be carried to a different answer.",
+      "type": "object",
+      "required": [
+        "coin",
+        "side",
+        "size",
+        "limit_price",
+        "time_in_force",
+        "max_cost",
+        "input_digest"
+      ],
+      "properties": {
+        "coin": {
+          "description": "The venue's own id for the instrument, as discovered.",
+          "type": "string",
+          "pattern": "^#[0-9]{1,12}$"
+        },
+        "side": {
+          "description": "Buy only. Acquiring protection is the only side a cost bound from the ask side can bound.",
+          "const": "buy"
+        },
+        "size": {
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "limit_price": {
+          "description": "The price of the HIGHEST level the walk touched. A fill at any price the book displayed for this size is at or below it, so the order cannot cost more than the bound.",
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "time_in_force": {
+          "description": "Ioc only. A resting order outlives the book that priced it, so the bound would stop being about the evidence.",
+          "const": "Ioc"
+        },
+        "max_cost": {
+          "$ref": "defs.schema.json#/$defs/number"
+        },
+        "input_digest": {
+          "$ref": "defs.schema.json#/$defs/sha256"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }
