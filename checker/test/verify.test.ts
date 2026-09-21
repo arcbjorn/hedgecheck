@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { parse, type Value } from "../src/canon.ts";
+import { canonical, digest, parse, type Value } from "../src/canon.ts";
 import { schemas, type Schemas } from "../src/doc.ts";
 import { parseVenue, type VenueValue } from "../src/venue.ts";
 import { type Bundle, verify } from "../src/verify.ts";
@@ -138,6 +138,64 @@ test("an unreviewed family is refused as an undeclared reduction, not a profile 
     checked += 1;
   }
   assert.ok(checked >= 2, `only ${checked} good bundles were checked against an empty allowlist`);
+});
+
+// ONLY A `computed` FAMILY HAS A TERMINAL PAYOFF TO CHECK.
+//
+// `bounded` means the payoff is not a function of the terminal price -- `priceTouch` is
+// path-dependent, so a terminal-price kernel cannot evaluate it -- and `refused` means
+// the registry has no established reading at all (PLAN section 6, "Everything else --
+// Refused").
+//
+// Both were evaluated as if `computed`: a family the registry REFUSES produced a clean
+// `passes`, with no reduction and no refusal. Both engines now refuse to lower one, so a
+// bundle carrying a lowering for one did not come from an engine that agrees with this
+// checker, and it is refused rather than checked.
+test("a family that is not computed is refused, not evaluated", async () => {
+  const all = loadSchemas();
+  const directory = here("../../fixtures/bundles/");
+
+  for (const status of ["bounded", "refused"]) {
+    const loaded = loadBundle(directory, "good-envelope");
+    // Rewrite the registry copy the bundle carries. The pin is over the entry WITHOUT
+    // its review, so changing `status` moves the digest -- which is why the refusal
+    // could arrive as a pin mismatch instead. Asserting the DETAIL below is what
+    // separates the two.
+    const rewritten = new Map<string, Uint8Array>();
+    const versions = new Map<string, string>();
+    for (const [family, raw] of loaded.bundle.registry) {
+      const entry = parse(raw) as Record<string, Value>;
+      const edited = { ...entry, status } as Record<string, Value>;
+      rewritten.set(family, canonical(edited as Value));
+      const withoutReview: Record<string, Value> = {};
+      for (const [key, value] of Object.entries(edited)) {
+        if (key !== "review") withoutReview[key] = value;
+      }
+      versions.set(family, await digest(withoutReview as Value));
+    }
+    // Repin the proposal at the edited entries, or the PIN check fires first and the
+    // fixture proves the wrong thing -- the same reason `tools/make_refusals.py` has a
+    // `repin` helper.
+    const proposal = parse(loaded.bundle.proposal) as Record<string, Value>;
+    const legs = (proposal["legs"] as Value[]).map((raw) => {
+      const leg = raw as Record<string, Value>;
+      return { ...leg, semantics_version: versions.get(leg["family"] as string) as string };
+    });
+    const repinned = canonical({ ...proposal, legs } as Value);
+
+    const outcome = await verify(
+      { ...loaded.bundle, proposal: repinned, registry: rewritten },
+      { schemas: all, allowlist: new Set(versions.values()) },
+    );
+
+    assert.equal(outcome.accepted, false, `a ${status} family was accepted`);
+    if (outcome.accepted) continue;
+    assert.equal(outcome.refusal.class, "SEMANTICS_PIN", `a ${status} family gave ${outcome.refusal.class}`);
+    assert.ok(
+      outcome.refusal.detail.includes(status),
+      `the refusal does not say the status is ${status}: ${outcome.refusal.detail}`,
+    );
+  }
 });
 
 test("every good bundle is accepted", async () => {
