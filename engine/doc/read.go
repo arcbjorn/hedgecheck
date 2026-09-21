@@ -45,6 +45,8 @@ var (
 	legIDPattern  = regexp.MustCompile(`\A[a-z][a-z0-9-]*\z`)
 	codePattern   = regexp.MustCompile(`\A[A-Z][A-Z0-9_]*\z`)
 	intPattern    = regexp.MustCompile(`\A-?(?:0|[1-9][0-9]*)\z`)
+	// defs.schema.json #/$defs/digits: a non-negative integer with no leading zero.
+	digitsPattern = regexp.MustCompile(`\A(?:0|[1-9][0-9]*)\z`)
 	coinPattern   = regexp.MustCompile(`\A#[0-9]{1,12}\z`)
 	refPattern    = regexp.MustCompile(`\A(?:synthetic|[a-z0-9]+(?::[A-Za-z0-9/._-]+){2,3})\z`)
 )
