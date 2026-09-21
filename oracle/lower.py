@@ -331,6 +331,15 @@ def lower(proposal, registry, snapshots):
             # a verdict may not rest on the bound alone.
             reductions.append({"leg": leg["id"], "rule": "unreviewed_family", "tight": False,
                                "reason_code": "UNREVIEWED_FAMILY"})
+        if entry["settlement"] == "deployer":
+            # A deployer leg pays what the deployer SUBMITS. EVIDENCE section 1,
+            # verified: `settleOutcome` carries a `settleFraction` the deployer chooses,
+            # and nothing in the protocol derives it from a price. The template says what
+            # they said they would do, not what they must. Not tight, for the same reason
+            # as above: the leg is probably worth more than zero, so this may make a
+            # proposal need review and may never make one fail.
+            reductions.append({"leg": leg["id"], "rule": "deployer_settled", "tight": False,
+                               "reason_code": "DEPLOYER_SETTLED"})
         _check_coin(leg)
         catalogue = _cited(snapshots, leg["instance"]["catalogue"], f"{leg['id']} catalogue")
         values, _item = check_terms(leg, catalogue)
