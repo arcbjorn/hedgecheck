@@ -17,47 +17,58 @@ is a mainnet question, and this run does not answer it.
 
 Do not read a success here as a checked hedge.
 
-## 0. Before anything: the gate will refuse today
+## 0. What the checker will and will not trust
 
 **The file the checker consults is the allowlist**, derived at build time from the
-registry entries that are genuinely reviewed. It is empty:
+registry entries that are genuinely reviewed:
 
     $ cat checker/dist/allowlist.json
-    {"reviewed": []}
+    {
+      "reviewed": [
+        "0f75191302086ba1cf59587956d1593a73372a729a98cd94556d56cda3a2b539",
+        "6fa3d6ba76bb0b092bcb0fbaa22e783f5f84cf45df18eca47d7b11100615cf63"
+      ]
+    }
 
-It is empty because both entries in the repository's `registry/` are drafts:
-
-    $ python3 -c "import json;print(json.load(open('registry/recurring.priceBucket.json'))['review']['state'])"
-    draft
-
-**Do not diagnose a bundle from `registry/`.** That directory is the review SOURCE,
-not what the checker reads for a given bundle — a bundle carries its own
-`registry-*.json` copies, and the two can disagree. They disagree right now: the
-copies inside `fixtures/bundles/good/` say `reviewed`, while `registry/` says `draft`.
-The allowlist is what decides.
-
-    $ python3 -c "import json;print(json.load(open('fixtures/bundles/good/registry-recurring.priceBucket.json'))['review']['state'])"
-    reviewed
-
-An unreviewed family reduces its leg, the reduced leg contributes zero to the lower
-profile, and the re-derived profile no longer matches the one the result states:
+Both registry entries are reviewed, so a good bundle is accepted and an envelope
+reaches the gate:
 
     $ node --experimental-strip-types consumer/src/run.ts \
-        --bundle fixtures/bundles/good --network testnet
+        --bundle fixtures/bundles/good-envelope --network testnet
     mode: REHEARSAL, nothing will be sent
-    REFUSED CHECKER_REFUSED: PROFILE_COVERAGE at $result.profile: the result states 2 pieces, the proposal gives 1
+    REHEARSAL, nothing sent: {"coin":"#39710",...,"size":"924","limit_price":"0.17399"}
+    APPROVED {"coin":"#39710",...}
     orders sent: 0
 
-**Zero orders sent. This is correct behaviour, not a fault.**
+**Do not diagnose a bundle from `registry/`.** That directory is the review SOURCE, not
+what the checker reads for a given bundle. A bundle carries its own `registry-*.json`
+copies, and the two can disagree. **The allowlist is what decides**, and it is derived
+from `registry/` at build time — so after any review you must rebuild:
 
-Note the trap: the class reads `PROFILE_COVERAGE`, which sounds like a broken payoff
-profile. It is not. With the family allowlisted the same bytes are accepted; the only
-variable is the review state. If you see `PROFILE_COVERAGE` on a bundle you believe is
-good, check the registry review state before you go looking at the profile.
+    $ python3 tools/build_checker.py
 
-**The owner's registry review is what unblocks a live approval.** Until an entry is
-`reviewed` with a review digest matching its `semantics_version`, every real check is
-`needs_review` and the gate refuses to place. `needs_review` is not a softer pass.
+### If a family is not in this checker's allowlist
+
+A bundle built against a reviewed copy, checked by a build that was not told to trust
+that version, is refused like this:
+
+    REFUSED CHECKER_REFUSED: REDUCTION_UNDECLARED at $result.reductions: leg bucket0-yes
+      rests on recurring.priceBucket at version 0f751913…b539, which is not in this
+      checker's allowlist, so this checker reduces it under unreviewed_family; the
+      result declares no reduction for that leg
+    orders sent: 0
+
+**Zero orders sent. This is correct behaviour, not a fault.** The message names the leg,
+the family, the exact version, and the reason — so the fix is either to review that
+entry and rebuild, or to accept that this checker does not trust that reading.
+
+This refusal used to arrive as `PROFILE_COVERAGE at $result.profile`, which reads like a
+broken payoff profile and sent operators looking two steps away from the cause. If you
+see `PROFILE_COVERAGE` now, it means what it says: the profile really does disagree.
+
+**A review is the owner's, and only the owner's.** Until an entry is `reviewed` with a
+digest matching its `semantics_version`, every real check on it is `needs_review` and
+the gate refuses to place. `needs_review` is not a softer pass.
 
 ## 1. Create a testnet agent wallet
 
@@ -127,7 +138,7 @@ and the gate refuses.
 Every outcome prints an `orders sent:` line. **If that line is missing, or the count
 is not what you expect, stop and check your fills before running anything again.**
 
-**Refusal** (exit 1). The common case today.
+**Refusal** (exit 1).
 
     REFUSED <REASON>: <detail>
     orders sent: 0
