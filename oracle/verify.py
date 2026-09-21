@@ -370,7 +370,29 @@ def replay():
 
     proposals = {name: canon.loads((REPLAY / f"{name}.proposal.json").read_bytes()) for name in PINNED}
 
-    # ---- on disk the entries are drafts: a loose bound, so the replay needs review
+    # ---- what the entries ON DISK produce, whichever state they are in
+    #
+    # This used to assert the draft behaviour unconditionally, which made it a record of
+    # the tree's state at one moment rather than a check. The draft arithmetic is still
+    # worth holding, so it is driven from in-memory DRAFT copies below; the on-disk
+    # entries are checked for whichever state they are actually in.
+    drafted = {}
+    for family, entry in registry.items():
+        copy = json.loads(json.dumps(entry))
+        copy["review"] = {"state": "draft", "drafted_by": "model"}
+        drafted[family] = copy
+
+    on_disk_reviewed = all(canon.reviewed(entry) for entry in registry.values())
+    for name, proposal in proposals.items():
+        lowered, _ = lower.lower(proposal, registry, snapshots)
+        rules = [r["rule"] for r in lowered.get("reductions", [])]
+        if on_disk_reviewed:
+            check(rules == [], f"replay: {name} on disk is reduced by nothing")
+            check(O.evaluate(lowered)["model_result"] == "passes", f"replay: {name} on disk passes")
+        else:
+            check(rules == ["unreviewed_family"], f"replay: {name} on disk is reduced by unreviewed_family")
+
+    # ---- the DRAFT arithmetic, pinned against in-memory draft copies
     #
     # Hand-derived. The bucket leg is valued at zero and its premium still counts, so the
     # lower profile is 0.1*(S - 77631.4) - 160.76676, which is -1923.90676 at the floor and
@@ -378,18 +400,18 @@ def replay():
     # 924 (EVIDENCE section 1), giving -999.90676 at the floor: inside the cap everywhere.
     # So nothing is proven to fail, and the verdict may never be `fails`.
     for name, proposal in proposals.items():
-        lowered, _ = lower.lower(proposal, registry, snapshots)
-        check([r["rule"] for r in lowered["reductions"]] == ["unreviewed_family"], f"replay: {name} on disk is reduced by unreviewed_family")
+        lowered, _ = lower.lower(proposal, drafted, snapshots)
+        check([r["rule"] for r in lowered["reductions"]] == ["unreviewed_family"], f"replay: {name} as a draft is reduced by unreviewed_family")
         check(lowered["reductions"][0]["tight"] is False, f"replay: {name} unreviewed_family is a loose rule")
         result = O.evaluate(lowered)
-        check(result["model_result"] == "needs_review", f"replay: {name} on disk needs review")
+        check(result["model_result"] == "needs_review", f"replay: {name} as a draft needs review")
         check(result["failing_intervals"] == [], f"replay: {name} proves no failure from a loose bound")
         check("UNREVIEWED_FAMILY" in result["reason_codes"], f"replay: {name} names the loose rule")
         check([interval["responsible_legs"] for interval in result["undecided_intervals"]] == [[proposal["legs"][0]["id"]]],
               f"replay: {name} names the leg responsible for each undecided interval")
-    bucket_draft = O.evaluate(lower.lower(proposals["bucket0"], registry, snapshots)[0])
+    bucket_draft = O.evaluate(lower.lower(proposals["bucket0"], drafted, snapshots)[0])
     check([(i["lower"], i["lower_inclusive"], i["upper"], i["upper_inclusive"]) for i in bucket_draft["undecided_intervals"]]
-          == [("60000", True, "69239.0676", False)], "replay: bucket0 on disk is undecided on [60000, 69239.0676)")
+          == [("60000", True, "69239.0676", False)], "replay: bucket0 as a draft is undecided on [60000, 69239.0676)")
     check([(p["slope"], p["intercept"]) for p in bucket_draft["profile"]] == [("0.1", "-7923.90676")], "replay: bucket0 lower profile with the leg at zero")
     check([(p["slope"], p["intercept"]) for p in bucket_draft["upper_profile"]] == [("0.1", "-6999.90676")], "replay: bucket0 upper profile credits the leg with 924")
     check(O.fmt(_at(bucket_draft["upper_profile"], exact.parse("60000"))) == "-999.90676", "replay: bucket0 upper profile meets the cap at the floor")
