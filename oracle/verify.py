@@ -627,7 +627,8 @@ def bundles():
         else:
             refused[manifest["expects"]] = refused.get(manifest["expects"], 0) + 1
             check("corruption" in manifest, f"bundles: {path.name} is refused and documents its one change")
-    check(accepted == 3, "bundles: three good bundles -- passing, failing, and passing with its envelope")
+    check(accepted == 4, "bundles: four good bundles -- passing, failing, passing with its envelope, "
+                         "and a deployer-settled family that needs review")
     # Every class the fixtures claim to exercise is exercised, and every corruption is
     # refused. These were one check while every corruption had a class to itself; the
     # envelope corruptions are four ways to be wrong about one thing, so counting
