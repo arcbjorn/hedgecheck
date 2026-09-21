@@ -55,7 +55,7 @@ checker:
 
 # The approval gate. It runs its own copy of the checker, so it is checked after it.
 consumer:
-	@cd consumer && deno check --quiet src/*.ts
+	@cd consumer && deno check --quiet --node-modules-dir=none src/*.ts
 	@cd consumer && node --test "test/*.test.ts" > .test.log 2>&1; status=$$?; grep -E "^(ℹ (tests|pass|fail)|✖)" .test.log; rm -f .test.log; exit $$status
 
 clean:
