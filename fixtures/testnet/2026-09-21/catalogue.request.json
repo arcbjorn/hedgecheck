@@ -1,0 +1,14 @@
+{
+  "endpoint": "https://api.hyperliquid-testnet.xyz/info",
+  "http_status": 200,
+  "method": "POST",
+  "network": "testnet",
+  "request_body": {
+    "type": "outcomeMeta"
+  },
+  "requested_at": "2026-09-21T04:00:22.176155+00:00",
+  "response_file": "716bf389d7711ce88357468deec93a77b9adec2daae98ef8d9a6d1fcb6712a66.json",
+  "response_sha256": "716bf389d7711ce88357468deec93a77b9adec2daae98ef8d9a6d1fcb6712a66",
+  "retrieved_at": "2026-09-21T04:00:23.975685+00:00",
+  "server_date": "Mon, 21 Sep 2026 04:00:22 GMT"
+}
