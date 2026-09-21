@@ -6,3 +6,29 @@ node_modules/
 research/observer-*.json
 var/
 reasonix.toml
+
+# Scratch files the build and test targets create and normally clean up. An
+# interrupted run leaves them behind, and neither is anything a reader wants.
+.test.log
+checker/dist/.build.js
+
+# Go coverage and profile output, which `go test -coverprofile` writes wherever it
+# is run from.
+*.coverprofile
+coverage.out
+cover.out
+
+# The built checker module. GENERATED from checker/src by
+# `python3 tools/build_checker.py`, which `make check` runs in --check mode.
+#
+# Not committed: it is build output, and a generated file in a diff is noise a
+# reviewer has to scroll past. `hedgecheck serve --checker checker/dist` needs it, so
+# build once after a clone. The service says plainly when the module is absent rather
+# than serving a page that silently offers no check.
+checker/dist/
+
+# NOT IGNORED, and deliberately so:
+#   fixtures/** is generated and committed. It is the conformance corpus three
+#   implementations are compared against, so it has to exist in a clone for
+#   `make check` to mean anything, and each generator has a --check mode that fails
+#   when the tree is stale.
