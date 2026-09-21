@@ -11,6 +11,7 @@ reasonix.toml
 # Build scratch, normally cleaned up.
 .test.log
 checker/dist/.build.js
+consumer/deno.lock
 *.coverprofile
 coverage.out
 cover.out
