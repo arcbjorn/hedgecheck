@@ -17,7 +17,11 @@
   ],
   "properties": {
     "endpoint": {
-      "const": "https://api.hyperliquid.xyz/info"
+      "enum": [
+        "https://api.hyperliquid.xyz/info",
+        "https://api.hyperliquid-testnet.xyz/info"
+      ],
+      "description": "The two info endpoints this system will call. An enum, not a base plus a path: an arbitrary URL must stay impossible, and a record naming one would be evidence of a request nothing here can make."
     },
     "method": {
       "const": "POST"
@@ -44,6 +48,13 @@
     },
     "server_date": {
       "type": "string"
+    },
+    "network": {
+      "enum": [
+        "mainnet",
+        "testnet"
+      ],
+      "description": "Which network the endpoint belongs to, stated so retained evidence cannot be mistaken for the other one. Optional: the 50 records at 085ccfb predate it and are all mainnet."
     }
   },
   "additionalProperties": false,
