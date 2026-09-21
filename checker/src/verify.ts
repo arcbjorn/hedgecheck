@@ -49,6 +49,7 @@ import {
   type ProfilePiece,
   sizeWindow,
   sum,
+  walkLimit,
   witness,
 } from "./pwa.ts";
 import { parseVenue, quantityText, type VenueValue, at as venueAt } from "./venue.ts";
@@ -71,6 +72,7 @@ export type RefusalClass =
   | "REDUCTION_UNSOUND"
   | "SIZE_WINDOW"
   | "CERTIFICATE_WEIGHTS"
+  | "ENVELOPE_MISMATCH"
   | "ENGINE_DISAGREES";
 
 export interface Refusal {
@@ -283,6 +285,8 @@ interface RebuiltLeg {
   readonly reductionRule: string | null;
   readonly tight: boolean;
   readonly levels: Level[];
+  /** The venue's own id, from the proposal. The IR does not carry it, by design. */
+  readonly coin: string;
 }
 
 interface Rebuilt {
@@ -363,7 +367,9 @@ function relower(evidence: Evidence): Rebuilt {
       rule = "unreviewed_family";
       tight = false;
     }
-    legs.push({ id, parts, size, premium: total, observationTime, reduced, reductionRule: rule, tight, levels });
+    const instance = object(leg["instance"], `$proposal.legs.${id}.instance`);
+    const coin = text(instance["coin"], `$proposal.legs.${id}.instance.coin`);
+    legs.push({ id, parts, size, premium: total, observationTime, reduced, reductionRule: rule, tight, levels, coin });
   }
 
   return {
@@ -727,6 +733,136 @@ function evaluateAndCompare(evidence: Evidence, rebuilt: Rebuilt): void {
 
   // Infeasibility certificates, where present.
   compareCertificates(evidence);
+
+  // The order envelope, against this checker's OWN re-walk of the book.
+  compareEnvelope(evidence, rebuilt);
+}
+
+/**
+ * An order envelope is the statement of which order the cost bound is about, so it is
+ * checked against the walk this checker did, never against the levels the result
+ * carries. `rebuilt.legs[].levels` came out of the snapshot bytes in `priceLeg`.
+ *
+ * The rules, and why each is not decoration:
+ *
+ *  - `envelope_issued` if and only if there is an envelope. Otherwise the readiness
+ *    field says one thing and the document does another, and a reader would have to
+ *    guess which.
+ *  - an envelope only on `passes`. PLAN section 4: a `fails` is a proposal that does
+ *    not meet the objective and a `needs_review` is one where nothing was established.
+ *    Either would be an order for an answer nobody gave.
+ *  - one leg. The envelope describes ONE order; with two legs the premium it claims
+ *    to bound includes a second one.
+ *  - coin, size and side from the proposal, limit and cost from the walk. A limit
+ *    below the highest level touched does not fill the size the result priced; one
+ *    above lets the order pay more than the bound.
+ *  - `Ioc`. A resting order outlives the book that priced it.
+ */
+function compareEnvelope(evidence: Evidence, rebuilt: Rebuilt): void {
+  const result = evidence.result;
+  const readiness = result["execution_readiness"];
+  const raw = result["order_envelope"];
+  const present = raw !== undefined;
+
+  if (present !== (readiness === "envelope_issued")) {
+    refuse(
+      "ENVELOPE_MISMATCH",
+      "$result.execution_readiness",
+      `readiness is ${String(readiness)} and an envelope is ${present ? "present" : "absent"}`,
+    );
+  }
+  if (!present) return;
+
+  const envelope = object(raw, "$result.order_envelope");
+  const verdict = result["model_result"];
+  if (verdict !== "passes") {
+    refuse("ENVELOPE_MISMATCH", "$result.order_envelope", `an envelope on a ${String(verdict)}`);
+  }
+  if (rebuilt.legs.length !== 1) {
+    refuse(
+      "ENVELOPE_MISMATCH",
+      "$result.order_envelope",
+      `the proposal has ${rebuilt.legs.length} legs; an envelope describes one order`,
+    );
+  }
+  const leg = rebuilt.legs[0] as RebuiltLeg;
+  if (leg.levels.length === 0) {
+    refuse("ENVELOPE_MISMATCH", "$result.order_envelope", "the leg is not priced on a book");
+  }
+
+  if (envelope["coin"] !== leg.coin) {
+    refuse(
+      "ENVELOPE_MISMATCH",
+      "$result.order_envelope.coin",
+      `the envelope names ${String(envelope["coin"])}, the proposal names ${leg.coin}`,
+    );
+  }
+  if (envelope["side"] !== "buy") {
+    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.side", `side is ${String(envelope["side"])}`);
+  }
+  if (envelope["time_in_force"] !== "Ioc") {
+    refuse(
+      "ENVELOPE_MISMATCH",
+      "$result.order_envelope.time_in_force",
+      `time in force is ${String(envelope["time_in_force"])}`,
+    );
+  }
+
+  const size = number(envelope["size"], "$result.order_envelope.size");
+  if (!equals(size, leg.size)) {
+    refuse(
+      "ENVELOPE_MISMATCH",
+      "$result.order_envelope.size",
+      `the envelope buys ${format(size)}, the proposal asks for ${format(leg.size)}`,
+    );
+  }
+
+  const limit = walkLimit(leg.levels, leg.size);
+  if (limit === null) {
+    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.limit_price", "the depth does not fill the size");
+  }
+  const claimedLimit = number(envelope["limit_price"], "$result.order_envelope.limit_price");
+  if (!equals(claimedLimit, limit)) {
+    refuse(
+      "ENVELOPE_MISMATCH",
+      "$result.order_envelope.limit_price",
+      `the envelope says ${format(claimedLimit)}, the walk ends in ${format(limit)}`,
+    );
+  }
+
+  // The cost this checker walked, not the one the result states -- though the two
+  // were already required to agree by compareCost.
+  const walked = askCost(leg.levels, leg.size);
+  if (!walked.covered || walked.total === null) {
+    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.max_cost", "the depth does not fill the size");
+  }
+  const claimedCost = number(envelope["max_cost"], "$result.order_envelope.max_cost");
+  if (!equals(claimedCost, walked.total)) {
+    refuse(
+      "ENVELOPE_MISMATCH",
+      "$result.order_envelope.max_cost",
+      `the envelope says ${format(claimedCost)}, the walk costs ${format(walked.total)}`,
+    );
+  }
+
+  // The envelope belongs to THIS result. A digest that does not match the result's is
+  // an envelope carried over from another answer, which is the one way a stale bound
+  // reaches a live order.
+  const stated = result["input_digest"];
+  if (stated === undefined) {
+    refuse(
+      "ENVELOPE_MISMATCH",
+      "$result.input_digest",
+      "an envelope was issued for a result that does not name its input digest",
+    );
+  }
+  if (envelope["input_digest"] !== stated) {
+    refuse(
+      "ENVELOPE_MISMATCH",
+      "$result.order_envelope.input_digest",
+      `the envelope belongs to ${short(String(envelope["input_digest"]))}, the result is ${short(String(stated))}`,
+    );
+  }
 }
 
 function compareProfile(mine: ProfilePiece[], claimed: Value[], at: string): void {
