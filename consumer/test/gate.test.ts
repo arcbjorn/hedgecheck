@@ -523,10 +523,35 @@ test("the gate cannot reach a sender of its own", () => {
   const names = readdirSync(here("../src/")).filter((name) => name.endsWith(".ts")).sort();
   assert.deepEqual(
     names,
-    ["gate.ts", "place.ts", "recheck.ts"],
+    ["gate.ts", "place.ts", "recheck.ts", "run.ts"],
     "consumer/src holds an unexpected module",
   );
   // Nor does the gate reach the re-check: a gate that could re-propose after a fill
   // could place again on its own, and topping up is the caller's decision.
   assert.doesNotMatch(source, /from\s*["']\.\/recheck\.ts["']/, "gate.ts imports recheck.ts");
+});
+
+// RUN.TS IS THE ONLY FILE THAT WIRES A REAL SENDER.
+//
+// It is in the inventory above because composing the gate with the sender is its
+// whole purpose. That is only safe while it stays the ONLY one, so the property is
+// asserted rather than left to the reading of the list: every other module keeps
+// `send` a parameter, and nothing but run.ts can reach the network by itself.
+test("only run.ts can reach a venue, and only through the gate", () => {
+  const strip = (name: string) =>
+    readFileSync(here(`../src/${name}`), "utf8").replace(/\/\/.*$/gm, "");
+
+  for (const name of ["gate.ts", "place.ts", "recheck.ts"]) {
+    assert.doesNotMatch(strip(name), /\bfetch\s*\(/, `${name} calls fetch`);
+  }
+
+  // And run.ts sends only inside the gate's callback: the one `place(` call it makes
+  // is the gate's parameter, so an approval is on the path to every order it issues.
+  const run = strip("run.ts");
+  assert.match(run, /\bgate\s*\(/, "run.ts does not call the gate");
+  assert.doesNotMatch(
+    run,
+    /^\s*(?:const|let|await)[^\n]*\bplace\s*\([^)]*\)[^\n]*$/m,
+    "run.ts calls place outside the gate's callback",
+  );
 });
