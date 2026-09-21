@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -15,8 +16,37 @@ import (
 // against hand-written literals, not against themselves, so a change to any of them
 // is a deliberate edit to this test rather than a silent widening.
 func TestNetworkContract(t *testing.T) {
-	if Endpoint != "https://api.hyperliquid.xyz/info" {
-		t.Errorf("endpoint is %q", Endpoint)
+	if Mainnet != "https://api.hyperliquid.xyz/info" {
+		t.Errorf("mainnet is %q", Mainnet)
+	}
+	if Testnet != "https://api.hyperliquid-testnet.xyz/info" {
+		t.Errorf("testnet is %q", Testnet)
+	}
+	if Endpoint != Mainnet {
+		t.Errorf("the default endpoint is %q, want mainnet", Endpoint)
+	}
+	// EXACTLY TWO. A third URL is what this test exists to refuse: the whole point
+	// of two constants rather than a configurable base is that an arbitrary URL
+	// stays impossible, and a set that quietly grew would end that.
+	if len(Networks) != 2 {
+		names := make([]string, 0, len(Networks))
+		for name := range Networks {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		t.Errorf("the network set has %d entries (%v), want exactly mainnet and testnet",
+			len(Networks), names)
+	}
+	for name, want := range map[string]string{"mainnet": Mainnet, "testnet": Testnet} {
+		got, known := EndpointFor(name)
+		if !known || got != want {
+			t.Errorf("EndpointFor(%q) = %q, %v", name, got, known)
+		}
+	}
+	for _, name := range []string{"", "MAINNET", "local", "http://evil.example", "devnet"} {
+		if _, known := EndpointFor(name); known {
+			t.Errorf("EndpointFor(%q) resolved to an endpoint", name)
+		}
 	}
 	if Pace != 1500*time.Millisecond {
 		t.Errorf("pace is %v, want 1.5s", Pace)
@@ -252,5 +282,58 @@ func TestRetrievedAtReadsRetainedPythonRecords(t *testing.T) {
 	// Pinned from the run document the spike wrote for this capture.
 	if milliseconds != 1789842197425 {
 		t.Errorf("read %d, the run recorded 1789842197425", milliseconds)
+	}
+}
+
+// A network name outside the closed set never reaches the client, and a refused name
+// leaves the client on the network it was already using.
+func TestSetNetworkRefusesEveryOtherName(t *testing.T) {
+	client := NewClient()
+	if client.Network() != "mainnet" {
+		t.Errorf("a fresh client is on %q, want mainnet", client.Network())
+	}
+	if err := client.SetNetwork("testnet"); err != nil {
+		t.Fatal(err)
+	}
+	if client.Network() != "testnet" || client.url() != Testnet {
+		t.Errorf("after SetNetwork(testnet) the client calls %q", client.url())
+	}
+	for _, name := range []string{
+		"", "Mainnet", "TESTNET", "devnet", "https://evil.example/info",
+		"mainnet ", "../testnet", "mainnet\x00",
+	} {
+		if err := client.SetNetwork(name); err == nil {
+			t.Errorf("SetNetwork(%q) was accepted", name)
+		}
+	}
+	// Still on testnet: a refused name changed nothing.
+	if client.url() != Testnet {
+		t.Errorf("a refused name moved the client to %q", client.url())
+	}
+}
+
+// The request record says which network it was, so retained evidence cannot be
+// mistaken for the other one.
+func TestTheRecordNamesTheNetwork(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"time":1}`))
+	}))
+	defer server.Close()
+
+	client := &Client{HTTP: server.Client(), Pace: 0, Budget: 2}
+	client.endpoint = server.URL
+	if err := client.SetNetwork("testnet"); err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.Fetch(map[string]any{"type": "outcomeMeta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(response.Record, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record["network"] != "testnet" {
+		t.Errorf("the record says network %v, want testnet", record["network"])
 	}
 }
