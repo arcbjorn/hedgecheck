@@ -1,19 +1,5 @@
 // Package service serves stored answers over HTTP: three reads and one write, all
 // idempotent.
-//
-//	POST /v1/checks                        lower, evaluate and store a proposal
-//	GET  /v1/checks/{input_digest}         the stored result
-//	GET  /v1/snapshots/{sha256}            the exact retained response bytes
-//	GET  /v1/registry/{semantics_version}  the reading a result used
-//
-// Together these are everything a browser needs to verify a result WITHOUT trusting
-// this server: it can re-derive the input digest from the proposal, re-hash every
-// snapshot, re-compute each semantics version, and re-run the evaluation itself. The
-// service is a convenience for fetching bytes, never an authority on what they mean.
-//
-// Standard library only, and bound to the loopback interface: this holds a person's
-// position sizes and answers questions about their money. Nothing here signs, trades,
-// or touches a key.
 package service
 
 import (
@@ -105,11 +91,6 @@ func (s *Server) NewHTTPServer(address string) *http.Server {
 // ---------------------------------------------------------------- the one write
 
 // checks lowers, evaluates and stores a proposal.
-//
-// Idempotent: the answer is a function of the proposal, the snapshots it cites and
-// the readings it pins, all of which are content-addressed. Posting the same proposal
-// twice files the same bytes under the same digest, so a retry is free and a
-// duplicate is not a second answer.
 func (s *Server) checks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
@@ -429,12 +410,6 @@ func (s *Server) bundlePart(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkerModule serves the built checker, and the allowlist beside it.
-//
-// SERVING THE CHECKER IS NOT A PROOF OF ANYTHING. A dishonest server could serve a
-// dishonest checker. This route exists so a reader gets an independent re-derivation
-// against an ENGINE BUG, which is a real and common failure; the trust boundary is
-// the consumer, which runs its own copy. ARCHITECTURE section 8 says so, and the
-// page says so to the reader.
 func (s *Server) checkerModule(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		methodNotAllowed(w, http.MethodGet)
