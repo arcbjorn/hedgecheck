@@ -417,6 +417,19 @@ accepts a `passes` whose `input_digest` matches the order envelope — coin, sid
 size, limit price, `Ioc`, maximum cost — make zero downstream calls. Keys live
 only here: testnet, an agent wallet, never a main-wallet key on disk.
 
+**The one third-party dependency**, pinned exactly with a lockfile, in `consumer/`
+only and never in `checker/`:
+
+| Package | Version | Why |
+|---|---|---|
+| `@noble/curves` | 1.7.0 | secp256k1 signing. Audited, dependency-light, and the narrowest thing that signs |
+| `@noble/hashes` | 1.6.1 | keccak-256 for EIP-712. A transitive 1.6.0 also arrives under `@noble/curves` |
+
+Chosen over a wallet library such as `viem`: 4.7 MB and three packages against 50 MB
+and ten, for code that touches a key. The cost is that the EIP-712 hashing and the
+action encoding are ours, and so is the burden of getting them right;
+`consumer/test/` drives both against a fake exchange.
+
 `consumer/src/gate.ts` is that function, and it ships with a recording fake and no
 key of any kind. Four things about it are structural rather than conventional:
 
