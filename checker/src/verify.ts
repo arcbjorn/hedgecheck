@@ -274,6 +274,8 @@ interface RebuiltLeg {
   readonly reduced: boolean;
   readonly reductionRule: string | null;
   readonly tight: boolean;
+  /** Every rule this leg earned, in the order the engine emits them. */
+  readonly reductionRules: { readonly rule: string; readonly tight: boolean }[];
   readonly levels: Level[];
   /** The venue's own id, from the proposal. The IR does not carry it, by design. */
   readonly coin: string;
@@ -347,24 +349,36 @@ function relower(evidence: Evidence): Rebuilt {
     premium = add(premium, total);
 
     // The reductions this checker DERIVES, not the ones the result declares.
+    //
+    // A LIST, because one leg can earn more than one. This was an `else if` chain
+    // keeping a single rule, which could not represent a leg that is both unreviewed
+    // and deployer-settled -- the engine emits two reductions for that leg, and the
+    // count comparison in `compareReductions` would have disagreed with a bundle that
+    // is perfectly correct.
     const observationTime = text(terms["expiry"], `$proposal.legs.${id}.terms.expiry`);
-    let reduced = false;
-    let rule: string | null = null;
-    let tight = false;
+    const rules: { rule: string; tight: boolean }[] = [];
     if (observationTime !== valuationTime) {
-      reduced = true;
-      rule = "horizon_mismatch";
-      tight = true;
-    } else if (!entry.reviewed) {
-      reduced = true;
-      rule = "unreviewed_family";
-      tight = false;
+      // The leg is not observed when the objective is valued, so its own observation
+      // may pay nothing by then. Tight: that state is admissible, not merely unproven.
+      rules.push({ rule: "horizon_mismatch", tight: true });
     }
+    if (!entry.reviewed) {
+      rules.push({ rule: "unreviewed_family", tight: false });
+    }
+    if (text(entry.value["settlement"], `$registry.${family}.settlement`) === "deployer") {
+      // A deployer leg pays what the deployer SUBMITS: `settleFraction` is chosen, not
+      // computed (EVIDENCE section 1). Loose, so it can make a proposal need review and
+      // can never make one fail.
+      rules.push({ rule: "deployer_settled", tight: false });
+    }
+    const reduced = rules.length > 0;
+    const rule = reduced ? (rules[0] as { rule: string }).rule : null;
+    const tight = rules.some((entry) => entry.tight);
     const instance = object(leg["instance"], `$proposal.legs.${id}.instance`);
     const coin = text(instance["coin"], `$proposal.legs.${id}.instance.coin`);
     legs.push({
       id, parts, size, premium: total, observationTime, reduced, reductionRule: rule, tight, levels, coin,
-      family, version: entry.version,
+      family, version: entry.version, reductionRules: rules,
     });
   }
 
@@ -1028,28 +1042,33 @@ function compareReductions(evidence: Evidence, rebuilt: Rebuilt): void {
     }
   }
 
-  if (stated.length !== mine.length) {
+  // FLATTENED, one entry per RULE rather than per leg. A leg that is both unreviewed
+  // and deployer-settled earns two, and the engine emits two.
+  const expected = mine.flatMap((leg) =>
+    leg.reductionRules.map((each) => ({ leg: leg.id, rule: each.rule, tight: each.tight }))
+  );
+  if (stated.length !== expected.length) {
     refuse(
       "REDUCTION_UNDECLARED",
       "$result.reductions",
-      `the result declares ${stated.length} reductions, the evidence requires ${mine.length}`,
+      `the result declares ${stated.length} reductions, the evidence requires ${expected.length}`,
     );
   }
-  for (let index = 0; index < mine.length; index += 1) {
+  for (let index = 0; index < expected.length; index += 1) {
     const claimed = object(stated[index], `$result.reductions[${index}]`);
-    const want = mine[index] as RebuiltLeg;
+    const want = expected[index] as { leg: string; rule: string; tight: boolean };
     const where = `$result.reductions[${index}]`;
-    if (claimed["leg"] !== want.id) {
-      refuse("REDUCTION_UNDECLARED", where, `expected the reduction on ${want.id}`);
+    if (claimed["leg"] !== want.leg) {
+      refuse("REDUCTION_UNDECLARED", where, `expected the reduction on ${want.leg}`);
     }
-    if (claimed["rule"] !== want.reductionRule) {
-      refuse("REDUCTION_UNSOUND", where, `expected the rule ${String(want.reductionRule)}`);
+    if (claimed["rule"] !== want.rule) {
+      refuse("REDUCTION_UNSOUND", where, `expected the rule ${want.rule}`);
     }
     if (claimed["tight"] !== want.tight) {
       refuse(
         "REDUCTION_UNSOUND",
         where,
-        `the result calls ${want.reductionRule} ${claimed["tight"] === true ? "tight" : "loose"}; it is not`,
+        `the result calls ${want.rule} ${claimed["tight"] === true ? "tight" : "loose"}; it is not`,
       );
     }
     // A declared reduction without its reason code cannot be read back by anyone.
