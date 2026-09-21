@@ -171,8 +171,12 @@ func decodeResult(path string, value any) (Result, error) {
 	}
 	out.Units = readUnits(r)
 	out.ModelResult = r.enum("model_result", "passes", "fails", "needs_review")
-	out.ExecutionReadiness = r.str("execution_readiness", nil, "")
-	out.EvaluationScope = r.str("evaluation_scope", nil, "")
+	// CONSTRAINED, like `model_result` on the line above. These read with no pattern at
+	// all, so the Go reader accepted `execution_readiness: "banana"`, `""`, the wrong
+	// case and a trailing space -- while the schema allows exactly three values, and
+	// `execution_readiness` is what says whether an order envelope may exist.
+	out.ExecutionReadiness = r.enum("execution_readiness", "not_evaluated", "envelope_issued", "blocked")
+	out.EvaluationScope = r.enum("evaluation_scope", "exhaustive_supported_terminal_model")
 	out.Baseline = readBaseline(r)
 	out.ObjectiveValuationTime = r.str("objective_valuation_time", timePattern, "a UTC instant ending in Z")
 	out.LegObservationTimes = readTimes(r, "leg_observation_times")
