@@ -295,6 +295,7 @@ def main():
                 checked_sizes += 1
         print(f"size windows: {checked_sizes} reported sizes verified against the lower profile")
 
+    basis_band()
     replay()
 
     print(f"{CHECKS} checks passed; vectors, golden table, the PLAN.md example and the 18 September replay all agree.")
@@ -345,6 +346,122 @@ BETTER = {
 # worth nothing then, its premium still counts, so P&L(S) = 0.1*(S - 77631.4) - 160.76676.
 HORIZON = {"pieces": [("0.1", "-7923.90676")], "fails_on": ("60000", True, "69239.0676", False),
            "worst": {"pnl": "-1923.90676", "attained": True, "price": "60000"}}
+
+
+def basis_band():
+    """A declared basis bound reaches the verdict, and it is applied to the GROUP."""
+    import lower
+
+    replay_dir = PROJECT / "fixtures" / "replay" / "2026-09-18"
+    entry = json.loads((PROJECT / "registry" / "recurring.priceBucket.json").read_text())
+    proposal = canon.loads((replay_dir / "bucket0.proposal.json").read_bytes())
+    snapshots = {}
+    for stem in ("book-bucket0-3971-yes", "meta-and-asset-ctxs", "outcome-meta"):
+        digest, document = lower.snapshot((replay_dir / f"{stem}.json").read_bytes())
+        snapshots[digest] = document
+    objective = proposal["objective_reference"]
+    foreign = "pyth:BTC/USD:price-twap:90s"
+
+    def lowered_for(reference_template, bounds):
+        copy_of = json.loads(json.dumps(entry))
+        copy_of["reference"] = reference_template
+        copy_of["review"] = {"state": "reviewed", "drafted_by": "model", "reviewed_by": "fixture",
+                             "reviewed_on": "2026-09-19", "digest": canon.semantics_version(copy_of)}
+        p = json.loads(json.dumps(proposal))
+        p["legs"][0]["semantics_version"] = canon.semantics_version(copy_of)
+        if bounds is not None:
+            p["basis_bounds"] = bounds
+        ir, _ = lower.lower(p, {copy_of["family"]: copy_of}, snapshots)
+        return ir, O.evaluate(ir)
+
+    native = "hl:perp:{underlying}:mark-interp"
+    away = "pyth:{underlying}/USD:price-twap:90s"
+    declared = [{"between": [objective, foreign], "bound": "500"}]
+
+    # A leg on the objective's own reference earns no band reduction at all. The entry
+    # carries a TEMPLATE, so this also checks that {underlying} resolves from the leg's
+    # own terms rather than being restated in the proposal.
+    ir, result = lowered_for(native, None)
+    check([r["rule"] for r in ir.get("reductions", [])] == [], "basis: a leg on the objective's reference is not banded")
+    baseline_worst = result["worst_case"]["pnl"]
+
+    # A ZERO band is no uncertainty, so it must give exactly the unbanded answer. This is
+    # the check that catches a band applied with the wrong sign or to the wrong side.
+    ir, result = lowered_for(away, [{"between": [objective, foreign], "bound": "0"}])
+    check([r["rule"] for r in ir.get("reductions", [])] == ["basis_band"], "basis: a zero bound still declares the rule")
+    check(result["worst_case"]["pnl"] == baseline_worst, "basis: a zero band is the unbanded answer")
+
+    # A DECLARED bound buys something. Without this check `basis_band` and
+    # `basis_unbridged` were the same answer -- the bound was recorded and discarded.
+    ir_bounded, bounded = lowered_for(away, declared)
+    ir_open, unbridged = lowered_for(away, None)
+    check([r["rule"] for r in ir_open.get("reductions", [])] == ["basis_unbridged"],
+          "basis: no declared bound is basis_unbridged")
+    check(ir_bounded["reductions"][0]["bound"] == "500", "basis: the reduction states the bound it used")
+    check(O.num(bounded["worst_case"]["pnl"]) > O.num(unbridged["worst_case"]["pnl"]),
+          "basis: a declared bound is worth more than none")
+
+    # A loose bound never condemns: PLAN section 2. Both forms are loose.
+    for ir_case, name in ((ir_bounded, "basis_band"), (ir_open, "basis_unbridged")):
+        check(all(not r["tight"] for r in ir_case["reductions"]), f"basis: {name} is loose")
+
+    # THE GROUP, NOT THE LEG. The infimum of a sum is not the sum of infima: two legs
+    # whose payoffs cancel have a flat sum that no basis move can hurt. Reducing them
+    # separately invents a loss on a perfectly hedged position -- and per-leg is the LOWER
+    # answer, so "a reduction never turns a failing proposal into a passing one" cannot
+    # catch it. Measured on the kernel, which is where the difference lives.
+    band = F(500)
+    long_leg = O.digital_below(F(1000), F(80000))
+    short_leg = O.digital_below(F(-1000), F(80000))
+    grouped = O.band_infimum(O.total([long_leg, short_leg]), band)
+    per_leg = O.total([O.band_infimum(long_leg, band), O.band_infimum(short_leg, band)])
+    check(all(grouped(F(s)) == 0 for s in (79600, 80000, 80400)),
+          "basis: a cancelling pair has a flat sum the band cannot hurt")
+    check(all(per_leg(F(s)) < grouped(F(s)) for s in (79600, 80000, 80400)),
+          "basis: reducing leg by leg is strictly worse, which is why the rule groups")
+
+    # AND THE EVALUATOR MUST GROUP, not merely the kernel.
+    #
+    # The kernel check above proves the two differ; it does not prove `evaluate` uses the
+    # grouped one. Every fixture is single-leg, where grouping and per-leg agree, so a
+    # per-leg evaluator passed every check until this case existed -- found by mutation.
+    #
+    # Two legs that cancel: long 1000 below 80,000 and short 1000 below 80,000. The summed
+    # payoff is identically zero, so no basis move can hurt it and the band must change
+    # nothing. Per-leg banding invents a loss of 1000.
+    cancelling = {
+        "schema_version": "1",
+        "units": ir_bounded["units"],
+        "domain": {"lower": "79000", "upper": "81000"},
+        "baseline": {"kind": "fixed", "price": "80000"},
+        "exposure": {"kind": "linear", "quantity": "0"},
+        "legs": [
+            {"id": "long-leg", "kind": "indicator", "size": "1000",
+             "pays_on": {"upper": "80000", "upper_inclusive": False},
+             "premium": {"kind": "fixed", "price": "0"}, "observation_time": ir_bounded["objective_valuation_time"],
+             "semantics": "0" * 64},
+            {"id": "short-leg", "kind": "indicator", "size": "-1000",
+             "pays_on": {"upper": "80000", "upper_inclusive": False},
+             "premium": {"kind": "fixed", "price": "0"}, "observation_time": ir_bounded["objective_valuation_time"],
+             "semantics": "0" * 64},
+        ],
+        "objective": [{"clause": "cap", "min_pnl": "-1"}],
+        "objective_valuation_time": ir_bounded["objective_valuation_time"],
+        "other_costs": "0",
+        "assumptions": ir_bounded["assumptions"],
+        "reductions": [{"leg": "long-leg", "with": ["short-leg"], "rule": "basis_band",
+                        "tight": False, "reason_code": "BASIS_BAND", "bound": "500"}],
+    }
+    result = O.evaluate(cancelling)
+    check(result["worst_case"]["pnl"] == "0",
+          f"basis: a cancelling pair is worth 0 under a band, not {result['worst_case']['pnl']}")
+    # `passes`, not `needs_review`: a loose reduction only makes a verdict undecided where
+    # a clause is actually breached on the lower profile, and this one is not breached
+    # anywhere. A loose rule does not condemn; it also does not manufacture doubt.
+    check(result["model_result"] == "passes",
+          "basis: a cancelling pair breaches no clause, so there is nothing to review")
+    check(result["failing_intervals"] == [] and result.get("undecided_intervals", []) == [],
+          "basis: a cancelling pair has neither a failing nor an undecided interval")
 
 
 def replay():
