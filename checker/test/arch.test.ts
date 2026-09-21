@@ -29,3 +29,41 @@ test("sources are runtime-neutral, import only each other, and never touch float
     }
   }
 });
+
+// Every source is reachable from the checker's entry points.
+//
+// A module nobody imports is a module nobody runs, and its guarantees are decoration.
+test("every source module is imported by another, or is an entry point", () => {
+  const files = readdirSync(here("../src/")).filter((name) => name.endsWith(".ts"));
+  const imported = new Set<string>();
+  for (const name of files) {
+    const source = readFileSync(here(`../src/${name}`), "utf8");
+    for (const match of source.matchAll(/from\s*["']\.\/([a-z-]+\.ts)["']/g)) {
+      imported.add(match[1] as string);
+    }
+  }
+  // The entry points a consumer reaches directly. Everything else must be reached
+  // from one of them.
+  const entries = new Set(["verify.ts", "pwa.ts", "doc.ts", "venue.ts"]);
+  for (const name of files) {
+    assert.ok(
+      imported.has(name) || entries.has(name),
+      `${name} is imported by nothing and is not an entry point`,
+    );
+  }
+});
+
+// No source converts a quantity through a JavaScript number.
+//
+// The banned list above catches parseFloat, Number( and Math. This catches the two
+// coercions that look innocent: unary plus on a string and a bare BigInt cast of one.
+test("no source coerces text to a JavaScript number", () => {
+  const files = readdirSync(here("../src/")).filter((name) => name.endsWith(".ts"));
+  for (const name of files) {
+    const source = readFileSync(here(`../src/${name}`), "utf8");
+    const code = source.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const pattern of [/[^\w)]\+(?:lexeme|text|raw|value)\b/, /\bvalueOf\(\)/, /\bnew Number\b/]) {
+      assert.doesNotMatch(code, pattern, `${name} coerces with ${pattern}`);
+    }
+  }
+});
