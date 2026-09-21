@@ -1420,18 +1420,28 @@ function relower(evidence) {
     const { total, levels } = priceLeg(evidence, acquisition, size, id);
     premium = add(premium, total);
     const observationTime = text(terms["expiry"], `$proposal.legs.${id}.terms.expiry`);
-    let reduced = false;
-    let rule = null;
-    let tight = false;
+    const rules = [];
     if (observationTime !== valuationTime) {
-      reduced = true;
-      rule = "horizon_mismatch";
-      tight = true;
-    } else if (!entry.reviewed) {
-      reduced = true;
-      rule = "unreviewed_family";
-      tight = false;
+      rules.push({
+        rule: "horizon_mismatch",
+        tight: true
+      });
     }
+    if (!entry.reviewed) {
+      rules.push({
+        rule: "unreviewed_family",
+        tight: false
+      });
+    }
+    if (text(entry.value["settlement"], `$registry.${family}.settlement`) === "deployer") {
+      rules.push({
+        rule: "deployer_settled",
+        tight: false
+      });
+    }
+    const reduced = rules.length > 0;
+    const rule = reduced ? rules[0].rule : null;
+    const tight = rules.some((entry2) => entry2.tight);
     const instance = object(leg["instance"], `$proposal.legs.${id}.instance`);
     const coin = text(instance["coin"], `$proposal.legs.${id}.instance.coin`);
     legs.push({
@@ -1446,7 +1456,8 @@ function relower(evidence) {
       levels,
       coin,
       family,
-      version: entry.version
+      version: entry.version,
+      reductionRules: rules
     });
   }
   return {
@@ -1884,21 +1895,26 @@ function compareReductions(evidence, rebuilt) {
       refuse("REDUCTION_UNDECLARED", "$result.reductions", `leg ${leg.id} rests on ${leg.family} at version ${leg.version}, which is not in this checker's allowlist, so this checker reduces it under unreviewed_family; the result declares no reduction for that leg`);
     }
   }
-  if (stated.length !== mine.length) {
-    refuse("REDUCTION_UNDECLARED", "$result.reductions", `the result declares ${stated.length} reductions, the evidence requires ${mine.length}`);
+  const expected = mine.flatMap((leg) => leg.reductionRules.map((each) => ({
+    leg: leg.id,
+    rule: each.rule,
+    tight: each.tight
+  })));
+  if (stated.length !== expected.length) {
+    refuse("REDUCTION_UNDECLARED", "$result.reductions", `the result declares ${stated.length} reductions, the evidence requires ${expected.length}`);
   }
-  for (let index = 0; index < mine.length; index += 1) {
+  for (let index = 0; index < expected.length; index += 1) {
     const claimed = object(stated[index], `$result.reductions[${index}]`);
-    const want = mine[index];
+    const want = expected[index];
     const where = `$result.reductions[${index}]`;
-    if (claimed["leg"] !== want.id) {
-      refuse("REDUCTION_UNDECLARED", where, `expected the reduction on ${want.id}`);
+    if (claimed["leg"] !== want.leg) {
+      refuse("REDUCTION_UNDECLARED", where, `expected the reduction on ${want.leg}`);
     }
-    if (claimed["rule"] !== want.reductionRule) {
-      refuse("REDUCTION_UNSOUND", where, `expected the rule ${String(want.reductionRule)}`);
+    if (claimed["rule"] !== want.rule) {
+      refuse("REDUCTION_UNSOUND", where, `expected the rule ${want.rule}`);
     }
     if (claimed["tight"] !== want.tight) {
-      refuse("REDUCTION_UNSOUND", where, `the result calls ${want.reductionRule} ${claimed["tight"] === true ? "tight" : "loose"}; it is not`);
+      refuse("REDUCTION_UNSOUND", where, `the result calls ${want.rule} ${claimed["tight"] === true ? "tight" : "loose"}; it is not`);
     }
     if (typeof claimed["reason_code"] !== "string" || claimed["reason_code"] === "") {
       refuse("REDUCTION_UNDECLARED", where, "the reduction states no reason code");
