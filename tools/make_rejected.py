@@ -97,6 +97,20 @@ def cases():
          "a bound that does not say who owns it"),
         ("ir", "indicator-pays-nowhere", mutate(lowered, ["legs", 0, "pays_on"], {}),
          "an indicator that pays nowhere in particular"),
+        # ---- a grouped reduction names its other legs, and they are leg ids
+        #
+        # `with` exists because the band reduction acts on a GROUP: the infimum of a sum
+        # is not the sum of infima, so reducing leg by leg invents a loss on a hedge whose
+        # legs cancel. The field is bounded, not free text: an empty list is not a group,
+        # and a member is a leg id.
+        ("ir", "grouped-reduction-empty", mutate(lowered, ["reductions"], [
+            {"leg": "bucket0-yes", "rule": "basis_band", "tight": False,
+             "reason_code": "BASIS_BAND", "with": []}]),
+         "a grouped reduction whose group is empty"),
+        ("ir", "grouped-reduction-not-a-leg", mutate(lowered, ["reductions"], [
+            {"leg": "bucket0-yes", "rule": "basis_band", "tight": False,
+             "reason_code": "BASIS_BAND", "with": ["Not A Leg"]}]),
+         "a grouped reduction naming something that is not a leg id"),
         # ---- the baseline and the objective are required and explicit
         ("ir", "baseline-missing", mutate(lowered, ["baseline"]), "a missing baseline"),
         ("ir", "baseline-unknown-kind", mutate(lowered, ["baseline", "kind"], "strike_reference"),
