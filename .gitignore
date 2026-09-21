@@ -6,6 +6,7 @@ node_modules/
 research/observer-*.json
 var/
 reasonix.toml
+.reasonix/
 
 # Scratch files the build and test targets create and normally clean up. An
 # interrupted run leaves them behind, and neither is anything a reader wants.
