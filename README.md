@@ -47,8 +47,8 @@ cd engine && go build -o hedgecheck ./cmd/hedgecheck
 ```text
 hedgecheck lower    --proposal P --registry DIR --snapshots DIR
 hedgecheck evaluate --lowered L
-hedgecheck check    --proposal P --registry DIR --snapshots DIR
-hedgecheck bundle   --proposal P --registry DIR --snapshots DIR --out DIR
+hedgecheck check    --proposal P --registry DIR --snapshots DIR [--envelope]
+hedgecheck bundle   --proposal P --registry DIR --snapshots DIR --out DIR [--envelope]
 hedgecheck compare  --result R --result R [--result R ...]
 hedgecheck replay   --input-digest D --store DIR --registry DIR
 hedgecheck retain   --input-digest D --store DIR --out DIR
@@ -58,7 +58,15 @@ hedgecheck render   --input-digest D --store DIR [--out FILE]
 
 Exit status is the answer, so a caller can branch without parsing output: `0`
 passes, `1` fails, `2` needs review, `3` refused with the class on stderr, `4` a
-usage or technical error. **A refusal is not a verdict** — status `3` never means
+usage or technical error.
+
+`--envelope` adds the order the cost bound assumes: coin, side, size, the price of
+the highest level the walk touched, `Ioc`, the maximum cost, and the
+`input_digest` it belongs to. It is issued only for a passing, depth-priced,
+single-leg answer; anything else sets `execution_readiness` to `blocked` and says
+why on stderr, without changing the exit status — **"this cannot be executed" is
+not "this failed the objective."** The envelope is a statement of which order, and
+only which order, the cost bound is about. It is not permission to send one. **A refusal is not a verdict** — status `3` never means
 the objective was evaluated and found wanting.
 
 `render` writes the result screen for a stored run: the candidates ranked by the
@@ -103,11 +111,12 @@ catalogue — so `085ccfb` is the only copy.
 | Path | Contents |
 |---|---|
 | `schema/` | Nine draft JSON Schemas: proposal, lowered proposal, result, comparison, registry entry, snapshot record, certificate bundle manifest, refusal classes, shared definitions |
-| `fixtures/` | `golden/` a lowered proposal and its generated result · `vectors/` numbers and canonical JSON · `replay/` retained responses and the real proposals lowered from them · `bundles/` certificate bundles, two good and twelve corrupted · `kernel/` the oracle's exact answers to 400 kernel queries, which the Go engine must reproduce · `rejected/` documents every schema must refuse, shared by all three implementations · `generated/` 320 lowered proposals with the oracle results the Go engine must reproduce · `refusals/` one proposal per refusal code lowering can raise |
+| `fixtures/` | `golden/` a lowered proposal and its generated result · `vectors/` numbers and canonical JSON · `replay/` retained responses and the real proposals lowered from them · `bundles/` certificate bundles, three good and seventeen corrupted · `kernel/` the oracle's exact answers to 400 kernel queries, which the Go engine must reproduce · `rejected/` documents every schema must refuse, shared by all three implementations · `generated/` 320 lowered proposals with the oracle results the Go engine must reproduce · `refusals/` one proposal per refusal code lowering can raise · `testnet/` a read-only testnet catalogue and its two empty books, retained as the evidence for EVIDENCE section 4 |
 | `registry/` | Contract semantics as data. Both entries are model drafts awaiting review |
 | `oracle/` | Python. Exact numbers, canonical JSON, the kernel, lowering, the reference refuser, the verifier. **Not the product engine** |
 | `engine/` | Go. So far the conformance spine and the architecture test |
 | `checker/` | TypeScript, no dependencies. So far the conformance spine and the architecture test |
+| `consumer/` | TypeScript. The approval gate: one function that runs its own copy of the checker and places an order only for an accepted `passes` carrying the order envelope its cost bound assumes. The clock is injected; `place` is a parameter and this tier ships only a recording fake. No keys, no network, no signing |
 | `tools/` | The vector generator, the corruption generator and the schema validator |
 | `research/` | Evidence packages and verifiers. **Restore from `085ccfb`** (above) |
 
