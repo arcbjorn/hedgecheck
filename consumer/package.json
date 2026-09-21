@@ -3,5 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The approval gate. Runs its own copy of the checker; places nothing itself."
+  "description": "The approval gate. Runs its own copy of the checker; places nothing itself.",
+  "dependencies": {
+    "@noble/curves": "1.7.0",
+    "@noble/hashes": "1.6.1"
+  }
 }
