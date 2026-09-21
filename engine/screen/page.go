@@ -82,11 +82,6 @@ type ReductionRow struct {
 
 // Ranked orders the candidates by the cost of the smallest passing size, cheapest
 // first, and puts the unsized ones last.
-//
-// Cost is the premium, compared EXACTLY: two candidates are ordered by rational
-// arithmetic and not by the rounded text beside them, so a chart that rounds to the
-// cent cannot reorder a table. Ties keep the order they arrived in, which is the
-// order discovery found them, so the ranking is stable across runs.
 func Ranked(candidates []Candidate) []Candidate {
 	out := append([]Candidate(nil), candidates...)
 	sort.SliceStable(out, func(i, j int) bool {
@@ -141,11 +136,6 @@ var pageTemplate = template.Must(template.New("page").Funcs(template.FuncMap{
 }).Parse(pageHTML))
 
 // NotCheckedWord turns a result's checks_not_performed code into a sentence.
-//
-// The codes are a closed vocabulary the documents share; the page is where they
-// become English, because a reader cannot act on LIVE_EXECUTION. An unknown code is
-// shown as itself rather than dropped: a limitation this page does not recognise is
-// still a limitation, and hiding it would be the one thing worse than showing a code.
 func NotCheckedWord(code string) string {
 	switch code {
 	case "LIVE_EXECUTION":
@@ -157,10 +147,6 @@ func NotCheckedWord(code string) string {
 }
 
 // verdictWord is the one place a verdict becomes English.
-//
-// Each states what was established and nothing more. "needs review" is not a softer
-// "fails": it says the answer rests on a bound that was not tight, so nothing was
-// established either way.
 func verdictWord(verdict string) string {
 	switch verdict {
 	case "passes":
@@ -304,12 +290,6 @@ const pageHTML = `<!DOCTYPE html>
 
    // The snapshots and registry entries the PROPOSAL cites, read from the parsed
    // document rather than scraped from its text.
-   //
-   // A regex over the bytes would find today's citations -- it does, on every
-   // proposal in the tree -- but it is a guess about a shape the schema owns. A
-   // field added later would be missed silently, and a missed citation makes
-   // verify() refuse a result that is perfectly good. Walking the parsed document
-   // cannot drift from the schema that way.
    const cited = [];
    const versions = [];
    const document = JSON.parse(new TextDecoder().decode(proposal));
