@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"hedgecheck/engine/canon"
@@ -189,5 +191,60 @@ func TestTheCapItselfIsNotAFailure(t *testing.T) {
 		result.FailingIntervals[1].Upper.String() != "92000" {
 		t.Fatalf("boundaries moved: %s and %s",
 			result.FailingIntervals[0].Upper, result.FailingIntervals[1].Upper)
+	}
+}
+
+// THE ADVERSE WORDING IS A CONTRACT BETWEEN TWO IMPLEMENTATIONS.
+//
+// `adverseWording` carries the comment "two implementations must produce the same
+// string", and until this test that agreement was incidental: it held only for rules
+// that appear in a FAILING fixture, because the string reaches a result through a
+// witness, and a witness only attaches to a failing interval.
+//
+// So a LOOSE rule's wording -- `unreviewed_family`, `deployer_settled` -- could drift
+// between Go and Python with every check green. Verified by mutation before this test
+// existed: changing Go's `deployer_settled` string left `make check` entirely green,
+// while the same edit to `horizon_mismatch` was caught, because `good-horizon` fails
+// and carries that witness.
+//
+// The maps are compared directly, so a rule needs no failing fixture to be pinned.
+func TestAdverseWordingMatchesTheOracle(t *testing.T) {
+	raw, err := os.ReadFile("../../oracle/oracle.py")
+	if err != nil {
+		t.Skip(err)
+	}
+	block := regexp.MustCompile(`(?s)ADVERSE_STATES\s*=\s*\{(.*?)\}`).FindSubmatch(raw)
+	if block == nil {
+		t.Fatal("oracle.py states no ADVERSE_STATES map")
+	}
+	entry := regexp.MustCompile(`"([a-z_]+)":\s*"((?:[^"\\]|\\.)*)"`)
+	theirs := map[string]string{}
+	for _, match := range entry.FindAllSubmatch(block[1], -1) {
+		theirs[string(match[1])] = strings.ReplaceAll(string(match[2]), `\'`, `'`)
+	}
+	if len(theirs) == 0 {
+		t.Fatal("no entries parsed from ADVERSE_STATES; the test is not reading what it thinks")
+	}
+
+	for rule, ours := range adverseWording {
+		their, known := theirs[rule]
+		if !known {
+			t.Errorf("Go states %q for %s; the oracle states no wording at all", ours, rule)
+			continue
+		}
+		if their != ours {
+			t.Errorf("%s: Go says %q, the oracle says %q", rule, ours, their)
+		}
+	}
+	for rule := range theirs {
+		if _, known := adverseWording[rule]; !known {
+			t.Errorf("the oracle states a wording for %s; Go states none", rule)
+		}
+	}
+	// The rules this test is meant to cover, named so a silent shrink is caught.
+	for _, rule := range []string{"horizon_mismatch", "unreviewed_family", "deployer_settled"} {
+		if _, known := adverseWording[rule]; !known {
+			t.Errorf("%s lost its adverse wording", rule)
+		}
 	}
 }
