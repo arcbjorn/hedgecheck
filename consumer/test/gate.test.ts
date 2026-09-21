@@ -693,6 +693,20 @@ test("only run.ts can reach a venue, and only through the gate", () => {
   // the old regex was anchored to one line and three leading keywords, so the same
   // call spread across lines -- ordinary formatting, or a `prettier` pass -- slipped
   // past it while placing an order on a refusal. A count is spelling-independent.
+  // SENDING NEEDS THE OPERATOR TO AFFIRM THE BUNDLE MATCHES THE NETWORK.
+  //
+  // A bundle records no network. Every bundle here is built from MAINNET books and
+  // carries coin #39710, so aiming one at testnet signs an order for an instrument that
+  // does not exist there -- and the gate cannot catch it, because the bundle is
+  // internally consistent. `--send` alone must refuse.
+  const runSource = code(here("../src/run.ts"));
+  assert.match(runSource, /bundle-is-for-this-network/, "run.ts does not require the network affirmation");
+  assert.match(
+    runSource,
+    /send\s*&&\s*!args\.bare\.has\("bundle-is-for-this-network"\)/,
+    "the affirmation is not what gates a send",
+  );
+
   // THE INJECTABLE GATE IS OUT OF RUN.TS'S REACH.
   //
   // `gateWith` takes the checker as a parameter, so a caller holding it can supply one
