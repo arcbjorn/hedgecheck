@@ -1,14 +1,4 @@
 // The kernel: one exact algebra of piecewise-affine functions of a single price.
-//
-// A FUNCTION IS ITS LIST OF PIECES. There is no rule-plus-breakpoints form here and
-// no operation takes breakpoints as an argument. ARCHITECTURE.md section 3 states
-// why: the first oracle separated the two, and its affinity probe sampled three
-// points per interval, so a strike in the outer third of the domain was missed
-// silently and gave a wrong failing set and a wrong infimum (EVIDENCE section 9).
-// A representation that cannot express the separation cannot suffer from it.
-//
-// The pieces cover the whole line, every endpoint states who owns it, and adjacent
-// pieces are never mergeable. A price owned by neither neighbour is a singleton.
 
 import {
   type Rational,
@@ -73,10 +63,6 @@ function meets(hi: Bound, lo: Bound): boolean {
 
 /**
  * Build a function from pieces, checking the representation rule and merging.
- *
- * The checks are not defensive programming: a gap, an overlap, or a price owned
- * twice is a function that answers two different things about one price, and every
- * later query would inherit that.
  */
 export function fn(pieces: readonly Piece[]): Fn {
   if (pieces.length === 0) throw new KernelError("a function has at least one piece");
@@ -178,11 +164,6 @@ export function indicator(size: Rational, lo: Bound, hi: Bound): Fn {
 
 /**
  * A ramp between low and high.
- *
- * `long` pays nothing at or below low, rises linearly to size at high, and stays at
- * size above. `short` is its mirror: size at or below low, falling to nothing at
- * high. The endpoints are closed on the sloped piece, so the ramp is continuous and
- * ownership never has to be guessed.
  */
 export function ramp(size: Rational, low: Rational, high: Rational, direction: "long" | "short"): Fn {
   if (lte(high, low)) throw new KernelError("a ramp needs low < high");
@@ -320,9 +301,6 @@ export interface Interval {
 
 /**
  * The pieces of f restricted to [lower, upper], with extra cuts applied.
- *
- * The cuts exist so two functions can be compared piece by piece on a common
- * refinement. They never change the function; they only split a piece.
  */
 export function window(
   f: Fn,
@@ -437,11 +415,6 @@ function onSameLine(a: ProfilePiece, b: ProfilePiece): boolean {
 
 /**
  * Adjacent, with the shared price owned exactly once between them.
- *
- * A SINGLETON is the case that matters: [lo, x) followed by {x} is adjacent and the
- * merge closes the left piece at x. The plain rule "exactly one owns it" holds
- * there, but the singleton also owns its own upper end, so the merged piece takes
- * the singleton's ownership rather than the predecessor's.
  */
 function touches(a: ProfilePiece, b: ProfilePiece): boolean {
   if (!equals(a.upper, b.lower)) return false;
@@ -459,12 +432,6 @@ export interface Infimum {
 
 /**
  * The greatest lower bound on [lower, upper], whether it is attained, and where.
- *
- * `at` is a price the function ACTUALLY ATTAINS whenever attained is true. On a flat
- * open atom every interior price attains the value and no endpoint does, so the
- * midpoint stands for the set. On a sloped atom the value is only approached at an
- * excluded end, so attained is false and `at` is that limit point: reporting it as
- * attained would hand a witness a price where the payoff is higher than claimed.
  */
 export function infimum(f: Fn, lower: Rational, upper: Rational): Infimum {
   let best: Infimum | null = null;
@@ -500,9 +467,6 @@ export function infimum(f: Fn, lower: Rational, upper: Rational): Infimum {
 
 /**
  * The exact set where f is strictly below a threshold, on [lower, upper].
- *
- * Returned as intervals with explicit ownership. Extra cuts refine the atoms without
- * changing the answer, which a caller needs when aligning two functions.
  */
 export function below(
   f: Fn,
@@ -585,10 +549,6 @@ export interface Witness {
 
 /**
  * A price where f is strictly below the threshold, with the value there.
- *
- * ADMISSIBLE means the function really attains that value at that price. An excluded
- * endpoint of an open interval is a limit point, not a member; reporting one would
- * name a price where the payoff is higher than the witness claims.
  */
 export function witness(
   f: Fn,
@@ -670,16 +630,6 @@ export interface BandPoint {
 
 /**
  * inf over [S - band, S + band], at each probe S.
- *
- * The breakpoints of the band infimum are NOT only the function's shifted
- * breakpoints. Where a sloped line and a plateau cross, the minimiser switches
- * between them, and that crossing is a breakpoint of the answer with no counterpart
- * in the function. Omitting that family is the bug the oracle had: a differential
- * against 400 generated cases found it where the committed fixtures did not.
- *
- * This implementation does not need the breakpoint family at all: it computes the
- * infimum over the shifted window directly at each probe, which is correct by
- * construction and is what a checker should do.
  */
 export function bandInfimum(
   f: Fn,
@@ -757,12 +707,6 @@ export interface SizeWindow {
 /**
  * The sizes n with base(S) + n*unit(S) - cost(n) >= floorPnl for every S in the
  * window.
- *
- * For a fixed n the combined payoff is affine on every open atom, so the condition
- * holds there exactly when it holds at both endpoint limits. Each site gives
- * beta*n - cost(n) >= floorPnl - alpha, which is concave in n because cost is convex,
- * so the feasible sizes form ONE interval. That is asserted below rather than
- * assumed: a gap would mean the concavity argument is wrong somewhere.
  */
 export function sizeWindow(
   base: Fn,
@@ -890,10 +834,6 @@ export function sizeWindow(
 
 /**
  * The sizes at one site: alpha + beta*n - cost(n) >= floorPnl.
- *
- * cost is a convex increasing piecewise-linear walk, so the left side is concave and
- * the feasible set is one interval. It is found by walking the ladder rung by rung
- * and solving the linear condition on each, which is exact.
  */
 function feasibleSpan(
   alpha: Rational,
