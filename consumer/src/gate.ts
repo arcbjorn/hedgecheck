@@ -108,6 +108,7 @@ export type Reason =
   | "NO_ENVELOPE"
   | "DIGEST_MISMATCH"
   | "CAPTURE_STALE"
+  | "POLICY_INVALID"
   | "UNREADABLE";
 
 /** What actually sends the order. A parameter, so this module never sends anything. */
@@ -145,6 +146,38 @@ export async function gate(
   capture: Capture,
   place: Place,
 ): Promise<Decision> {
+  // 0. THE BUNDLE IS READ ONCE, HERE.
+  //
+  // `Bundle` is an interface, so its fields can be accessors. `bundle.result` used to
+  // be read twice -- once by the checker, once below -- and a getter returning
+  // different bytes on the second read made the gate place an order the checker never
+  // saw: verified 924 contracts, placed 999999. Every field is pinned into a local
+  // constant and the checker is handed THESE, so what was verified is what is used.
+  const pinned: Bundle = {
+    proposal: bundle.proposal,
+    lowered: bundle.lowered,
+    result: bundle.result,
+    manifest: bundle.manifest,
+    snapshots: bundle.snapshots,
+    registry: bundle.registry,
+  };
+
+  // The policy's own numbers, before anything rests on them. TypeScript erases, and a
+  // `maxAgeMs` of `undefined` -- a typo'd key -- made `age >= maxAgeMs` false and
+  // removed the staleness rule entirely: a year-old capture placed an order.
+  for (const [name, value] of [
+    ["policy.now", policy.now],
+    ["policy.maxAgeMs", policy.maxAgeMs],
+    ["capture.capturedAtMs", capture.capturedAtMs],
+  ] as const) {
+    if (typeof value !== "bigint") {
+      return no("POLICY_INVALID", `${name} is ${value === undefined ? "missing" : `a ${typeof value}`}, not a bigint`);
+    }
+  }
+  if (policy.maxAgeMs < 0n) {
+    return no("POLICY_INVALID", `policy.maxAgeMs is negative`);
+  }
+
   // 1. The checker, run here, over these bytes.
   //
   // A checker that throws is not a checker that accepted. The catch is why the table
@@ -153,7 +186,7 @@ export async function gate(
   let accepted: boolean;
   let refusal = "";
   try {
-    const outcome = await (policy.verifier ?? verify)(bundle, policy.checker ?? {});
+    const outcome = await (policy.verifier ?? verify)(pinned, policy.checker ?? {});
     accepted = outcome.accepted;
     if (!outcome.accepted) {
       refusal = `${outcome.refusal.class} at ${outcome.refusal.at}: ${outcome.refusal.detail}`;
@@ -166,7 +199,7 @@ export async function gate(
   // 2-4. The result, read only after the checker has established it.
   let result: Record<string, unknown>;
   try {
-    result = JSON.parse(new TextDecoder().decode(bundle.result)) as Record<string, unknown>;
+    result = JSON.parse(new TextDecoder().decode(pinned.result)) as Record<string, unknown>;
   } catch (error) {
     return no("UNREADABLE", error instanceof Error ? error.message : String(error));
   }
