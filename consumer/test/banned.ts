@@ -6,6 +6,19 @@
 // `readFileSync` is a hole: a key read smuggled in there was not caught, though the
 // scan's own regex matched the line.
 
+/**
+ * Patterns banned in ONE named file rather than everywhere.
+ *
+ * `gate.ts` must not parse the result bytes itself: `verify` returns the value it
+ * established, and a second parse -- by a laxer parser than the checker's -- would be
+ * the gate acting on a value nothing verified. Nothing exploitable was found, but it is
+ * the wrong shape on the path that places orders.
+ */
+export const BANNED_IN: readonly [string, RegExp, string][] = [
+  ["gate.ts", /\bJSON\.parse\b/, "parses the result itself instead of using what verify established"],
+  ["gate.ts", /\bTextDecoder\b/, "decodes the result bytes itself"],
+];
+
 export const BANNED: readonly [RegExp, string][] = [
   [/readFileSync\s*\([^)]*key/i, "reads a key from a file"],
   [/console\.[a-z]+\([^)]*process\.env/i, "logs the environment"],
