@@ -23,6 +23,7 @@
         "REDUCTION_UNSOUND",
         "SIZE_WINDOW",
         "CERTIFICATE_WEIGHTS",
+        "ENVELOPE_MISMATCH",
         "ENGINE_DISAGREES"
       ]
     },
