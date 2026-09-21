@@ -235,6 +235,25 @@ func resolve(leg doc.ProposalLeg, registry map[string]doc.Entry) (doc.Entry, str
 		return doc.Entry{}, "", refuse("SEMANTICS_PIN_MISMATCH",
 			"%s: pins %s, the registry entry is %s", leg.ID, short(leg.SemanticsVersion), short(version))
 	}
+	// A bounded family's payoff is NOT a function of the terminal price. `priceTouch` is
+	// the case: whether the price ever touched a level is path-dependent, and this
+	// kernel evaluates terminal prices. PLAN section 2 states the bound -- the inclusive
+	// terminal digital at the target, and only when the touch window covers the
+	// valuation time -- but no such family exists yet, so there is no rule to apply.
+	// Refusing is the safe direction: evaluating one with the terminal machinery would
+	// over-credit it at prices it may never have touched.
+	if entry.Status == "bounded" {
+		return doc.Entry{}, "", refuse("UNSUPPORTED_FAMILY",
+			"%s: %s is bounded, not computed, and lowering has no bound for it yet", leg.ID, entry.Family)
+	}
+	// The registry says this family is not understood (PLAN section 6: "Everything else
+	// -- Refused"). A REFUSAL, not a reduction: a reduction still yields a verdict, and
+	// there is no verdict to give about a payoff nobody has read. Worst-casing it to zero
+	// would answer a question this project has declared unanswerable.
+	if entry.Status == "refused" {
+		return doc.Entry{}, "", refuse("UNSUPPORTED_FAMILY",
+			"%s: the registry refuses %s: its reading is not established", leg.ID, entry.Family)
+	}
 	return entry, version, nil
 }
 
