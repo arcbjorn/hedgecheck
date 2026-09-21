@@ -519,11 +519,7 @@ function boundFrom(
     if (!Array.isArray(raw)) {
       refuse("TERMS_MISMATCH", `$proposal.legs.${id}.terms.${termName}`, "expected a list");
     }
-    // The position is read digit by digit rather than through parseInt. A list index
-    // is small and exact, so a JavaScript number would be safe here -- but the rule
-    // is that no `number` holds a value read out of a document, and an exception
-    // made where it happens to be harmless is an exception a later reader copies to
-    // somewhere it is not.
+    // Digit by digit, not parseInt: no `number` holds a value read from a document.
     const item = raw[digitsOf(positionText)];
     if (typeof item !== "string") {
       refuse("TERMS_MISMATCH", `$proposal.legs.${id}.terms.${termName}`, `no item at ${positionText}`);
