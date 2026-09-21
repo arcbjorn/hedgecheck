@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"hedgecheck/engine/doc"
+	"hedgecheck/engine/envelope"
 	"hedgecheck/engine/evaluate"
 	"hedgecheck/engine/lower"
 )
@@ -45,16 +46,22 @@ const usage = `hedgecheck — check whether a proposed hedge meets an explicit o
   hedgecheck check --live --underlying BTC --quantity Q --cap C --floor F
                           --ceiling CE --baseline analysis_time|explicit:P
                           --valuation-time T --store DIR --registry DIR
+                          [--network mainnet|testnet]
   hedgecheck bundle   --proposal P --registry DIR --snapshots DIR --out DIR
   hedgecheck compare  --result R --result R [--result R ...]
   hedgecheck replay   --input-digest D --store DIR --registry DIR
   hedgecheck retain   --input-digest D --store DIR --out DIR
   hedgecheck serve    --store DIR --registry DIR [--address 127.0.0.1:8787]
+                      [--checker checker/dist]
   hedgecheck render   --input-digest D --store DIR [--out FILE]
 
 Options:
   --pretty      indent the output; canonical JSON otherwise
   --reviewed    treat every registry entry as reviewed (fixtures only, never live)
+  --envelope    issue the order envelope the cost bound assumes, on check and bundle.
+                Only for a passing, depth-priced, single-leg answer; anything else
+                sets execution_readiness to blocked and says why on stderr. It is a
+                statement of which order the bound is about, not permission to send it
 
 Exit status:
   0  passes
@@ -124,6 +131,8 @@ type options struct {
 	store         string
 	inputDigest   string
 	address       string
+	checker       string
+	network       string
 	live          bool
 	underlying    string
 	quantity      string
@@ -132,6 +141,7 @@ type options struct {
 	ceiling       string
 	baseline      string
 	valuationTime string
+	envelope      bool
 }
 
 func parseFlags(args []string) (options, error) {
@@ -165,6 +175,8 @@ func parseFlags(args []string) (options, error) {
 			flags.store, err = value()
 		case "--live":
 			flags.live = true
+		case "--envelope":
+			flags.envelope = true
 		case "--underlying":
 			flags.underlying, err = value()
 		case "--quantity":
@@ -179,6 +191,10 @@ func parseFlags(args []string) (options, error) {
 			flags.baseline, err = value()
 		case "--valuation-time":
 			flags.valuationTime, err = value()
+		case "--network":
+			flags.network, err = value()
+		case "--checker":
+			flags.checker, err = value()
 		case "--address":
 			flags.address, err = value()
 		case "--input-digest":
@@ -381,7 +397,7 @@ func commandCheck(flags options, out, errOut *os.File) int {
 		fmt.Fprintln(errOut, "check needs --proposal, --registry and --snapshots")
 		return exitUsage
 	}
-	_, ir, _, err := lowerFrom(flags)
+	proposal, ir, versions, err := lowerFrom(flags)
 	if err != nil {
 		return refusalExit(err, errOut)
 	}
@@ -389,6 +405,9 @@ func commandCheck(flags options, out, errOut *os.File) int {
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return exitUsage
+	}
+	if flags.envelope {
+		result = issueEnvelope(proposal, ir, result, versions, errOut)
 	}
 	encoded, err := doc.WriteResult(result)
 	if err != nil {
@@ -402,12 +421,32 @@ func commandCheck(flags options, out, errOut *os.File) int {
 	return verdictExit(result)
 }
 
+// issueEnvelope attaches the order envelope, or marks the result blocked and says why.
+//
+// A refusal to issue is NOT an error and never changes the exit status: the verdict is
+// still the verdict, and "this answer cannot be turned into one order" is information
+// about execution, not about the objective. Conflating the two would make a passing
+// hedge look like a failing one because it has two legs.
+func issueEnvelope(proposal doc.Proposal, ir doc.IR, result doc.Result, versions []string, errOut *os.File) doc.Result {
+	digest, err := lower.InputDigest(proposal, ir, versions)
+	if err != nil {
+		fmt.Fprintf(errOut, "no envelope: %v\n", err)
+		return result
+	}
+	result.SetDigests("", digest)
+	issued, err := envelope.Issue(proposal, ir, result, digest)
+	if err != nil {
+		fmt.Fprintf(errOut, "no envelope: %v\n", err)
+	}
+	return issued
+}
+
 func commandBundle(flags options, out, errOut *os.File) int {
 	if flags.proposal == "" || flags.registry == "" || flags.snapshots == "" || flags.out == "" {
 		fmt.Fprintln(errOut, "bundle needs --proposal, --registry, --snapshots and --out")
 		return exitUsage
 	}
-	proposal, ir, _, err := lowerFrom(flags)
+	proposal, ir, versions, err := lowerFrom(flags)
 	if err != nil {
 		return refusalExit(err, errOut)
 	}
@@ -415,6 +454,9 @@ func commandBundle(flags options, out, errOut *os.File) int {
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return exitUsage
+	}
+	if flags.envelope {
+		result = issueEnvelope(proposal, ir, result, versions, errOut)
 	}
 	registry, err := loadRegistry(flags.registry, flags.reviewed)
 	if err != nil {
