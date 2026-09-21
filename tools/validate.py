@@ -241,6 +241,43 @@ def main():
             refused += 1
     check(refused >= 40, f"only {refused} rejected documents; the set is meant to be broad")
 
+    # ---- "an envelope only on a passing, depth-priced result" is a cross-field rule too
+    #
+    # No keyword in this validator's subset can say "order_envelope implies
+    # model_result is passes", so the rule lives here, where the documents are
+    # already in hand. The three mutations are the three ways an envelope could
+    # escape the verdict it belongs to; each must be refused.
+    envelope = {"coin": "#39651", "side": "buy", "size": "1409", "limit_price": "0.48404",
+                "time_in_force": "Ioc", "max_cost": "645.76904", "input_digest": "c" * 64}
+
+    def envelope_problems(document):
+        out = []
+        has = "order_envelope" in document
+        if has and document["model_result"] != "passes":
+            out.append(f"an envelope on a {document['model_result']}")
+        if has != (document["execution_readiness"] == "envelope_issued"):
+            out.append(f"execution_readiness {document['execution_readiness']!r} with envelope present={has}")
+        return out
+
+    issued = mutate(mutate(mutate(result, ["model_result"], "passes"),
+                           ["execution_readiness"], "envelope_issued"),
+                    ["order_envelope"], envelope)
+    check(not valid(issued, "result.schema.json"), "a passing result carrying its envelope is valid")
+    check(not envelope_problems(issued), "a passing result carrying its envelope is coherent")
+    check(envelope_problems(mutate(issued, ["model_result"], "fails")),
+          "refuses an envelope issued for a failing verdict")
+    check(envelope_problems(mutate(issued, ["model_result"], "needs_review")),
+          "refuses an envelope issued for a verdict that needs review")
+    check(envelope_problems(mutate(issued, ["execution_readiness"], "blocked")),
+          "refuses an envelope beside a readiness that says it was blocked")
+    check(envelope_problems(mutate(result, ["execution_readiness"], "envelope_issued")),
+          "refuses envelope_issued with no envelope to issue")
+    check(not envelope_problems(result), "a result that issued nothing stays coherent")
+    # And the whole tree obeys it, not only the probes above.
+    for name, document in documents.items():
+        if name.endswith(".result.json") or name.endswith("/result.json"):
+            check(not envelope_problems(document), f"{name}: {envelope_problems(document)}")
+
     # ---- "reviewed with a stale digest" is a cross-field rule no schema keyword can express
     genuine = mutate(entry, ["review"], {"state": "reviewed", "drafted_by": "model", "reviewed_by": "owner",
                                          "reviewed_on": "2026-09-19", "digest": canon.semantics_version(entry)})
@@ -299,7 +336,8 @@ def main():
     # capture is not checked by it. That is how the Go adapter came to write RFC 3339
     # with a Z where the frozen schema requires +00:00: nothing looked. These are the
     # records a replay actually reads, so they are checked where they live.
-    tree_records = sorted(PROJECT.glob("fixtures/replay/*/*.request.json"))
+    tree_records = sorted(PROJECT.glob("fixtures/replay/*/*.request.json")) + \
+        sorted(PROJECT.glob("fixtures/testnet/*/*.request.json"))
     for path in tree_records:
         problems = valid(json.loads(path.read_text()), "snapshot-record.schema.json")
         check(not problems, f"{path.relative_to(PROJECT)}: {problems[:2]}")
