@@ -1352,6 +1352,10 @@ async function readEvidence(bundle, options) {
     if (entry.version !== pin) {
       refuse("SEMANTICS_PIN", `$proposal.legs.${family}`, `the pin is ${short(pin)}, the entry's semantics_version is ${short(entry.version)}`);
     }
+    const status = text(entry.value["status"], `$registry.${family}.status`);
+    if (status !== "computed") {
+      refuse("SEMANTICS_PIN", `$proposal.legs.${family}`, `the entry's status is ${status}, and only a computed family has a terminal payoff to check`);
+    }
   }
   return {
     proposal,
