@@ -17,6 +17,7 @@ result; it is not a `fails`.
 
 from hashlib import sha256
 import json
+import re
 from typing import NoReturn
 
 import canon
@@ -142,6 +143,30 @@ def check_terms(leg, catalogue):
 
 
 # --------------------------------------------------------------------------- registry
+
+
+def leg_reference(leg, entry):
+    """The price series this leg is observed on, resolved from the entry's template.
+
+    A registry entry carries a TEMPLATE -- `hl:perp:{underlying}:mark-interp` -- because one
+    reading covers every instance of a family. Each `{name}` is the leg's own term of that
+    name, so the reference is a fact about the leg and never restated in the proposal.
+
+    A template naming a term the leg does not carry is a MALFORMED ENTRY, not a leg on a
+    foreign reference: there is no series to name at all. That is a refusal, not the
+    reduction below.
+    """
+    def one(match):
+        name = match.group(1)
+        if name not in leg["terms"]:
+            _refuse("UNSUPPORTED_FAMILY",
+                    f"{leg['id']}: the entry's reference names {{{name}}}, which the leg's terms do not carry")
+        value = leg["terms"][name]
+        if not isinstance(value, str):
+            _refuse("UNSUPPORTED_FAMILY",
+                    f"{leg['id']}: the entry's reference names {{{name}}}, which is not a single value")
+        return value
+    return re.sub(r"\{([a-z_]+)\}", one, entry["reference"])
 
 
 def resolve(leg, registry):
@@ -334,6 +359,8 @@ def lower(proposal, registry, snapshots):
     baseline = read_baseline(proposal, snapshots)
 
     legs, versions, reductions = [], [], []
+    # Each leg's resolved price series, for the basis-band grouping after the loop.
+    leg_references = {}
     for leg in proposal["legs"]:
         entry, version = resolve(leg, registry)
         versions.append(version)
@@ -367,6 +394,7 @@ def lower(proposal, registry, snapshots):
         for name in entry["assumptions_required"]:
             if name not in proposal["assumptions"]:
                 _refuse("ASSUMPTION_REQUIRED", f"{leg['id']}: {entry['family']} requires the {name!r} assumption")
+        leg_references[leg["id"]] = leg_reference(leg, entry)
         legs.append({
             "id": leg["id"],
             "kind": "indicator",
@@ -376,6 +404,44 @@ def lower(proposal, registry, snapshots):
             "observation_time": leg["terms"]["expiry"],
             "semantics": version,
         })
+
+    # ---- the basis band: legs observed on a reference the objective is not stated on
+    #
+    # GROUPED, never leg by leg. PLAN section 2 states the rule as the infimum of the
+    # GROUP's SUMMED payoff over [S - b, S + b], and the infimum of a sum is not the sum of
+    # infima: two legs whose payoffs cancel have a flat sum that no basis move can hurt,
+    # while each alone is stepped. Reducing them separately invents a loss on a perfectly
+    # hedged position -- and the "a reduction never turns a failing proposal into a passing
+    # one" invariant cannot catch that, because per-leg is the LOWER answer.
+    #
+    # The reduction is recorded here; the arithmetic is the kernel's `band_infimum`, applied
+    # by the evaluator to the group's summed payoff.
+    objective_reference = proposal.get("objective_reference")
+    if objective_reference is not None:
+        bounds = {}
+        for declared in proposal.get("basis_bounds", []):
+            left, right = declared["between"]
+            bounds[frozenset((left, right))] = declared["bound"]
+        groups = {}
+        for leg, reference in leg_references.items():
+            if reference != objective_reference:
+                groups.setdefault(reference, []).append(leg)
+        for reference, members in sorted(groups.items()):
+            members = sorted(members)
+            bound = bounds.get(frozenset((objective_reference, reference)))
+            head, rest = members[0], members[1:]
+            row = {"leg": head, "rule": "basis_band", "tight": False,
+                   "reason_code": "BASIS_BAND"}
+            if rest:
+                row["with"] = rest
+            if bound is None:
+                # PLAN section 2: "No bound declared: zero". The reference is KNOWN -- it
+                # just cannot be related to the objective's -- so this is a reduction and
+                # not a refusal. Loose: the group is probably worth more than zero.
+                row["rule"], row["reason_code"] = "basis_unbridged", "BASIS_UNBRIDGED"
+            else:
+                row["bound"] = exact.format(num(bound))
+            reductions.append(row)
 
     lowered = {
         "schema_version": SCHEMA_VERSION,
