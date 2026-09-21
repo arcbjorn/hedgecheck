@@ -151,8 +151,17 @@ func commandCheckLive(flags options, out, errOut *os.File) int {
 
 	keep := store.New(flags.store)
 	client := hyperliquid.NewClient()
-	fmt.Fprintf(out, "capturing from %s, at most %d requests, one per %v\n",
-		hyperliquid.Endpoint, hyperliquid.Budget, hyperliquid.Pace)
+	// The network is named, never a URL. An unknown name is refused here rather
+	// than turned into a request somewhere this engine was not built to call.
+	if flags.network != "" {
+		if err := client.SetNetwork(flags.network); err != nil {
+			fmt.Fprintln(errOut, err)
+			return exitUsage
+		}
+	}
+	endpoint, _ := hyperliquid.EndpointFor(client.Network())
+	fmt.Fprintf(out, "capturing from %s (%s), at most %d requests, one per %v\n",
+		endpoint, client.Network(), hyperliquid.Budget, hyperliquid.Pace)
 
 	captured, err := CaptureLive(venueClient{client}, keep, settings.underlying,
 		hyperliquid.RetrievedAt)
@@ -229,6 +238,30 @@ func commandCheckLive(flags options, out, errOut *os.File) int {
 		if err := keep.PutResult(row.InputDigest, string(row.Result.EngineVersion), resultBytes); err != nil {
 			fmt.Fprintln(errOut, err)
 			return exitUsage
+		}
+		// The proposal and the lowered proposal are stored beside the result, so a
+		// browser can fetch the whole bundle and re-derive the answer rather than
+		// reading the engine's own conclusion back.
+		proposalBytes, err := doc.WriteProposal(row.Proposal)
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return exitUsage
+		}
+		loweredBytes, err := doc.WriteIR(row.IR)
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return exitUsage
+		}
+		for _, part := range []struct {
+			name string
+			body []byte
+		}{
+			{"proposal", proposalBytes}, {"lowered", loweredBytes},
+		} {
+			if err := keep.PutBundlePart(row.InputDigest, part.name, part.body); err != nil {
+				fmt.Fprintln(errOut, err)
+				return exitUsage
+			}
 		}
 		fmt.Fprintf(out, "%s: input_digest %s\n", row.ID, row.InputDigest)
 		if status := verdictExit(row.Result); status > worst {
