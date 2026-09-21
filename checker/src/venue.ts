@@ -1,21 +1,4 @@
 // Venue JSON: the second parser mode. A snapshot is EVIDENCE, not a contract document.
-//
-// The canonical profile refuses numbers, null and camelCase keys, and it is right to:
-// a contract document is written by this system and those things would be a defect in
-// it. A venue response is written by someone else. In the retained snapshots there are
-// 3,594 numbers, 504 nulls and keys such as `dayNtlVlm` and `marginTableId`. Refusing
-// them would mean refusing the evidence every result rests on.
-//
-// So this parser is as strict as `canon` about SYNTAX -- the same UTF-8 handling, the
-// same duplicate-key rejection, the same depth limit, the same refusal of raw control
-// characters and lone surrogates -- and relaxes only what the venue legitimately sends.
-//
-// EVERY NUMBER IS KEPT AS ITS LEXEME AND NEVER CONVERTED. `1200.0`, `1.2e3` and
-// `0.00000001` stay exactly those characters. A number that passed through a JavaScript
-// `number` would be a quantity this checker had silently rounded, and the whole point
-// of the checker is that it does not do that. Quantities are read only from STRING
-// fields; `numberLexeme` exists so a caller can look at a number without converting it,
-// and there is deliberately no function here that turns one into a Rational.
 
 export const MAX_DEPTH = 32;
 
@@ -240,12 +223,6 @@ export function at(value: VenueValue, path: readonly (string | number)[]): Venue
 
 /**
  * A quantity, read ONLY from a string field.
- *
- * The venue sends sizes as text such as "1200.0" and prices as text such as "0.17399".
- * It also sends genuine numbers, for timestamps and counts. This refuses a number even
- * though one could be converted, because the conversion is exactly what must not
- * happen: every quantity in this system is exact, and the venue's own choice of string
- * is what makes that possible.
  */
 export function quantityText(value: VenueValue, path: readonly (string | number)[]): string {
   const found = at(value, path);
