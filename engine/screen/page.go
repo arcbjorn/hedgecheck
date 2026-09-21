@@ -64,6 +64,13 @@ type Page struct {
 	NotChecked []string
 	// Unreviewed lists families whose reading is still a draft.
 	Unreviewed []string
+
+	// Verifiable is set when the checker is mounted and this result has the bundle
+	// parts stored beside it. The page then loads the checker and re-derives the
+	// answer in the reader's own browser.
+	Verifiable bool
+	// CheckDigest is the input digest the browser fetches the bundle under.
+	CheckDigest string
 }
 
 // ReductionRow is the sell-down alternative.
@@ -186,6 +193,17 @@ const pageHTML = `<!DOCTYPE html>
  th { font-weight: 600; color: var(--quiet); font-size: .85rem; }
  td.n, th.n { text-align: right; padding-right: 1.5rem; }
  .verdict-passes { color: var(--above); }
+ /* A REFUSAL IS NOT A LESSER EVENT THAN A FAILING VERDICT. It uses the same
+    weight, the same size and the same colour: a checker saying "this result is
+    not what it claims" is at least as serious as the result saying "this hedge
+    does not meet your objective", and styling it as a footnote would invite a
+    reader to skim past the one thing they must not. */
+ .check { border: 2px solid var(--rule); border-radius: 4px; padding: .75rem 1rem;
+          margin: 1.5rem 0; font-size: 1.05rem; }
+ .check-accepted { border-color: var(--above); color: var(--above); }
+ .check-refused  { border-color: var(--below); color: var(--below); font-weight: 600; }
+ .check-unchecked { border-color: var(--quiet); color: var(--quiet); }
+ .check-class { font: 13px/1.4 ui-monospace, monospace; }
  .verdict-fails { color: var(--below); }
  .verdict-needs_review { color: var(--quiet); }
  figure { margin: 1rem 0 2rem; }
@@ -230,6 +248,115 @@ const pageHTML = `<!DOCTYPE html>
   <td class="note">keep {{.Reduction.Keep}}, buy nothing</td>
  </tr>
 </table>
+
+<div class="check check-unchecked" id="check">
+{{if .Verifiable}}
+ <strong>Not checked in this browser.</strong>
+ This page was served with a checker, but scripts are not running, so nothing here
+ has been re-derived. The numbers above are the server&rsquo;s own answer.
+{{else}}
+ <strong>Not checked in this browser.</strong>
+ No checker is mounted for this result.
+{{end}}
+</div>
+{{if .Verifiable}}
+<script type="module">
+ // Re-derive the result from the bundle, in the reader's own browser.
+ //
+ // Every part is fetched separately and HASHED HERE. The service says which bytes
+ // it holds; this page does not take its word for which bytes those are.
+ import { verify } from "/checker.js";
+
+ const digest = {{.CheckDigest}};
+ const box = document.getElementById("check");
+
+ const sha256 = async (bytes) => {
+   const hash = await crypto.subtle.digest("SHA-256", bytes);
+   return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
+ };
+ const fetchBytes = async (path) => {
+   const response = await fetch(path);
+   if (!response.ok) throw new Error(path + ": " + response.status);
+   return new Uint8Array(await response.arrayBuffer());
+ };
+
+ const show = (kind, headline, detail) => {
+   box.className = "check check-" + kind;
+   box.innerHTML = "";
+   const strong = document.createElement("strong");
+   strong.textContent = headline;
+   box.append(strong);
+   if (detail) {
+     box.append(" ");
+     const span = document.createElement("span");
+     span.className = "check-class";
+     span.textContent = detail;
+     box.append(span);
+   }
+ };
+
+ try {
+   const [result, proposal, lowered] = await Promise.all([
+     fetchBytes("/v1/checks/" + digest),
+     fetchBytes("/v1/bundle/" + digest + "/proposal"),
+     fetchBytes("/v1/bundle/" + digest + "/lowered"),
+   ]);
+
+   // The snapshots and registry entries the PROPOSAL cites, read from the parsed
+   // document rather than scraped from its text.
+   //
+   // A regex over the bytes would find today's citations -- it does, on every
+   // proposal in the tree -- but it is a guess about a shape the schema owns. A
+   // field added later would be missed silently, and a missed citation makes
+   // verify() refuse a result that is perfectly good. Walking the parsed document
+   // cannot drift from the schema that way.
+   const cited = [];
+   const versions = [];
+   const document = JSON.parse(new TextDecoder().decode(proposal));
+   const source = document.baseline && document.baseline.source;
+   if (source && typeof source.snapshot === "string") cited.push(source.snapshot);
+   for (const leg of document.legs || []) {
+     if (leg.instance && typeof leg.instance.catalogue === "string") {
+       cited.push(leg.instance.catalogue);
+     }
+     if (leg.acquisition && typeof leg.acquisition.snapshot === "string") {
+       cited.push(leg.acquisition.snapshot);
+     }
+     if (typeof leg.semantics_version === "string") versions.push(leg.semantics_version);
+   }
+
+   const snapshots = new Map();
+   for (const want of new Set(cited)) {
+     const bytes = await fetchBytes("/v1/snapshots/" + want);
+     const got = await sha256(bytes);
+     if (got !== want) throw new Error("a snapshot does not hash to the name it was served under");
+     snapshots.set(got, bytes);
+   }
+   const registry = new Map();
+   for (const version of new Set(versions)) {
+     const bytes = await fetchBytes("/v1/registry/" + version);
+     registry.set(JSON.parse(new TextDecoder().decode(bytes)).family, bytes);
+   }
+
+   const outcome = await verify(
+     { proposal, lowered, result, manifest: new Uint8Array(), snapshots, registry },
+     {},
+   );
+   if (outcome.accepted) {
+     show("accepted", "ACCEPTED.",
+       "re-derived in this browser from the proposal and the snapshots it cites");
+   } else {
+     show("refused", "REFUSED: " + outcome.refusal.class + ".",
+       outcome.refusal.at + " " + outcome.refusal.detail);
+   }
+ } catch (error) {
+   // A checker that could not finish has established nothing. It says so rather
+   // than leaving the reader with the unchecked notice, which would read as
+   // "nobody tried" when in fact something went wrong.
+   show("refused", "NOT ESTABLISHED.", String(error && error.message || error));
+ }
+</script>
+{{end}}
 
 {{range .Candidates}}{{if .Sized}}
 <h2>{{.ID}}</h2>
@@ -281,5 +408,12 @@ const pageHTML = `<!DOCTYPE html>
 <p class="note">
  This page answers the objective stated above, on the snapshots named above.
  It is not advice, and it says nothing about any objective other than the one stated.
+</p>
+<p class="note">
+ The check above runs in this browser and re-derives the answer from the proposal
+ and the snapshots it cites. It protects against a mistake in the engine that
+ computed the result. <strong>It does not protect against a dishonest server</strong>,
+ which could serve a dishonest checker alongside a dishonest result. Running your
+ own copy is what makes the check yours.
 </p>
 `
