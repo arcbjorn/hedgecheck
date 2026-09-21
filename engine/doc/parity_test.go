@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,4 +137,52 @@ func TestAcceptsAndRoundTripsEveryValidDocument(t *testing.T) {
 		}
 	}
 	t.Logf("accepted and round-tripped %d documents", total)
+}
+
+// The closed list in Go is the closed list in the schema.
+//
+// RefusalClasses is a hand-copy of refusal.schema.json's enum. That copy silently
+// drifted the first time a class was added after the freeze: the schema gained
+// ENVELOPE_MISMATCH, the Go decoder did not, and four bundle manifests that were
+// valid became undecodable. The list is small enough to copy and small enough to
+// forget, which is exactly the pair a test exists for.
+func TestRefusalClassesMatchTheSchema(t *testing.T) {
+	raw, err := os.ReadFile("../../schema/refusal.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// encoding/json, not canon: a schema file is a specification, not evidence, and
+	// its "$defs" key is outside the canonical profile the checker's parser enforces.
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	defs, ok := document["$defs"].(map[string]any)
+	if !ok {
+		t.Fatal("no $defs")
+	}
+	class, ok := defs["class"].(map[string]any)
+	if !ok {
+		t.Fatal("no $defs.class")
+	}
+	items, ok := class["enum"].([]any)
+	if !ok {
+		t.Fatal("$defs.class has no enum")
+	}
+	want := make([]string, 0, len(items))
+	for _, item := range items {
+		text, ok := item.(string)
+		if !ok {
+			t.Fatalf("a class that is not a string: %v", item)
+		}
+		want = append(want, text)
+	}
+	if len(want) != len(RefusalClasses) {
+		t.Fatalf("the schema has %d classes, Go has %d: %v vs %v", len(want), len(RefusalClasses), want, RefusalClasses)
+	}
+	for index, name := range want {
+		if RefusalClasses[index] != name {
+			t.Errorf("class %d: the schema says %q, Go says %q", index, name, RefusalClasses[index])
+		}
+	}
 }
