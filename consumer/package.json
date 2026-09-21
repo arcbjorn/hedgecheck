@@ -1,0 +1,7 @@
+{
+  "name": "@hedgecheck/consumer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The approval gate. Runs its own copy of the checker; places nothing itself."
+}
