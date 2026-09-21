@@ -1254,9 +1254,9 @@ function refuse(className, at2, detail) {
 }
 async function verify(bundle, options = {}) {
   try {
-    await establish(bundle, options);
     return {
-      accepted: true
+      accepted: true,
+      result: await establish(bundle, options)
     };
   } catch (error) {
     if (error instanceof Refused) return {
@@ -1278,6 +1278,7 @@ async function establish(bundle, options) {
   const rebuilt = relower(evidence);
   await compareLowering(evidence, rebuilt);
   evaluateAndCompare(evidence, rebuilt);
+  return evidence.result;
 }
 async function readEvidence(bundle, options) {
   const proposal = object(readDocument(bundle.proposal, "proposal"), "$proposal");
@@ -1443,7 +1444,9 @@ function relower(evidence) {
       reductionRule: rule,
       tight,
       levels,
-      coin
+      coin,
+      family,
+      version: entry.version
     });
   }
   return {
@@ -1704,10 +1707,10 @@ function evaluateAndCompare(evidence, rebuilt) {
     ...upperParts,
     cash(upperCeiling)
   ]);
+  compareReductions(evidence, rebuilt);
   const mine = profile(lowerFn, rebuilt.domainLower, rebuilt.domainUpper);
   compareProfile(mine, list(result["profile"], "$result.profile"), "$result.profile");
   compareVerdict(evidence, rebuilt, lowerFn, upperFn);
-  compareReductions(evidence, rebuilt);
   compareCost(evidence, rebuilt, lowerFn);
   compareSizeWindows(evidence, rebuilt);
   compareWitnesses(evidence, rebuilt, upperFn);
@@ -1875,6 +1878,12 @@ function compareIntervals(evidence, rebuilt, lowerFn, clauses) {
 function compareReductions(evidence, rebuilt) {
   const stated = list(evidence.result["reductions"] ?? [], "$result.reductions");
   const mine = rebuilt.legs.filter((leg) => leg.reduced);
+  const declaredFor = new Set(stated.map((entry) => text(object(entry, "$result.reductions[]")["leg"], "$result.reductions[].leg")));
+  for (const leg of mine) {
+    if (leg.reductionRule === "unreviewed_family" && !declaredFor.has(leg.id)) {
+      refuse("REDUCTION_UNDECLARED", "$result.reductions", `leg ${leg.id} rests on ${leg.family} at version ${leg.version}, which is not in this checker's allowlist, so this checker reduces it under unreviewed_family; the result declares no reduction for that leg`);
+    }
+  }
   if (stated.length !== mine.length) {
     refuse("REDUCTION_UNDECLARED", "$result.reductions", `the result declares ${stated.length} reductions, the evidence requires ${mine.length}`);
   }
