@@ -237,7 +237,7 @@ func readPayoffs(r *reader) []Payoff {
 		payoff := Payoff{}
 		if selector, ok := child.sub("select"); ok {
 			payoff.Side = selector.enum("side", "yes", "no", "long", "short")
-			payoff.Index, payoff.HasIndex = selector.optionalStr("index", nil, "")
+			payoff.Index, payoff.HasIndex = selector.optionalStr("index", digitsPattern, "digits")
 			child.finish(selector)
 		}
 		for legIndex, legItem := range child.list("pays", 1) {
