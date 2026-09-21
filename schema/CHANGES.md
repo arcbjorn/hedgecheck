@@ -95,6 +95,37 @@ validated is not evidence.
   50 records at `085ccfb` predate the field and are all mainnet; making it required
   would invalidate the evidence commit.
 
+## Forced by the first deployer-settled bundle (T4)
+
+**The forcing case.** T4 added a reduction for `settlement: deployer`, and with it the
+first BUNDLE whose verdict is `needs_review` — so the first result document carrying an
+undecided interval that anything validated. It failed:
+
+    $.undecided_intervals[0]: unexpected 'clause'
+    $.undecided_intervals[0]: unexpected 'responsible_legs'
+    $.undecided_intervals[0]: unexpected 'witness'
+
+**The schema was wrong, and had been since the field existed.** `undecided_intervals`
+pointed at `$defs/interval` — four endpoint fields, `additionalProperties: false` —
+while all three implementations have always emitted seven fields there. Verified across
+the generated corpus: **40 of 40** undecided intervals carry the rich shape, and
+`fixtures/generated/ir/case-0090.result.json`, which predates this change, fails the
+old schema exactly as the new bundle did. Nothing caught it because no validated
+document had ever contained one: every bundle fixture was `passes` or `fails`.
+
+- **`undecided_intervals` gets its own shape** rather than sharing `$defs/interval`:
+  `lower`, `lower_inclusive`, `upper`, `upper_inclusive`, `clause`, `witness`,
+  `responsible_legs`, all required, `additionalProperties: false`. `clause` and
+  `witness` match `failing_intervals` field for field.
+- **`responsible_legs` is required here and absent from a failing interval.** That
+  asymmetry is the point: an undecided interval exists BECAUSE some leg's bound is
+  loose, and a reader has to know whose. A failing interval has a proven violation and
+  no leg is to blame for uncertainty.
+- **`$defs/interval` is untouched**, so every other user of it is unaffected.
+
+`schema_version` stays `"1"`: the change only widens what `undecided_intervals` accepts,
+and every document valid before is valid now.
+
 ## Not changed, and why
 
 - **`schema_version` stays `"1"`.** Every change above is additive: no field was removed, no field became required, no existing value became invalid. A document valid at `062a245` is valid now.
