@@ -102,6 +102,10 @@ func renderSample(t *testing.T) string {
 			"whether the venue will quote these prices again",
 		},
 		Unreviewed: []string{"recurring.priceBinary"},
+		// Verifiable, so the sample carries the checker's script and the guards
+		// below see what a reader with scripts enabled would run.
+		Verifiable:  true,
+		CheckDigest: strings.Repeat("a", 64),
 	}
 	rendered, err := Render(page)
 	if err != nil {
@@ -237,5 +241,185 @@ func TestNotCheckedCodesBecomeEnglish(t *testing.T) {
 	// does not know about is still a limitation.
 	if NotCheckedWord("SOMETHING_NEW") != "SOMETHING_NEW" {
 		t.Error("an unknown code was not passed through, so it would vanish from the page")
+	}
+}
+
+// With scripts disabled the page is fully readable, and it says plainly that the
+// result has NOT been checked in this browser.
+//
+// A page that silently omitted the check would let a reader believe they had seen
+// one. The unchecked notice is in the HTML itself, so it is what a reader sees
+// unless a script replaces it.
+func TestPageWithoutScriptsSaysItIsUnchecked(t *testing.T) {
+	page := renderSample(t)
+	// Everything outside <script> is what a reader sees with scripts disabled.
+	withoutScripts := stripScripts(page)
+	for _, required := range []string{
+		"Not checked in this browser",
+		"the smallest size that met the objective",
+		"does not establish",
+		"not advice",
+	} {
+		if !strings.Contains(withoutScripts, required) {
+			t.Errorf("without scripts the page never says %q", required)
+		}
+	}
+	// The table and the chart survive: the page is readable, not a stub.
+	if !strings.Contains(withoutScripts, "<table>") {
+		t.Error("the ranked table is inside a script and vanishes without one")
+	}
+	if !strings.Contains(withoutScripts, "<svg") {
+		t.Error("the payoff chart is inside a script and vanishes without one")
+	}
+}
+
+func stripScripts(page string) string {
+	out := page
+	for {
+		start := strings.Index(out, "<script")
+		if start < 0 {
+			return out
+		}
+		end := strings.Index(out[start:], "</script>")
+		if end < 0 {
+			return out[:start]
+		}
+		out = out[:start] + out[start+end+len("</script>"):]
+	}
+}
+
+// A REFUSAL IS NEVER STYLED AS A LESSER EVENT THAN A FAILING VERDICT.
+//
+// A checker saying "this result is not what it claims" is at least as serious as a
+// result saying "this hedge does not meet your objective". If the refusal were
+// smaller, lighter or quieter, a reader would skim past the one thing they must not.
+func TestARefusalIsNotStyledMoreQuietlyThanAFailure(t *testing.T) {
+	page := renderSample(t)
+	rules := styleRules(page)
+
+	refused, ok := rules[".check-refused"]
+	if !ok {
+		t.Fatal("the page has no style for a refusal")
+	}
+	failure, ok := rules[".verdict-fails"]
+	if !ok {
+		t.Fatal("the page has no style for a failing verdict")
+	}
+	// Both use the same colour: a refusal is not a milder shade.
+	if !strings.Contains(refused, "var(--below)") || !strings.Contains(failure, "var(--below)") {
+		t.Errorf("a refusal and a failure use different colours: %q vs %q", refused, failure)
+	}
+	// The refusal is not made quieter.
+	for _, quiet := range []string{"var(--quiet)", "opacity", "font-size: .8", "font-size: .9"} {
+		if strings.Contains(refused, quiet) {
+			t.Errorf("the refusal style contains %q, which makes it quieter than a failure", quiet)
+		}
+	}
+	// And the block it sits in is not smaller than the body text.
+	block, ok := rules[".check"]
+	if !ok {
+		t.Fatal("the page has no style for the check block")
+	}
+	if strings.Contains(block, "font-size: .") {
+		t.Errorf("the check block is smaller than the body text: %q", block)
+	}
+}
+
+// styleRules maps a selector to its declarations, for the one stylesheet the page
+// carries inline.
+func styleRules(page string) map[string]string {
+	out := map[string]string{}
+	start := strings.Index(page, "<style>")
+	end := strings.Index(page, "</style>")
+	if start < 0 || end < 0 {
+		return out
+	}
+	for _, rule := range strings.Split(page[start+len("<style>"):end], "}") {
+		brace := strings.Index(rule, "{")
+		if brace < 0 {
+			continue
+		}
+		for _, selector := range strings.Split(rule[:brace], ",") {
+			out[strings.TrimSpace(selector)] = rule[brace+1:]
+		}
+	}
+	return out
+}
+
+// The page's inline script PLANS FETCHES. It never decides anything.
+//
+// The script uses JSON.parse to read which snapshots a proposal cites, which is safe
+// because the answer does not depend on it: every fetched snapshot is hashed in the
+// page, and verify() re-parses the proposal with the strict canonical reader and
+// looks up snapshots by the digest IT read. A proposal with duplicate keys would at
+// worst make the page over-fetch, and would then be refused by verify().
+//
+// That reasoning holds only while the script confines itself to planning. This guard
+// holds it there: the page may not compare numbers, judge a verdict, or reach a
+// conclusion of its own. The one authority on accept-or-refuse is the checker module.
+func TestThePageScriptDecidesNothing(t *testing.T) {
+	page := renderSample(t)
+	script := scriptsOf(page)
+	if !strings.Contains(script, "verify(") {
+		t.Fatal("the script does not call verify; the test is not looking where it should")
+	}
+
+	// Vocabulary that would mean the page had formed its own opinion.
+	banned := []struct {
+		pattern *regexp.Regexp
+		why     string
+	}{
+		{regexp.MustCompile(`\bmodel_result\b`), "reading the verdict means judging it"},
+		{regexp.MustCompile(`\bworst_case\b`), "the page does not compare the engine's numbers"},
+		{regexp.MustCompile(`"passes"|'passes'`), "a verdict literal is a decision"},
+		{regexp.MustCompile(`"fails"|'fails'`), "a verdict literal is a decision"},
+		{regexp.MustCompile(`\bBigInt\b`), "arithmetic in the page is arithmetic outside the checker"},
+		{regexp.MustCompile(`\bparseFloat\b|\bNumber\(`), "a quantity must never become a JavaScript number"},
+	}
+	for _, entry := range banned {
+		if found := entry.pattern.FindString(script); found != "" {
+			t.Errorf("the page script contains %q: %s", found, entry.why)
+		}
+	}
+
+	// And the accept-or-refuse branch reads the CHECKER's outcome, not its own.
+	if !strings.Contains(script, "outcome.accepted") {
+		t.Error("the script does not branch on the checker's outcome")
+	}
+	if !strings.Contains(script, "outcome.refusal.class") {
+		t.Error("the script does not report the checker's refusal class")
+	}
+}
+
+// A snapshot the page fetched is hashed BY THE PAGE before it is believed.
+//
+// The service says which bytes it holds under a name. The page does not take its
+// word for that: it hashes what arrived and compares. Without this, a server could
+// serve any bytes under any hash and the check would proceed on them.
+func TestThePageHashesWhatItFetched(t *testing.T) {
+	script := scriptsOf(renderSample(t))
+	if !strings.Contains(script, `crypto.subtle.digest("SHA-256"`) {
+		t.Error("the page does not hash anything it fetched")
+	}
+	if !strings.Contains(script, "does not hash to the name it was served under") {
+		t.Error("the page does not refuse a snapshot whose bytes do not match its name")
+	}
+}
+
+func scriptsOf(page string) string {
+	var out strings.Builder
+	rest := page
+	for {
+		start := strings.Index(rest, "<script")
+		if start < 0 {
+			return out.String()
+		}
+		open := strings.Index(rest[start:], ">")
+		end := strings.Index(rest[start:], "</script>")
+		if open < 0 || end < 0 {
+			return out.String()
+		}
+		out.WriteString(rest[start+open+1 : start+end])
+		rest = rest[start+end+len("</script>"):]
 	}
 }
