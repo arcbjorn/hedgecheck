@@ -355,17 +355,8 @@ export function profile(f: Fn, lower: Rational, upper: Rational): ProfilePiece[]
     });
   }
 
-  // MAXIMAL pieces: adjacent atoms on the SAME line are one piece, and nothing else
-  // is merged. A singleton whose line differs from both neighbours is a real piece
-  // of the answer -- the oracle emits 23 of them across the corpus -- so a rule that
-  // absorbed every point would lose a breakpoint the function has.
-  // A singleton lies on ONE line as data, but the value it carries may continue a
-  // neighbour's line. Where it does, the pieces are not maximal until it is
-  // absorbed: a ramp that starts at 65000 pays nothing there, so 65000 continues the
-  // flat piece to its left even though the ramp's own piece owns it. Rewriting the
-  // singleton onto the line that its value continues is what makes the answer
-  // maximal, and it never changes the function -- only which of two equal
-  // descriptions of the same point is reported.
+  // A singleton whose VALUE continues a neighbour's line is absorbed into it; one
+  // that continues neither is a real piece (the oracle emits 23 such).
   for (let index = 0; index < raw.length; index += 1) {
     const point = raw[index] as ProfilePiece;
     if (!equals(point.lower, point.upper)) continue;
@@ -791,12 +782,8 @@ export function sizeWindow(
       highSite = { price: site.price, side: site.side };
     }
   }
-  // The sites that pin the window, deduplicated: one site can hold both ends, and
-  // naming it twice would suggest two constraints where there is one.
-  // A ceiling site binds only where it cuts BELOW the displayed depth. When the
-  // ceiling is the depth itself, nothing about the objective holds it there: the
-  // window simply ran out of book, which is a fact about the venue and not a
-  // constraint the reader has to reason about.
+  // Deduplicated. A ceiling site binds only where it cuts below displayed depth:
+  // at the depth itself the window ran out of book, which constrains nothing.
   const ceilingBinds = high !== null && lt(high, depth);
   for (const site of [lowSite, ceilingBinds ? highSite : null]) {
     if (site === null) continue;
