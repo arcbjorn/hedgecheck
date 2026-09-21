@@ -96,7 +96,7 @@ func invoke(t *testing.T, args ...string) (int, string, string) {
 func TestReplayReproducesThePythonRun(t *testing.T) {
 	root, inputDigest := seedStore(t)
 	status, stdout, stderr := invoke(t, "replay",
-		"--input-digest", inputDigest, "--store", root, "--registry", "../../../registry")
+		"--input-digest", inputDigest, "--store", root, "--registry", draftRegistry(t))
 	if status != exitNeedsReview {
 		t.Fatalf("status %d, want %d (needs_review)\n%s", status, exitNeedsReview, stderr)
 	}
@@ -255,8 +255,10 @@ func TestRetainCopiesBytesUnchanged(t *testing.T) {
 // the live path makes, and the last thing the Python spike was still needed to prove.
 func TestReplayReproducesTheGoLiveRun(t *testing.T) {
 	root, inputDigest := seedFrom(t, goFixtures, "binary-no.run.json")
+	// Replayed against DRAFTS, because the stored run was produced against drafts.
+	// Byte identity is the claim here, and it only holds against the same inputs.
 	status, stdout, stderr := invoke(t, "replay",
-		"--input-digest", inputDigest, "--store", root, "--registry", "../../../registry")
+		"--input-digest", inputDigest, "--store", root, "--registry", draftRegistry(t))
 	if status != exitNeedsReview {
 		t.Fatalf("status %d, want %d (needs_review, the entries are drafts)\n%s",
 			status, exitNeedsReview, stderr)
