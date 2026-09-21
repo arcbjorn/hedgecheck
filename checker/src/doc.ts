@@ -1,21 +1,4 @@
 // Contract documents: strict typed decoding from a canonical value.
-//
-// The SCHEMAS are the specification. Rather than transcribe sixty fields by hand into
-// this file -- where they would drift from `schema/` the first time either changed --
-// the decoder reads the schema and checks the document against it. The keyword set is
-// small and closed: type, enum, const, pattern, maxLength, required, properties,
-// additionalProperties, minProperties, dependentRequired, items, minItems, maxItems,
-// oneOf, $ref, $defs. The list is checked against the files by a test, because a
-// keyword the decoder silently ignores is a constraint that stops being enforced.
-//
-// Unknown keys are rejected. Every schema in `schema/` sets additionalProperties
-// false, and this treats a missing additionalProperties as false too: a document
-// carrying a field this checker does not understand cannot be verified by ignoring it.
-//
-// Optional fields are ABSENT, never null. The canonical profile has no null at all, so
-// this is a property of the parser rather than a rule enforced here -- but a decoder
-// that turned an absent field into a null would put it back, and a decode-then-encode
-// round trip would stop reproducing the bytes a digest covers.
 
 import { canonical, type Value } from "./canon.ts";
 import { isNumber, numberLexeme, type VenueValue } from "./venue.ts";
@@ -37,12 +20,6 @@ export interface Schemas {
 
 /**
  * Index the schema files by their file name, so $ref can resolve across them.
- *
- * A SCHEMA IS NOT A CONTRACT DOCUMENT. It carries `$schema`, `$id`, `$comment` and
- * numeric keywords such as minItems, all of which the canonical profile refuses --
- * correctly, because a contract document containing them would be a defect. Schema
- * files are read with the venue parser, which is as strict about syntax and allows
- * the shapes tooling legitimately uses.
  */
 export function schemas(files: ReadonlyMap<string, VenueValue>): Schemas {
   const byName = new Map<string, Schema>();
@@ -60,9 +37,6 @@ interface Context {
 /**
  * Check a document against a named schema. Returns the problems found, in document
  * order; an empty list means the document is valid.
- *
- * Every problem is returned rather than only the first, because a caller refusing a
- * document should be able to say everything that is wrong with it.
  */
 export function problems(value: Value, schemaName: string, all: Schemas): string[] {
   const schema = all.byName.get(schemaName);
@@ -262,12 +236,6 @@ function check(
 
 /**
  * Decode then encode reproduces the canonical bytes.
- *
- * The decoder above does not build a second representation, so a round trip is the
- * identity on a valid document -- which is the point. A decoder that normalised
- * anything, dropped an absent optional field or added one, would change the bytes a
- * digest covers, and a checker whose own reading of a document differs from the bytes
- * it hashed is checking something else.
  */
 export function roundTrip(value: Value): Uint8Array {
   return canonical(value);
