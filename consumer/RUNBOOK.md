@@ -19,21 +19,32 @@ Do not read a success here as a checked hedge.
 
 ## 0. Before anything: the gate will refuse today
 
-Both registry entries are `draft`:
+**The file the checker consults is the allowlist**, derived at build time from the
+registry entries that are genuinely reviewed. It is empty:
+
+    $ cat checker/dist/allowlist.json
+    {"reviewed": []}
+
+It is empty because both entries in the repository's `registry/` are drafts:
 
     $ python3 -c "import json;print(json.load(open('registry/recurring.priceBucket.json'))['review']['state'])"
     draft
 
-The build derives its allowlist from genuinely reviewed entries, so it is empty:
+**Do not diagnose a bundle from `registry/`.** That directory is the review SOURCE,
+not what the checker reads for a given bundle — a bundle carries its own
+`registry-*.json` copies, and the two can disagree. They disagree right now: the
+copies inside `fixtures/bundles/good/` say `reviewed`, while `registry/` says `draft`.
+The allowlist is what decides.
 
-    $ cat checker/dist/allowlist.json
-    {"reviewed": []}
+    $ python3 -c "import json;print(json.load(open('fixtures/bundles/good/registry-recurring.priceBucket.json'))['review']['state'])"
+    reviewed
 
 An unreviewed family reduces its leg, the reduced leg contributes zero to the lower
 profile, and the re-derived profile no longer matches the one the result states:
 
     $ node --experimental-strip-types consumer/src/run.ts \
-        --bundle fixtures/bundles/good --network testnet --dry-run
+        --bundle fixtures/bundles/good --network testnet
+    mode: REHEARSAL, nothing will be sent
     REFUSED CHECKER_REFUSED: PROFILE_COVERAGE at $result.profile: the result states 2 pieces, the proposal gives 1
     orders sent: 0
 
@@ -69,13 +80,15 @@ The key is read from **`HEDGECHECK_AGENT_KEY`** and nowhere else. Nothing reads 
 from a file, a flag, or a config; a test greps the whole of `consumer/` for another
 source and fails if one appears.
 
-Set it for the single command, so it is never written to your shell history file or
-left in the environment afterwards:
+Type it as input rather than putting it on a command line, so it never reaches your
+shell history:
 
     read -rs HEDGECHECK_AGENT_KEY && export HEDGECHECK_AGENT_KEY
 
-`read -rs` does not echo and does not enter history. Unset it the moment the run is
-done:
+`read -rs` does not echo. History records command LINES, and the key is typed as
+input, so it is not a history candidate either way. `export` then keeps the value for
+the life of this shell — it does not expire on its own — so unset it the moment the
+run is done:
 
     unset HEDGECHECK_AGENT_KEY
 
@@ -86,26 +99,61 @@ done:
     node --experimental-strip-types consumer/src/run.ts \
       --bundle <BUNDLE_DIR> --network testnet
 
-Add `--dry-run` to do everything, including the gate, and stop before sending. **Run
-it once with `--dry-run` first.**
+**This sends nothing.** Without `--send` it is a rehearsal: the gate runs in full and
+stops before the venue. Sending is opt-in, so a flag that goes missing leaves the run
+harmless rather than armed. Every run states its mode on the first line, before the
+gate, including refusals:
 
-`--captured-at <ms>` states when the book was captured, in milliseconds since the
-epoch. It defaults to now. It is your statement: the bundle records a skew, never an
-instant, so nothing can re-derive it. A capture 15 minutes old or older is stale and
-the gate refuses.
+    mode: REHEARSAL, nothing will be sent
+    mode: LIVE SEND
+
+**Check that line.** It is the only thing that tells you which run you are in.
+
+To actually place the order, add `--send`:
+
+    node --experimental-strip-types consumer/src/run.ts \
+      --bundle <BUNDLE_DIR> --network testnet --send
+
+An unrecognised argument is refused rather than ignored, so a mistyped flag stops the
+run instead of silently changing what it does.
+
+`--captured-at <ms>` states when the book was captured, in whole milliseconds since
+the epoch. It defaults to now. It is your statement: the bundle records a skew, never
+an instant, so nothing can re-derive it. A capture 15 minutes old or older is stale
+and the gate refuses.
 
 ## 5. What to expect
+
+Every outcome prints an `orders sent:` line. **If that line is missing, or the count
+is not what you expect, stop and check your fills before running anything again.**
 
 **Refusal** (exit 1). The common case today.
 
     REFUSED <REASON>: <detail>
     orders sent: 0
 
-`orders sent: 0` is printed on every refusal. If you ever see a refusal with a nonzero
-count, stop and treat it as a defect in the gate.
-
 Reasons: `CHECKER_REFUSED`, `NOT_PASSES`, `NO_ENVELOPE`, `DIGEST_MISMATCH`,
-`CAPTURE_STALE`, `CHECKER_THREW`, `UNREADABLE`.
+`CAPTURE_STALE`, `POLICY_INVALID`, `CHECKER_THREW`, `UNREADABLE`.
+
+**Usage error** (exit 2). A bad argument, an unknown network, or mainnet. Nothing was
+read and nothing was sent.
+
+**Failed before the gate** (exit 3). A bad `--captured-at`, a missing bundle, a
+manifest naming a path outside its own directory.
+
+    FAILED BEFORE THE GATE: <what>
+    orders sent: 0
+
+A distinct code from a refusal, so "it crashed" and "it said no" are never confused.
+No order can have been sent: the gate had not run.
+
+**Failed during the send** (exit 4).
+
+    FAILED: <what>
+    orders sent: <count>
+
+Read the count. If it is 1, an order reached the venue and you do not yet know what it
+did — go to "Timeout / no answer" below.
 
 **Success** (exit 0).
 
@@ -129,8 +177,14 @@ venue's interface, find out what actually happened, and decide from there.
 ## 6. Retain the bytes as evidence
 
     node --experimental-strip-types consumer/src/run.ts \
-      --bundle <BUNDLE_DIR> --network testnet \
+      --bundle <BUNDLE_DIR> --network testnet --send \
       > research/testnet-run-$(date -u +%Y%m%dT%H%M%SZ).log 2>&1
+
+`2>&1` captures errors as well as output, which is what you want for evidence — and
+is why nothing on this path is allowed to put a key into an error. A malformed or
+out-of-range key is refused by name before it reaches the signing library, and the
+library's own errors are replaced rather than passed through. Read the log once
+before you keep it.
 
 Record alongside it: the UTC time, the bundle directory and its manifest digest, the
 agent address (not the key), and the venue's response body verbatim. Note whether the
