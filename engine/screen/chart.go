@@ -1,13 +1,4 @@
 // Package screen renders a result as a page a person can read.
-//
-// Pure: documents in, HTML out. No I/O, no clock, and no floating point -- the chart
-// coordinates are computed in exact arithmetic and rounded ONCE, at the moment they
-// become text in an SVG attribute. A picture of the answer is not the answer, and
-// nothing rounded here ever flows back into a number.
-//
-// The page states what was asked, what the answer is, and what was NOT checked. It is
-// not advice: it answers an objective someone stated, and `forbidden_test.go` holds
-// the language to that.
 package screen
 
 import (
@@ -63,10 +54,6 @@ const (
 )
 
 // BuildPlot turns a result's profile into pixels.
-//
-// The vertical extent covers the payoff AND the cap, so a reader can always see which
-// side of the bound the line is on. A chart that cropped the cap out of view would
-// show a passing hedge and a failing one as the same picture.
 func BuildPlot(result doc.Result, capPnl exact.Q, hasCap bool) (Plot, error) {
 	pieces := result.Profile
 	if len(pieces) == 0 {
@@ -135,12 +122,6 @@ func BuildPlot(result doc.Result, capPnl exact.Q, hasCap bool) (Plot, error) {
 }
 
 // segmentsFor draws one piece, split at the cap crossing when it has one.
-//
-// A piece is affine, so it crosses the cap at most once. Colouring the whole piece by
-// whether it dips below the cap ANYWHERE would paint a line red along the stretch
-// where it is comfortably above the bound -- which is the reader's actual question,
-// answered wrongly. The crossing price is solved exactly and the piece is cut there,
-// so the colour changes at the price where the bound is crossed and nowhere else.
 func (p Plot) segmentsFor(piece doc.Piece, capPnl exact.Q, hasCap bool) []Segment {
 	atLower, atUpper := valueAt(piece, piece.Lower), valueAt(piece, piece.Upper)
 	whole := Segment{
