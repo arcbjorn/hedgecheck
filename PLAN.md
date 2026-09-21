@@ -352,8 +352,8 @@ Each tier ships only through its gate. No tier has a date.
 |---|---|---|
 | **T0** done | Evidence packages, reference oracle, one fixture — at `085ccfb` | Five verifiers pass after the restore |
 | **T1** Contract, on real data — **done, 19 Sep** | The live canonical check end to end **on the oracle**: discover instances → coherent snapshots → proposal → lowering → verdict, cost, alternatives → replay. Schema v1 frozen ([schema/CHANGES.md](./schema/CHANGES.md)). Fixtures: the 18 Sep replay, a 19 Sep live capture, fourteen certificate bundles. | Every line proved by a command, below |
-| **T2** Engine | Go. A **pure evaluator** — library and CLI, proposal and snapshots in, result out, no I/O — then the live adapter, the service, and one result screen ordering binary, bucket and exposure reduction by the cost of the smallest passing size | **Frozen v1 schemas, not drafts: a shape change now needs a new `schema_version` and a row in `schema/CHANGES.md`.** A snapshot's hash says nothing about its shape, so a leg citing the catalogue where a book belongs is refused, never a crash (T1 found this by crashing). Byte-identical results to the fixtures; agreement with the oracle on generated primitives; replay from stored snapshots reproduces the result byte for byte; T1's adapter deleted |
-| **T3** Checker and consumer | TypeScript checker, run by the result screen on every view. Then a simulated approval gate, then a **testnet** order behind it, with the order envelope the cost bound assumes, and a re-check after any partial fill | Returns the closed classes in `refusal.schema.json`, so a disagreement with `oracle/refuse.py` is a real one. **A checker that re-adds the pieces the engine emitted proves nothing** — it must establish domain coverage, endpoint ownership and proposal-to-pieces correspondence independently, and evaluate each witness on the *unreduced* payoff. Every corrupted certificate and rejected input refused; engine and checker agree on every fixture; anything but `passes` produces zero downstream calls, asserted; a partial fill triggers the re-check, whose result — top up as a new proposal, or unwind — is the consumer's policy and never the gate's |
+| **T2** Engine — **done, 21 Sep** | Go. A **pure evaluator** — library and CLI, proposal and snapshots in, result out, no I/O — then the live adapter, the service, and one result screen ordering binary, bucket and exposure reduction by the cost of the smallest passing size | **Frozen v1 schemas, not drafts: a shape change now needs a new `schema_version` and a row in `schema/CHANGES.md`.** A snapshot's hash says nothing about its shape, so a leg citing the catalogue where a book belongs is refused, never a crash (T1 found this by crashing). Byte-identical results to the fixtures; agreement with the oracle on generated primitives; replay from stored snapshots reproduces the result byte for byte; T1's adapter deleted |
+| **T3** Checker and consumer — **done, 21 Sep, except the live testnet order** | TypeScript checker, run by the result screen on every view. Then a simulated approval gate, then a **testnet** order behind it, with the order envelope the cost bound assumes, and a re-check after any partial fill | Returns the closed classes in `refusal.schema.json`, so a disagreement with `oracle/refuse.py` is a real one. **A checker that re-adds the pieces the engine emitted proves nothing** — it must establish domain coverage, endpoint ownership and proposal-to-pieces correspondence independently, and evaluate each witness on the *unreduced* payoff. Every corrupted certificate and rejected input refused; engine and checker agree on every fixture; anything but `passes` produces zero downstream calls, asserted; a partial fill triggers the re-check, whose result — top up as a new proposal, or unwind — is the consumer's policy and never the gate's |
 | **T4** | Deployer families, the reference registry, the band reduction, the `priceTouch` bound | Each reference string reviewed; Skew's written confirmation, or an explicit assumption with an ID; fixtures for the shrunk middle bucket and for mixed legs on one foreign reference |
 | **T5** | Exact synthesis with infeasibility certificates | The checker verifies optimal structures and certificates alike; every rounded structure re-checked |
 | **T6** | Path reductions: isolated perps | Liquidation semantics reviewed from official text, portfolio margin included; every **[U]** it touches resolved |
@@ -372,9 +372,9 @@ Each tier ships only through its gate. No tier has a date.
 | One command runs everything, this file's guard included | `make check` | `all checks passed`, including the guard that compares this file's example block with the generated fixture |
 
 Two things T1 did **not** establish, stated because the gate did not ask and a
-reader would assume otherwise: the registry entries are still **model drafts**, so
-every live result is `needs_review`; and `oracle/refuse.py` is a reference, not
-the checker T3 builds.
+reader would assume otherwise: at T1 the registry entries were still **model drafts**,
+so every live result was `needs_review` (the owner reviewed both on 21 Sep — see T3
+below); and `oracle/refuse.py` is a reference, not the checker T3 builds.
 
 **What T1 taught, and what it changes.** Four things, each learned by being wrong
 about it first; the T2 and T3 rows above carry the consequences.
@@ -434,6 +434,54 @@ SHA-256, so its provenance is checkable against `085ccfb`.
 **Keys.** T3 is the first tier that signs anything. Testnet only, an agent wallet
 only, never a main-wallet key on disk; `ApproveBuilderFee` needs the main wallet
 and is done by hand.
+
+**Closing T2 and T3, 21 Sep.** Both gates pass under `make check`. What closed them,
+and what each tier learned by being wrong first:
+
+- **T2's gap audit (8b)** ran last, and it was the part with no adversarial coverage.
+  It found the service open to any web page the operator visits: a cross-origin
+  `text/plain` POST returned 200 and the check RAN, `Host` was not validated so a
+  DNS-rebound name was served as localhost, and a result file swapped on disk was
+  served as authentic. Binding to `127.0.0.1` keeps other MACHINES out, not other
+  PAGES. Also: the purity guard banned `os` and `net` but not impure packages of this
+  project's own, so the kernel could import `store` and stay green; and three enums the
+  schemas constrain were read by Go as bare strings, one of them the field that says
+  whether an order envelope may exist. Report:
+  `hc-audit-t3-report/09-t2-gap-audit-8b.md`.
+- **T3's adversarial audit** found the gate could place an order the checker never
+  verified (`bundle.result` read twice, so an accessor could answer differently the
+  second time: verified 924 contracts, placed 999999), and the private key printed in
+  decimal into the log the runbook tells the operator to retain. Reports `03`–`08`.
+- **The lesson both tiers share.** A guard that reads SOURCE TEXT is a lint, not a
+  proof. Measured rather than assumed: an obfuscated `fetch` wrapped in `try/catch`
+  passes every grep AND every behavioural test, and only the runtime tripwire harness
+  catches it. §7's "Lints and proofs" in ARCHITECTURE.md carries this.
+- **The registry.** The owner reviewed both entries on 21 Sep, weighing and accepting
+  the `[U]` on bucket index order for testnet. The allowlist carries both digests and a
+  good bundle now reaches `APPROVED`. A review cannot sign itself — the digest is taken
+  over the entry WITHOUT its `review` key — and editing a reviewed entry invalidates it,
+  both verified by mutation.
+
+**What T3 has NOT established, and will not until the owner runs it.** The live testnet
+order. It is the one step no agent performs, and `consumer/RUNBOOK.md` is written for a
+human to follow with a key in their environment. Two things about it are worth stating
+where the gate is, not only in the runbook:
+
+- **It cannot be run today, and the reason is sharper than "no liquidity".** Testnet has
+  no expiry carrying both a binary and a bucket, so no testnet proposal can be built at
+  all — `check --live --network testnet` refuses and says so. Meanwhile every bundle in
+  the repository is built from MAINNET books and carries coin `#39710`, asset id
+  `100,039,710`; testnet's outcomes are 10217–20497, a disjoint range. **Aiming an
+  existing bundle at testnet would sign an order for an instrument that does not exist
+  there** — and the gate cannot catch it, because the bundle is internally consistent
+  and the check is sound. `run.ts` now refuses `--send` without an explicit
+  `--bundle-is-for-this-network`, since nothing inside a bundle records its network.
+- Both testnet books were empty besides (0 bids, 0 asks), so **the live run exercises the
+  ORDER PATH, not the hedge check.** A success there is not a checked hedge, and reading
+  it as one is the mistake this row exists to prevent.
+- Everything up to the send is proved offline against a fake exchange: the envelope, the
+  msgpack encoding and EIP-712 digest (both derived by hand from their specs and matched
+  byte for byte), one send with no retry, and a re-check after a partial fill.
 
 ---
 
