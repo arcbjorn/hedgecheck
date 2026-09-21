@@ -62,6 +62,14 @@ var (
 type Server struct {
 	Store    *store.Store
 	Registry map[string]doc.Entry
+	// Checker is the built ES module the browser loads, and Allowlist is the set of
+	// registry digests it accepts as reviewed. Both are generated and embedded by
+	// the caller; the service serves bytes and decides nothing about them.
+	Checker   []byte
+	Allowlist []byte
+	// Page renders a stored result. Nil means the screen is not mounted, and the
+	// service then serves its documents and nothing else.
+	Page func(inputDigest string) ([]byte, error)
 }
 
 // Handler builds the routing. Written as an explicit switch rather than a mux with
@@ -72,6 +80,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/checks/", s.checkByDigest)
 	mux.HandleFunc("/v1/snapshots/", s.snapshot)
 	mux.HandleFunc("/v1/registry/", s.registryEntry)
+	mux.HandleFunc("/v1/bundle/", s.bundlePart)
+	mux.HandleFunc("/checker.js", s.checkerModule)
+	mux.HandleFunc("/result/", s.resultPage)
 	mux.HandleFunc("/", notFound)
 	return mux
 }
@@ -385,4 +396,91 @@ func short(digest string) string {
 		return digest
 	}
 	return digest[:12]
+}
+
+// ---------------------------------------------------------------- the browser
+
+// bundlePart serves the proposal or lowered proposal a result was derived from.
+//
+// A browser cannot verify a result it was simply handed. It needs what the result
+// was derived FROM, and it needs to hash every part itself.
+func (s *Server) bundlePart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/bundle/")
+	slash := strings.Index(rest, "/")
+	if slash < 0 {
+		fail(w, http.StatusBadRequest, "not_a_bundle_path", "expected /v1/bundle/{digest}/{part}")
+		return
+	}
+	digest, part := rest[:slash], rest[slash+1:]
+	if !digestPattern.MatchString(digest) {
+		fail(w, http.StatusBadRequest, "not_a_digest", "an input digest is 64 hex characters")
+		return
+	}
+	raw, err := s.Store.BundlePart(digest, part)
+	if err != nil {
+		fail(w, http.StatusNotFound, "no_bundle_part", "that part is not stored here")
+		return
+	}
+	writeCanonical(w, http.StatusOK, raw)
+}
+
+// checkerModule serves the built checker, and the allowlist beside it.
+//
+// SERVING THE CHECKER IS NOT A PROOF OF ANYTHING. A dishonest server could serve a
+// dishonest checker. This route exists so a reader gets an independent re-derivation
+// against an ENGINE BUG, which is a real and common failure; the trust boundary is
+// the consumer, which runs its own copy. ARCHITECTURE section 8 says so, and the
+// page says so to the reader.
+func (s *Server) checkerModule(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	if len(s.Checker) == 0 {
+		fail(w, http.StatusNotFound, "no_checker", "no checker module is mounted")
+		return
+	}
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	w.Write(s.Checker)
+}
+
+// resultPage renders a stored result, with the checker mounted on it.
+func (s *Server) resultPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	if s.Page == nil {
+		fail(w, http.StatusNotFound, "no_screen", "the screen is not mounted")
+		return
+	}
+	digest := strings.TrimPrefix(r.URL.Path, "/result/")
+	if !digestPattern.MatchString(digest) {
+		fail(w, http.StatusBadRequest, "not_a_digest", "an input digest is 64 hex characters")
+		return
+	}
+	page, err := s.Page(digest)
+	if err != nil {
+		fail(w, http.StatusNotFound, "no_result", "nothing stored under that input digest")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	w.Write(page)
+}
+
+// Allowlisted serves the registry digests the checker accepts as reviewed.
+func (s *Server) allowlist(w http.ResponseWriter, r *http.Request) {
+	if len(s.Allowlist) == 0 {
+		writeCanonical(w, http.StatusOK, []byte(`{"reviewed":[]}`))
+		return
+	}
+	writeCanonical(w, http.StatusOK, s.Allowlist)
 }
