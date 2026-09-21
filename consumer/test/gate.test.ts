@@ -18,6 +18,7 @@ import { schemas, type Schemas } from "../../checker/src/doc.ts";
 import { parseVenue, type VenueValue } from "../../checker/src/venue.ts";
 import type { Bundle } from "../../checker/src/verify.ts";
 import { type Capture, gate, type OrderEnvelope, type Place, type Policy, type Reason } from "../src/gate.ts";
+import { code } from "./source.ts";
 
 const here = (path: string) => new URL(path, import.meta.url);
 
@@ -378,6 +379,23 @@ test("the table: every refusal makes zero downstream calls", async () => {
         return decision.approved ? {} : { reason: decision.reason };
       },
     },
+    // A result that PARSES but is not an object. `null` is the one that matters: with
+    // the guard removed the gate throws an uncaught TypeError out of the function
+    // rather than returning a Decision, and run.ts has no catch around the gate call.
+    // The accepting stub is what isolates the gate's own condition here.
+    ...(["null", "[1,2,3]", "42", '"a string"', "true"].map((text) => ({
+      name: `a result that parses to ${text}`,
+      run: async (place: Place) => {
+        const bundle = { ...good.bundle, result: new TextEncoder().encode(text) };
+        const decision = await gate(
+          bundle,
+          { ...base, verifier: async () => ({ accepted: true }) as never },
+          CAPTURE,
+          place,
+        );
+        return decision.approved ? {} : { reason: decision.reason };
+      },
+    }))),
     {
       // A checker that throws, supplied as the verifier.
       //
@@ -494,9 +512,93 @@ test("the age boundary is decided by the policy, not by rounding", async () => {
   }
 });
 
+// THE GATE READS THE BUNDLE ONCE, SO WHAT WAS VERIFIED IS WHAT IS USED.
+//
+// `Bundle` is an interface, so a caller can supply accessors. `bundle.result` was
+// read twice -- once by the checker, once by the gate -- and a getter answering
+// differently the second time made the gate place an order the checker never saw:
+// verified 924 contracts at 0.17399, placed 999999 at 0.99999, `approved: true`.
+test("a bundle field that changes between reads cannot change the order", async () => {
+  const good = loadBundle("good-envelope");
+  const genuine = good.bundle.result;
+  const swapped = withResult(good.bundle, (result) => {
+    const envelope = result["order_envelope"] as Record<string, unknown>;
+    envelope["size"] = "999999";
+    envelope["limit_price"] = "0.99999";
+    envelope["max_cost"] = "999999";
+  }).result;
+
+  let reads = 0;
+  const trap: Bundle = {
+    proposal: good.bundle.proposal,
+    lowered: good.bundle.lowered,
+    manifest: good.bundle.manifest,
+    snapshots: good.bundle.snapshots,
+    registry: good.bundle.registry,
+    get result() {
+      reads += 1;
+      return reads === 1 ? genuine : swapped;
+    },
+  };
+
+  const recorder = new Recorder();
+  const decision = await gate(
+    trap,
+    { ...policy(), checker: { schemas: loadSchemas(), allowlist: good.allowlist } },
+    CAPTURE,
+    recorder.place,
+  );
+
+  assert.equal(reads, 1, `the gate read bundle.result ${reads} times; it must read it once`);
+  if (decision.approved) {
+    const placed = recorder.calls[0] as OrderEnvelope;
+    assert.equal(placed.size, "924", "the order placed is not the one the checker verified");
+    assert.equal(placed.limit_price, "0.17399", "the price placed is not the one verified");
+    assert.equal(placed.max_cost, "160.76676", "the cost bound placed is not the one verified");
+  }
+});
+
+// THE POLICY'S NUMBERS ARE CHECKED, BECAUSE TYPES ERASE.
+//
+// `maxAgeMs` is typed bigint but arrives from a caller. A bigint/number comparison is
+// legal in JavaScript and any comparison against NaN is false, so `undefined` -- what
+// a typo'd key produces -- made `age >= maxAgeMs` false and removed the staleness
+// rule entirely. A capture a YEAR old placed an order.
+test("a policy that is not bigints refuses, and places nothing", async () => {
+  const good = loadBundle("good-envelope");
+  const base = { ...policy(), checker: { schemas: loadSchemas(), allowlist: good.allowlist } };
+  const YEAR = 31_536_000_000n;
+  const stale: Capture = { capturedAtMs: CAPTURED_AT - YEAR };
+
+  for (const bad of [undefined, Number.NaN, Number.POSITIVE_INFINITY, 900_000, "900000"]) {
+    const recorder = new Recorder();
+    const decision = await gate(
+      good.bundle,
+      { ...base, now: CAPTURED_AT, maxAgeMs: bad as unknown as bigint },
+      stale,
+      recorder.place,
+    );
+    assert.equal(decision.approved, false, `maxAgeMs=${String(bad)} approved a year-old capture`);
+    assert.equal(recorder.calls.length, 0, `maxAgeMs=${String(bad)} placed an order`);
+  }
+
+  // And a non-bigint instant is refused rather than throwing out of the gate.
+  for (const field of ["now", "capturedAtMs"] as const) {
+    const recorder = new Recorder();
+    const decision = await gate(
+      good.bundle,
+      { ...base, ...(field === "now" ? { now: Date.now() as unknown as bigint } : {}) },
+      field === "capturedAtMs" ? ({ capturedAtMs: Date.now() } as unknown as Capture) : CAPTURE,
+      recorder.place,
+    );
+    assert.equal(decision.approved, false, `a number ${field} was approved`);
+    assert.equal(recorder.calls.length, 0, `a number ${field} placed an order`);
+  }
+});
+
 /** The gate never reads a clock: a policy is the only source of "now". */
 test("the gate reads no clock", () => {
-  const source = readFileSync(here("../src/gate.ts"), "utf8").replace(/\/\/.*$/gm, "");
+  const source = code(here("../src/gate.ts"));
   for (const pattern of [/\bDate\b/, /\bperformance\b/, /\bhrtime\b/]) {
     assert.doesNotMatch(source, pattern, `gate.ts uses ${pattern}`);
   }
@@ -504,7 +606,7 @@ test("the gate reads no clock", () => {
 
 /** The gate signs nothing and sends nothing: `place` is the only way out. */
 test("the gate has no way to send an order of its own", () => {
-  const source = readFileSync(here("../src/gate.ts"), "utf8").replace(/\/\/.*$/gm, "");
+  const source = code(here("../src/gate.ts"));
   for (const pattern of [/\bfetch\b/, /\bXMLHttpRequest\b/, /\bWebSocket\b/, /\bsign\w*\(/, /\bprivateKey\b/, /\bmnemonic\b/, /["']node:/]) {
     assert.doesNotMatch(source, pattern, `gate.ts uses ${pattern}`);
   }
@@ -538,20 +640,18 @@ test("the gate cannot reach a sender of its own", () => {
 // asserted rather than left to the reading of the list: every other module keeps
 // `send` a parameter, and nothing but run.ts can reach the network by itself.
 test("only run.ts can reach a venue, and only through the gate", () => {
-  const strip = (name: string) =>
-    readFileSync(here(`../src/${name}`), "utf8").replace(/\/\/.*$/gm, "");
-
   for (const name of ["gate.ts", "place.ts", "recheck.ts"]) {
-    assert.doesNotMatch(strip(name), /\bfetch\s*\(/, `${name} calls fetch`);
+    assert.doesNotMatch(code(here(`../src/${name}`)), /\bfetch\s*\(/, `${name} calls fetch`);
   }
 
-  // And run.ts sends only inside the gate's callback: the one `place(` call it makes
-  // is the gate's parameter, so an approval is on the path to every order it issues.
-  const run = strip("run.ts");
+  // And run.ts sends only inside the gate's callback. COUNTED, not pattern-matched:
+  // the old regex was anchored to one line and three leading keywords, so the same
+  // call spread across lines -- ordinary formatting, or a `prettier` pass -- slipped
+  // past it while placing an order on a refusal. A count is spelling-independent.
+  const run = code(here("../src/run.ts"));
   assert.match(run, /\bgate\s*\(/, "run.ts does not call the gate");
-  assert.doesNotMatch(
-    run,
-    /^\s*(?:const|let|await)[^\n]*\bplace\s*\([^)]*\)[^\n]*$/m,
-    "run.ts calls place outside the gate's callback",
-  );
+  const calls = run.match(/\bplace\s*\(/g) ?? [];
+  assert.equal(calls.length, 1, `run.ts calls place at ${calls.length} sites, not 1`);
+  // The one call is the gate's fourth argument, so the approval is on its path.
+  assert.match(run, /await\s+gate\s*\([\s\S]*\bplace\s*\(/, "the place call is not inside the gate call");
 });
