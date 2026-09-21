@@ -1,19 +1,5 @@
 // The checker: accept a certificate bundle, or refuse it with a class from the closed
 // list in schema/refusal.schema.json.
-//
-// THE CHECKER IS NOT A SECOND ENGINE. It answers accept or refuse and states nothing
-// else. It does not produce a result, rank anything, or offer an opinion about what
-// the proposal should have been.
-//
-// It also does not re-add the pieces the engine emitted. ARCHITECTURE section 6:
-// "A checker that re-adds the pieces the engine emitted proves nothing." So the
-// profile is rebuilt from the PROPOSAL -- registry entries resolved to indicators,
-// instances checked against the catalogue, books re-walked, reductions re-derived --
-// and only then compared with what the result claims. Where this file reads a field
-// of the result, it is to compare, never to build.
-//
-// Written without reading the Go engine or oracle/refuse.py, from ARCHITECTURE
-// sections 3, 4 and 6, PLAN section 5, the schemas, the registry and the fixtures.
 
 import { canonical, digest, parse, type Value } from "./canon.ts";
 import { problems, type Schemas } from "./doc.ts";
@@ -234,11 +220,6 @@ async function readEvidence(bundle: Bundle, options: Options): Promise<Evidence>
 
 /**
  * The refusal class a schema violation belongs to.
- *
- * The schema check is a net, not a classifier: it finds a fault wherever it is, and
- * the class must still say what KIND of fault it is. A reader acting on
- * ENGINE_DISAGREES would look for a disagreement between implementations; a reader
- * acting on REDUCTION_UNDECLARED would look at the reduction.
  */
 function classForSchemaProblem(problem: string): RefusalClass {
   if (problem.includes(".reductions")) return "REDUCTION_UNDECLARED";
@@ -255,9 +236,6 @@ function classForSchemaProblem(problem: string): RefusalClass {
  * An entry counts as reviewed only when ALL THREE hold: its state is `reviewed`, its
  * review digest still matches its semantics_version, and that version is in this
  * checker's allowlist.
- *
- * The third is what makes the checker's trust its own rather than the server's: a
- * server can write `"state": "reviewed"` into any entry it likes.
  */
 function isReviewed(
   entry: Record<string, Value>,
@@ -586,10 +564,6 @@ function priceLeg(
 function asksOf(book: VenueValue, id: string): Level[] {
   // A HASH IDENTIFIES BYTES, NOT A SHAPE. A leg citing the catalogue where a book
   // belongs is refused, never a crash -- T1 found this by crashing.
-  //
-  // The class is SNAPSHOT_NOT_CITED rather than TERMS_MISMATCH: the terms are fine,
-  // and the fault is that the leg cites a snapshot which is not the book it needs.
-  // The bytes are present and hash correctly; they are simply not that evidence.
   const sides = venueAt(book, ["levels"]);
   if (!Array.isArray(sides) || sides.length !== 2 || !Array.isArray(sides[1])) {
     refuse(
@@ -742,21 +716,6 @@ function evaluateAndCompare(evidence: Evidence, rebuilt: Rebuilt): void {
  * An order envelope is the statement of which order the cost bound is about, so it is
  * checked against the walk this checker did, never against the levels the result
  * carries. `rebuilt.legs[].levels` came out of the snapshot bytes in `priceLeg`.
- *
- * The rules, and why each is not decoration:
- *
- *  - `envelope_issued` if and only if there is an envelope. Otherwise the readiness
- *    field says one thing and the document does another, and a reader would have to
- *    guess which.
- *  - an envelope only on `passes`. PLAN section 4: a `fails` is a proposal that does
- *    not meet the objective and a `needs_review` is one where nothing was established.
- *    Either would be an order for an answer nobody gave.
- *  - one leg. The envelope describes ONE order; with two legs the premium it claims
- *    to bound includes a second one.
- *  - coin, size and side from the proposal, limit and cost from the walk. A limit
- *    below the highest level touched does not fill the size the result priced; one
- *    above lets the order pay more than the bound.
- *  - `Ioc`. A resting order outlives the book that priced it.
  */
 function compareEnvelope(evidence: Evidence, rebuilt: Rebuilt): void {
   const result = evidence.result;
@@ -959,16 +918,6 @@ function compareVerdict(evidence: Evidence, rebuilt: Rebuilt, lowerFn: Fn, upper
   }
 
   // ARCHITECTURE section 4, the two-profile table:
-  //
-  //   violated on the lower profile, every responsible rule TIGHT -> fails
-  //   violated on the lower profile, some responsible rule LOOSE  -> needs_review
-  //   not violated                                                -> passes
-  //
-  // The discriminator is TIGHTNESS, not the upper profile. A tight reduction IS the
-  // established value -- `horizon_mismatch` says the leg's own observation pays
-  // zero, and that is a fact, not a bound that might turn out better -- so a
-  // violation it produces is a real failure. A loose rule is a statement about what
-  // has not been established, so it can never produce a failing interval.
   let expected: string;
   if (!broken) expected = anyLoose ? "needs_review" : "passes";
   else expected = anyLoose ? "needs_review" : "fails";
@@ -1186,13 +1135,6 @@ function compareWitnesses(evidence: Evidence, rebuilt: Rebuilt, upperFn: Fn): vo
       }
 
       // EVALUATED ON THE UPPER PROFILE, but only where a LOOSE rule is responsible.
-      //
-      // A tight reduction IS the established value: `horizon_mismatch` says the
-      // leg's own observation pays zero, which is a fact, so the lower profile is
-      // the truth and the upper profile is irrelevant. A loose reduction is a bound
-      // that might turn out better, so a failure resting on one must break the
-      // objective even when every reduced leg is credited in full -- otherwise
-      // nothing was established and the verdict should have been needs_review.
       if (field === "failing_intervals" && looseLegs.size > 0) {
         const best = evaluateOn(upperFn, price);
         if (!lt(best, clause.minPnl)) {
@@ -1244,9 +1186,6 @@ function evaluateOn(fn: Fn, price: Rational): Rational {
 /**
  * An infeasibility certificate: nonnegative weights that combine the constraints into
  * a contradiction.
- *
- * A negative weight is not a proof of anything -- it reverses the inequality it is
- * applied to -- so it is refused before the combination is even checked.
  */
 function compareCertificates(evidence: Evidence): void {
   // A certificate sits on the SIZE WINDOW it explains: it is the proof that no size
