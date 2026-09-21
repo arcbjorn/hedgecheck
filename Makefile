@@ -51,11 +51,18 @@ bundlecheck:
 
 checker:
 	@cd checker && deno check --quiet src/*.ts
+	@cd checker && deno check --quiet --node-modules-dir=none test/*.ts
 	@cd checker && node --test "test/*.test.ts" > .test.log 2>&1; status=$$?; grep -E "^(ℹ (tests|pass|fail)|✖)" .test.log; rm -f .test.log; exit $$status
 
 # The approval gate. It runs its own copy of the checker, so it is checked after it.
+#
+# The tests are type-checked too: they are where the guarantees live, and a guard that
+# stops asserting what it means to assert is the failure this project keeps meeting.
+# `unrepresentable.ts` is excluded because it is DELIBERATELY uncompilable --
+# typegate.test.ts runs deno over it and fails if it SUCCEEDS.
 consumer:
 	@cd consumer && deno check --quiet --node-modules-dir=none src/*.ts
+	@cd consumer && deno check --quiet --node-modules-dir=none $$(ls test/*.ts | grep -v unrepresentable.ts)
 	@cd consumer && node --test "test/*.test.ts" > .test.log 2>&1; status=$$?; grep -E "^(ℹ (tests|pass|fail)|✖)" .test.log; rm -f .test.log; exit $$status
 
 clean:
