@@ -16,9 +16,14 @@ import { test } from "node:test";
 
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
-test("an Approved cannot be written outside gate()", () => {
+test("an Approved cannot be written outside gate()", (t) => {
   const probe = spawnSync("deno", ["--version"], { encoding: "utf8" });
   if (probe.error !== undefined || probe.status !== 0) {
+    // SKIPPED, not passed. This used to `return`, which the runner reports as a green
+    // tick -- so on a machine without deno the repo's strongest type-level claim
+    // evaporated into a pass, and breaking the brand outright still showed green.
+    // The only signal was the duration.
+    t.skip("deno is not on the path, so the type-level claim was NOT checked");
     return;
   }
   const run = spawnSync("deno", ["check", here("./unrepresentable.ts")], { encoding: "utf8" });
