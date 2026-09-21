@@ -62,6 +62,26 @@ def sources():
     return lowered, result, entry, proposal, manifest, comparison
 
 
+def envelope(**changes):
+    """A well-formed order envelope, then exactly one thing wrong with it.
+
+    The numbers are the 18 September binary walk, hand-derived from
+    fixtures/replay/2026-09-18/book-3965-no.json and written down here rather than
+    taken from any implementation: 1,409 contracts fill 36 + 115 + 1000 + 41 + 40 +
+    21 + 40 + 40 + 50 = 1,383 through 0.48123, so the last 26 come from the 0.48404
+    level and that level is the highest the walk touched. The total in units of
+    1e-5 is 1623600 + 5203750 + 45600000 + 1875750 + 1840000 + 969150 + 1880000 +
+    1920000 + 2406150 + 1258504 = 64576904.
+    """
+    out = {"coin": "#39651", "side": "buy", "size": "1409", "limit_price": "0.48404",
+           "time_in_force": "Ioc", "max_cost": "645.76904", "input_digest": "c" * 64}
+    drop = changes.pop("drop", None)
+    if drop is not None:
+        del out[drop]
+    out.update(changes)
+    return out
+
+
 def cases():
     lowered, result, entry, proposal, manifest, comparison = sources()
     book = "d62ba1359f45abc313840ed63deef8d705fcc9bd988ca0f29e9412d8e2cd1ef1"
@@ -140,6 +160,19 @@ def cases():
          "an alternative that does not say how much to keep"),
         ("result", "alternative-missing", mutate(result, ["comparisons", "smallest_reduction"]),
          "a result without the no-premium alternative"),
+
+        # ---- order envelopes. The cost bound is about ONE order; an envelope that
+        # names a different one carries the bound somewhere it does not apply.
+        ("result", "envelope-resting", mutate(result, ["order_envelope"], envelope(time_in_force="Gtc")),
+         "an order envelope that would rest on the book instead of cancelling"),
+        ("result", "envelope-sells", mutate(result, ["order_envelope"], envelope(side="sell")),
+         "an order envelope on the sell side, which no ask walk bounds"),
+        ("result", "envelope-without-limit", mutate(result, ["order_envelope"], envelope(drop="limit_price")),
+         "an order envelope with no limit price"),
+        ("result", "envelope-without-digest", mutate(result, ["order_envelope"], envelope(drop="input_digest")),
+         "an order envelope that does not say which result it belongs to"),
+        ("result", "envelope-coin-is-a-ticker", mutate(result, ["order_envelope"], envelope(coin="BTC")),
+         "an order envelope naming a ticker where the venue's own id belongs"),
 
         # ---- registry entries
         ("registry-entry", "review-state-unknown", mutate(entry, ["review", "state"], "approved"),
