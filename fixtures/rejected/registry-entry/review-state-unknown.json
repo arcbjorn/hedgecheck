@@ -59,7 +59,10 @@
  ],
  "reference": "hl:perp:{underlying}:mark-interp",
  "review": {
+  "digest": "6fa3d6ba76bb0b092bcb0fbaa22e783f5f84cf45df18eca47d7b11100615cf63",
   "drafted_by": "model",
+  "reviewed_by": "owner",
+  "reviewed_on": "2026-09-21",
   "state": "approved"
  },
  "schema_version": "1",
