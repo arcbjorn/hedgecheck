@@ -126,6 +126,45 @@ document had ever contained one: every bundle fixture was `passes` or `fails`.
 `schema_version` stays `"1"`: the change only widens what `undecided_intervals` accepts,
 and every document valid before is valid now.
 
+## Forced by the band reduction acting on a group (T4)
+
+**The forcing case.** PLAN section 2 states the band reduction as "the infimum of the
+**group's summed payoff** over the band". Every reduction the IR could express attaches to
+ONE leg -- `leg` is required, singular, `additionalProperties: false` -- so a group
+reduction was unexpressible.
+
+That is not a presentation detail. **The infimum of a sum is not the sum of infima**, and
+the difference is the case a hedge exists for. Two legs whose payoffs cancel have a flat
+sum that no basis move can hurt; each alone is stepped. Measured with the oracle's own
+kernel, band 500, a long and a short digital at the same strike:
+
+        price     f+g   grouped   per-leg
+        79000     0.0       0.0       0.0
+        79600     0.0       0.0   -1000.0
+        80000     0.0       0.0   -1000.0
+        80400     0.0       0.0   -1000.0
+        81000     0.0       0.0       0.0
+
+Grouping gives the correct 0. Reducing leg by leg invents a **loss of 1000 on a perfectly
+hedged position**.
+
+**And the existing guard cannot catch it.** Per-leg is LOWER, so it satisfies "a reduction
+never turns a failing proposal into a passing one" while making a sound hedge fail. The
+error is invisible in the direction the invariants check.
+
+- **`reductions[].with` is added, optional, an array of leg ids, `minItems: 1`.** The
+  other legs reduced together with `leg`. Optional and additive: `leg` stays required, so
+  every document valid before is valid now, and a per-leg rule omits it.
+- **Added to `result.schema.json` as well as `ir.schema.json`.** A checker compares the
+  result's declared reductions with the ones it re-derives, field for field, so a grouped
+  reduction that could not round-trip into the result would be refused by the checker as a
+  disagreement.
+- **`leg` is not widened to a list.** The subject of the reduction stays one leg, with
+  companions named -- so the existing comparison, which matches reductions in order by
+  `leg`, keeps working unchanged.
+
+`schema_version` stays `"1"`: the change only adds an optional field.
+
 ## Not changed, and why
 
 - **`schema_version` stays `"1"`.** Every change above is additive: no field was removed, no field became required, no existing value became invalid. A document valid at `062a245` is valid now.
