@@ -4,8 +4,11 @@
   "status": "computed",
   "settlement": "protocol",
   "review": {
-    "state": "draft",
-    "drafted_by": "model"
+    "state": "reviewed",
+    "drafted_by": "model",
+    "reviewed_by": "owner",
+    "reviewed_on": "2026-09-21",
+    "digest": "6fa3d6ba76bb0b092bcb0fbaa22e783f5f84cf45df18eca47d7b11100615cf63"
   },
   "reference": "hl:perp:{underlying}:mark-interp",
   "observation": "One instant, the expiry: linear interpolation between the HyperCore mark price updates immediately before and after it. Not a TWAP, not a candle close, not the oracle price.",
