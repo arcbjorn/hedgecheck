@@ -521,5 +521,12 @@ test("the gate cannot reach a sender of its own", () => {
   const source = readFileSync(here("../src/gate.ts"), "utf8");
   assert.doesNotMatch(source, /from\s*["']\.\/place\.ts["']/, "gate.ts imports place.ts");
   const names = readdirSync(here("../src/")).filter((name) => name.endsWith(".ts")).sort();
-  assert.deepEqual(names, ["gate.ts", "place.ts"], "consumer/src holds an unexpected module");
+  assert.deepEqual(
+    names,
+    ["gate.ts", "place.ts", "recheck.ts"],
+    "consumer/src holds an unexpected module",
+  );
+  // Nor does the gate reach the re-check: a gate that could re-propose after a fill
+  // could place again on its own, and topping up is the caller's decision.
+  assert.doesNotMatch(source, /from\s*["']\.\/recheck\.ts["']/, "gate.ts imports recheck.ts");
 });
