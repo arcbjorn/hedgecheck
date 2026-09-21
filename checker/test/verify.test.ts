@@ -73,10 +73,11 @@ function everyBundle(): Loaded[] {
 /**
  * The allowlist for these bundles.
  *
- * The committed registry entries are DRAFTS, so a checker with an empty allowlist is
- * correct and every bundle would reduce by `unreviewed_family`. The good bundles were
- * built against reviewed copies, so the test states the versions they pin -- read
- * from the bundles themselves, not hard-coded.
+ * A checker accepts a family only when the version the bundle pins is one IT was built
+ * to trust, so the test states the versions each bundle pins -- read from the bundle
+ * itself, never hard-coded. A checker whose allowlist lacks them is not broken: it is
+ * a checker that was not told to trust that reading, which is the case the test below
+ * covers.
  */
 async function allowlistFor(loaded: Loaded): Promise<Set<string>> {
   const proposal = parse(loaded.bundle.proposal) as Record<string, Value>;
@@ -87,6 +88,57 @@ async function allowlistFor(loaded: Loaded): Promise<Set<string>> {
   }
   return out;
 }
+
+// AN ALLOWLIST THAT LACKS THE PINNED VERSION IS NAMED AS SUCH.
+//
+// A good bundle, built against a reviewed copy, presented to a checker that was not
+// told to trust that version. The checker reduces the leg under `unreviewed_family`
+// and the bundle declares no such reduction, so the profile ALSO disagrees -- and the
+// profile used to be the refusal reported: `PROFILE_COVERAGE at $result.profile`,
+// which sends an operator hunting a broken payoff profile for a cause that is two
+// steps upstream and entirely benign.
+//
+// The refusal must name the cause, and its detail must carry enough to act on: the
+// family, the version, and the fact that this checker does not have it.
+test("an unreviewed family is refused as an undeclared reduction, not a profile mismatch", async () => {
+  const all = loadSchemas();
+  let checked = 0;
+  for (const loaded of everyBundle()) {
+    if (loaded.expects !== "accept") continue;
+    // A bundle already reduced for another reason is not this case: `horizon_mismatch`
+    // takes priority in the rebuild, so `good-horizon` declares a reduction either way
+    // and nothing disagrees. Skipping it keeps the test about the allowlist.
+    const declared = parse(loaded.bundle.lowered) as Record<string, Value>;
+    const rules = ((declared["reductions"] ?? []) as Value[])
+      .map((entry) => (entry as Record<string, Value>)["rule"]);
+    if (rules.length > 0) continue;
+
+    // The ONLY difference from the accepting run: an empty allowlist.
+    const outcome = await verify(loaded.bundle, { schemas: all, allowlist: new Set() });
+    assert.equal(outcome.accepted, false, `${loaded.name} was accepted with an empty allowlist`);
+    if (outcome.accepted) continue;
+
+    assert.equal(
+      outcome.refusal.class,
+      "REDUCTION_UNDECLARED",
+      `${loaded.name}: refused as ${outcome.refusal.class}, which points away from the allowlist`,
+    );
+    assert.equal(outcome.refusal.at, "$result.reductions", `${loaded.name}: refused at the wrong place`);
+
+    // The detail is what the operator acts on, so it names all three things.
+    const detail = outcome.refusal.detail;
+    const proposal = parse(loaded.bundle.proposal) as Record<string, Value>;
+    const leg = (proposal["legs"] as Value[])[0] as Record<string, Value>;
+    assert.ok(detail.includes(leg["family"] as string), `${loaded.name}: the detail does not name the family`);
+    assert.ok(
+      detail.includes(leg["semantics_version"] as string),
+      `${loaded.name}: the detail does not name the version`,
+    );
+    assert.ok(detail.includes("allowlist"), `${loaded.name}: the detail does not mention the allowlist`);
+    checked += 1;
+  }
+  assert.ok(checked >= 2, `only ${checked} good bundles were checked against an empty allowlist`);
+});
 
 test("every good bundle is accepted", async () => {
   const all = loadSchemas();
