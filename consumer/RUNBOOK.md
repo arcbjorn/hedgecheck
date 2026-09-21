@@ -5,17 +5,44 @@ For the owner, by hand. No agent runs any step on this page.
 **No mainnet key is ever used.** Every step here is testnet. The script refuses
 `--network mainnet` outright; reaching mainnet is not a flag away.
 
-## What this run establishes, and what it does not
+## STOP — there is no testnet bundle to run today
+
+**Do not point this at `fixtures/bundles/`.** Every bundle in the repository is built
+from MAINNET books and carries the coin `#39710` — outcome 3971, asset id
+`100,039,710`. Testnet's outcomes are a different range entirely (10217–20489, asset
+ids `100,102,170`–`100,204,891`), so that envelope names an instrument that does not
+exist there.
+
+The gate does not catch this, and cannot: the bundle is internally consistent and the
+check is sound. It approves, signs, and sends asset `100,039,710` to the testnet
+exchange. Either testnet rejects it — in which case the run proves nothing — or some
+unrelated testnet instrument answers to that id and **you buy something you did not
+choose**.
+
+    $ node --experimental-strip-types consumer/src/run.ts \
+        --bundle fixtures/bundles/good-envelope --network testnet
+    APPROVED {"coin":"#39710", ...}        <-- a MAINNET instrument
+
+**A testnet bundle cannot be built today either.** The canonical check needs one expiry
+carrying both a binary and a bucket, and testnet has none (verified 21 Sep: 5 recurring
+binaries at `expiry:20260922-0300`, 1 bucket at `expiry:20260921-0600`). The tool says
+so itself and spends one request:
+
+    $ hedgecheck check --live --network testnet
+    no expiry with both a binary and a bucket for BTC
+
+Both books were empty besides (0 bids, 0 asks), so even with a shared expiry a depth
+walk would price nothing.
+
+**So the live order waits on testnet listing a bucket and a binary at one expiry, with
+depth.** Re-read the catalogue before trying again; §0 onwards is ready for when it does.
+
+## What this run will establish, and what it will not
 
 It exercises the **order path**: envelope to signed action, one send, and the answer
-read back. It does **not** exercise the hedge check.
-
-Testnet has no shared expiry across its outcome markets, and both books were empty
-when the venue was last read (0 bids, 0 asks). A depth walk over an empty book prices
-nothing, so there is no testnet hedge to check. The bound this tool exists to compute
-is a mainnet question, and this run does not answer it.
-
-Do not read a success here as a checked hedge.
+read back. It does **not** exercise the hedge check — an empty or thin testnet book
+does not bound anything, and the bound this tool exists to compute is a mainnet
+question. Do not read a success here as a checked hedge.
 
 ## 0. What the checker will and will not trust
 
@@ -120,10 +147,17 @@ gate, including refusals:
 
 **Check that line.** It is the only thing that tells you which run you are in.
 
-To actually place the order, add `--send`:
+To actually place the order, add `--send` AND affirm the bundle matches the network:
 
     node --experimental-strip-types consumer/src/run.ts \
-      --bundle <BUNDLE_DIR> --network testnet --send
+      --bundle <BUNDLE_DIR> --network testnet \
+      --send --bundle-is-for-this-network
+
+`--send` alone refuses (exit 2). A bundle records no network — the retained request
+records do, but they are not bundle parts — so nothing in it can be checked against
+`--network`, and the gate cannot catch a mainnet bundle aimed at testnet. You assert it,
+having confirmed the bundle's instruments exist there. See the STOP section above:
+today, for every bundle in this repository, they do not.
 
 An unrecognised argument is refused rather than ignored, so a mistyped flag stops the
 run instead of silently changing what it does.
@@ -188,7 +222,8 @@ venue's interface, find out what actually happened, and decide from there.
 ## 6. Retain the bytes as evidence
 
     node --experimental-strip-types consumer/src/run.ts \
-      --bundle <BUNDLE_DIR> --network testnet --send \
+      --bundle <BUNDLE_DIR> --network testnet \
+      --send --bundle-is-for-this-network \
       > research/testnet-run-$(date -u +%Y%m%dT%H%M%SZ).log 2>&1
 
 `2>&1` captures errors as well as output, which is what you want for evidence — and
