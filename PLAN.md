@@ -328,6 +328,26 @@ endpoint ownership, known ambiguities, status. Instance ids are never in it.
 | `template.priceTouch` | Template text **[V]** | Same | Bounded (§2), never computed as terminal |
 | Everything else | — | — | Refused |
 
+**`status` decides whether a family is evaluated at all**, and all three implementations
+agree on it:
+
+- **`computed`** — the payoff is a function of the terminal price, so the kernel
+  evaluates it.
+- **`bounded`** — it is not. `priceTouch` is path-dependent: whether the price ever
+  touched a level is not recoverable from where it ended. §2 gives the bound — the
+  inclusive terminal digital at the target, and only when the touch window covers the
+  valuation time — but no such family exists yet, so lowering **refuses**
+  (`UNSUPPORTED_FAMILY`) rather than reaching for the terminal machinery. Evaluating one
+  as terminal would over-credit it at prices it may never have touched.
+- **`refused`** — the registry has no reading. A **refusal, not a reduction**: a
+  reduction still produces a verdict, and there is no verdict to produce about a payoff
+  nobody has read. Worst-casing it to zero would answer a question declared
+  unanswerable; `needs_review` would invite review of a reading that does not exist.
+
+Both non-`computed` values were evaluated as if `computed` until 21 Sep — a family the
+registry REFUSES produced a clean `passes`. Fixtures
+`fixtures/refusals/family-bounded-not-computed` and `family-status-refused` hold it.
+
 **Reference ids** are `source:series:statistic[:window]`, never free text:
 `hl:perp:BTC:mark-interp` · `hl:perp:BTC:mark-twap:60s` ·
 `hl:perp:BTC:trade-twap:90s` · `pyth:BTC/USD:price-twap:90s`. The registry maps
