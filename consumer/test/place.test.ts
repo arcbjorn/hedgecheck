@@ -16,7 +16,7 @@ import {
   place,
   PlaceError,
 } from "../src/place.ts";
-import { BANNED, SKIPPED } from "./banned.ts";
+import { BANNED, BANNED_IN, SKIPPED } from "./banned.ts";
 import { FakeExchange, filledSize, SCENARIOS } from "./fake-exchange.ts";
 import { code } from "./source.ts";
 
@@ -284,6 +284,9 @@ test("nothing in consumer/ reads a key from outside the environment", () => {
       for (const [pattern, why] of BANNED) {
         assert.doesNotMatch(source, pattern, `${name} ${why}`);
       }
+      for (const [file, pattern, why] of BANNED_IN) {
+        if (name === file) assert.doesNotMatch(source, pattern, `${name} ${why}`);
+      }
     }
   };
   visit(root);
@@ -303,6 +306,8 @@ test("nothing in consumer/ reads a key from outside the environment", () => {
     "recheck.ts",
     "run.ts",
     "source.ts",
+    "testing.ts",
+    "tripwire.test.ts",
     "typegate.test.ts",
     "unrepresentable.ts",
   ], "the scan is not looking at the files it should");
