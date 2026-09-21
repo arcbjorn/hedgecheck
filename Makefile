@@ -45,12 +45,9 @@ engine:
 	@cd engine && test -z "$$(gofmt -l .)" || { echo "gofmt: unformatted files"; exit 1; }
 	@cd engine && go vet ./... && go test -race -count=1 ./...
 
-# The built checker module and its allowlist are BUILD OUTPUT, not committed. This
-# builds them from checker/src, asserting on the way that the build is reproducible:
-# twice in place, and once more from another directory, so a working directory baked
-# into the output would be caught.
+# Fails if the committed checker build differs from its sources.
 bundlecheck:
-	@python3 tools/build_checker.py
+	@python3 tools/build_checker.py --check
 
 checker:
 	@cd checker && deno check --quiet src/*.ts
