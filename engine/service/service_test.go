@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"hedgecheck/engine/doc"
+	"hedgecheck/engine/evaluate"
 	"hedgecheck/engine/store"
 )
 
@@ -556,6 +557,144 @@ func TestRefusalsDoNotLeakPaths(t *testing.T) {
 			if strings.Contains(text, marker) {
 				t.Errorf("%s: the refusal leaks %q: %s", p.what, marker, text)
 			}
+		}
+	}
+}
+
+// A LOOPBACK BIND KEEPS OTHER MACHINES OUT. IT KEEPS NO WEB PAGE OUT.
+//
+// Any page the operator visits can reach 127.0.0.1, and the browser supplies their
+// reachability rather than the attacker's. These are the two doors that were open, both
+// confirmed against a running server before they were closed:
+//
+//   - a cross-origin `text/plain` POST returned 200 and the check RAN
+//   - `Host: attacker.example` was served exactly as localhost, so a name re-pointed by
+//     whoever owns its DNS reached this service
+func TestServiceIsNotOpenToAnyWebPage(t *testing.T) {
+	server, httpServer := newServer(t)
+	proposal := aProposal(t)
+
+	// A write must be application/json, because that is the one content type a
+	// cross-origin fetch cannot send without a preflight -- and the preflight fails,
+	// since no CORS headers are ever sent from here.
+	for _, mediaType := range []string{
+		"text/plain",
+		"application/x-www-form-urlencoded",
+		"multipart/form-data; boundary=x",
+		"text/plain;charset=UTF-8",
+		"",
+	} {
+		req, err := http.NewRequest(http.MethodPost, httpServer.URL+"/v1/checks", bytes.NewReader(proposal))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mediaType != "" {
+			req.Header.Set("Content-Type", mediaType)
+		}
+		req.Header.Set("Origin", "https://evil.example")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnsupportedMediaType {
+			t.Errorf("a %q write gave %d, want 415", mediaType, resp.StatusCode)
+		}
+	}
+
+	// And the real client is unaffected.
+	if resp, body := post(t, httpServer.URL, proposal); resp.StatusCode != http.StatusOK {
+		t.Errorf("an application/json write gave %d: %s", resp.StatusCode, body)
+	}
+
+	// The Host header names this machine, by NAME. The port is not part of the rule:
+	// the bind address chooses it, and a test binds an ephemeral one.
+	handler := server.Handler()
+	for _, allowed := range []string{"localhost:8787", "127.0.0.1:8787", "localhost", "127.0.0.1:41234", "[::1]:8787"} {
+		req := httptest.NewRequest(http.MethodGet, "/v1/checks/"+strings.Repeat("a", 64), nil)
+		req.Host = allowed
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code == http.StatusMisdirectedRequest {
+			t.Errorf("Host %q was refused; it names this machine", allowed)
+		}
+	}
+	for _, refused := range []string{"attacker.example", "hedgecheck.evil.test", "", "localhost.evil.test", "127.0.0.1.evil.test"} {
+		req := httptest.NewRequest(http.MethodGet, "/v1/checks/"+strings.Repeat("a", 64), nil)
+		req.Host = refused
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusMisdirectedRequest {
+			t.Errorf("Host %q gave %d, want 421: a rebound name is served as localhost", refused, rec.Code)
+		}
+	}
+}
+
+// A STORED RESULT DOES NOT CONTRADICT THE DIGEST IT IS SERVED UNDER.
+//
+// A snapshot is content-addressed, so the store re-hashes it. A result is filed under
+// `input_digest` -- a claim about its inputs, not a hash of itself -- so nothing in the
+// store catches a file swapped for one answering a different question. It was served as
+// authentic: requested dfd48569…, served a document claiming dead8569…, status 200.
+func TestAServedResultDoesNotContradictItsDigest(t *testing.T) {
+	server, httpServer := newServer(t)
+	resp, body := post(t, httpServer.URL, aProposal(t))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("post: %d %s", resp.StatusCode, body)
+	}
+	digest := strings.TrimPrefix(resp.Header.Get("Location"), "/v1/checks/")
+	if digest == "" {
+		t.Fatal("the write states no Location")
+	}
+
+	// Read back cleanly first, so the refusal below is caused by the swap and not by
+	// something this test got wrong about the shape of a result.
+	if ok, _ := get(t, httpServer.URL+"/v1/checks/"+digest); ok.StatusCode != http.StatusOK {
+		t.Fatalf("the genuine result read back as %d", ok.StatusCode)
+	}
+
+	var stored map[string]any
+	if err := json.Unmarshal(body, &stored); err != nil {
+		t.Fatal(err)
+	}
+	stored["input_digest"] = "dead" + digest[4:]
+	swapped, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Store.PutResult(digest, evaluate.Version, swapped); err != nil {
+		t.Fatal(err)
+	}
+
+	after, served := get(t, httpServer.URL+"/v1/checks/"+digest)
+	if after.StatusCode != http.StatusInternalServerError {
+		t.Errorf("a result answering a different input was served with %d: %s", after.StatusCode, served)
+	}
+	if strings.Contains(string(served), "dead") {
+		t.Errorf("the refusal quotes the stored value: %s", served)
+	}
+}
+
+// A SERVER WITH NO STORE ANSWERS, RATHER THAN PANICKING.
+//
+// Found while probing the host check: a zero `Server` panicked with a nil dereference
+// in `store.resultPath` on a well-formed request. `serve` refuses without `--store`, so
+// this is not reachable from the CLI -- but `Handler()` is exported, and a panic in a
+// handler goroutine is a worse answer than a status.
+func TestAServerWithoutAStoreDoesNotPanic(t *testing.T) {
+	handler := (&Server{}).Handler()
+	for _, path := range []string{
+		"/v1/checks/" + strings.Repeat("a", 64),
+		"/v1/snapshots/" + strings.Repeat("b", 64),
+		"/v1/registry/recurring.priceBucket",
+		"/v1/bundle/" + strings.Repeat("c", 64) + "/result.json",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "localhost:8787"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req) // must not panic
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s gave %d, want 503", path, rec.Code)
 		}
 	}
 }
