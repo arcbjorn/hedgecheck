@@ -64,6 +64,21 @@ func loadRegistry(t *testing.T) map[string]doc.Entry {
 	return out
 }
 
+// The registry as DRAFTS, whatever the entries on disk say.
+//
+// A test that pins the draft arithmetic has to supply the drafts. Reading the live
+// entries made the expected numbers depend on whether an owner had reviewed them,
+// which is a fact about the working tree rather than about the code.
+func loadRegistryAsDrafts(t *testing.T) map[string]doc.Entry {
+	t.Helper()
+	out := loadRegistry(t)
+	for family, entry := range out {
+		entry.Review = doc.Review{State: "draft"}
+		out[family] = entry
+	}
+	return out
+}
+
 func mustQ(t *testing.T, text string) exact.Q {
 	t.Helper()
 	value, err := exact.ParseQ(text)
@@ -88,7 +103,7 @@ func spikeOptions(t *testing.T) Options {
 }
 
 func TestRunReproducesTheSpikeRun(t *testing.T) {
-	answer, err := Run(loadCapture(t), spikeOptions(t), loadRegistry(t))
+	answer, err := Run(loadCapture(t), spikeOptions(t), loadRegistryAsDrafts(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +124,11 @@ func TestRunReproducesTheSpikeRun(t *testing.T) {
 
 	// Both legs rest on an unreviewed family, so each is reduced to no value and the
 	// verdict is needs_review rather than fails: a loose bound never condemns.
+	//
+	// Driven from DRAFT COPIES rather than whatever the registry happens to hold. The
+	// numbers below are the draft arithmetic, and pinning them against the live
+	// entries made this a record of the tree's review state at one moment instead of
+	// a check: reviewing an entry changed the answer and the test simply broke.
 	want := map[string]struct{ verdict, worst, premium string }{
 		"binary-no":   {"needs_review", "-2640.69285", "488.69285"},
 		"bucket0-yes": {"needs_review", "-2197.636", "45.636"},
