@@ -225,6 +225,22 @@ async function readEvidence(bundle: Bundle, options: Options): Promise<Evidence>
         `the pin is ${short(pin)}, the entry's semantics_version is ${short(entry.version)}`,
       );
     }
+    // A STATUS THIS CHECKER WILL NOT EVALUATE.
+    //
+    // `bounded` means the payoff is not a function of the terminal price -- `priceTouch`
+    // is path-dependent -- and no bound for one exists yet. `refused` means the registry
+    // itself says the family's reading is not established (PLAN section 6). Either way
+    // there is nothing to re-derive, so a bundle claiming a verdict for one is refused
+    // rather than checked: the engines refuse to LOWER these, so a bundle that carries a
+    // lowering for one did not come from an engine that agrees with this checker.
+    const status = text(entry.value["status"], `$registry.${family}.status`);
+    if (status !== "computed") {
+      refuse(
+        "SEMANTICS_PIN",
+        `$proposal.legs.${family}`,
+        `the entry's status is ${status}, and only a computed family has a terminal payoff to check`,
+      );
+    }
   }
 
   return { proposal, lowered, result, entries, snapshots };
