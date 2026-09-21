@@ -138,6 +138,24 @@ func Lower(proposal doc.Proposal, registry map[string]doc.Entry, snapshots Snaps
 				ReasonCode: "UNREVIEWED_FAMILY",
 			})
 		}
+		// A DEPLOYER LEG PAYS WHAT THE DEPLOYER SUBMITS.
+		//
+		// EVIDENCE section 1, verified: `settleOutcome` carries a `settleFraction` the
+		// deployer chooses -- "Standalone outcomes may settle to any fraction" -- and
+		// nothing in the protocol derives it from a price. So the template describes
+		// what the deployer SAID they would do, not what they must do, and evaluating
+		// such a leg as written is an assumption rather than a fact.
+		//
+		// LOOSE, like unreviewed_family: the leg is worst-cased to zero on the lower
+		// profile, so a deployer leg can make a proposal need review and can never make
+		// one fail. A tight rule here would let this system condemn a hedge on the
+		// strength of a payoff nobody is bound to.
+		if entry.Settlement == "deployer" {
+			reductions = append(reductions, doc.Reduction{
+				Leg: leg.ID, Rule: "deployer_settled", Tight: false,
+				ReasonCode: "DEPLOYER_SETTLED",
+			})
+		}
 
 		if err := checkCoin(leg); err != nil {
 			return doc.IR{}, nil, err
