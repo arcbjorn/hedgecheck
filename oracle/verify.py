@@ -593,8 +593,9 @@ def replay():
         check(True, "replay: refuses to compare proposals with different valuation times")
 
     bundles()
-    print(f"replay: {len(proposals)} real proposals need review as drafts on disk; "
-          f"pinned values verified against in-memory reviewed copies")
+    state = "reviewed" if on_disk_reviewed else "drafts"
+    print(f"replay: {len(proposals)} real proposals against {state} on disk; "
+          f"draft and reviewed arithmetic both pinned against in-memory copies")
 
 
 def bundles():
