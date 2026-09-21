@@ -9,7 +9,23 @@ export type Scenario =
   | "no-fill"
   | "rejected"
   | "timeout"
-  | "duplicate";
+  | "duplicate"
+  | "server-error"
+  | "rate-limited"
+  | "redirected";
+
+/** Every scenario, so a test can sweep them all rather than naming a few. */
+export const SCENARIOS: readonly Scenario[] = [
+  "full-fill",
+  "partial-fill",
+  "no-fill",
+  "rejected",
+  "timeout",
+  "duplicate",
+  "server-error",
+  "rate-limited",
+  "redirected",
+];
 
 export interface Request {
   readonly url: string;
@@ -46,6 +62,15 @@ export class FakeExchange {
         };
       case "timeout":
         throw new Error("socket hang up");
+      // NON-200 ANSWERS. Without these every scenario returned 200, so a retry
+      // conditioned on the status -- the way anyone would actually write one -- was
+      // never exercised, and a duplicate live order would have gone unnoticed.
+      case "server-error":
+        return { status: 503, body: "upstream unavailable" };
+      case "rate-limited":
+        return { status: 429, body: "slow down" };
+      case "redirected":
+        return { status: 307, body: "" };
       case "duplicate":
         // The venue answered twice for one request. A caller that sent once must
         // not conclude it sent twice.
