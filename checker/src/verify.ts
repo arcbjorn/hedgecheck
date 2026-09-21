@@ -67,7 +67,17 @@ export interface Refusal {
   readonly detail: string;
 }
 
-export type Outcome = { readonly accepted: true } | { readonly accepted: false; readonly refusal: Refusal };
+/**
+ * What a check concluded.
+ *
+ * On acceptance it carries `result`: the result document AS THIS CHECKER PARSED IT,
+ * with the strict canonical parser. A caller that acted on its own second parse of the
+ * same bytes would be acting on a value this checker never established -- so the value
+ * travels with the verdict.
+ */
+export type Outcome =
+  | { readonly accepted: true; readonly result: Record<string, Value> }
+  | { readonly accepted: false; readonly refusal: Refusal };
 
 /** Everything a bundle holds, already read as bytes. */
 export interface Bundle {
@@ -102,8 +112,7 @@ function refuse(className: RefusalClass, at: string, detail: string): never {
 
 export async function verify(bundle: Bundle, options: Options = {}): Promise<Outcome> {
   try {
-    await establish(bundle, options);
-    return { accepted: true };
+    return { accepted: true, result: await establish(bundle, options) };
   } catch (error) {
     if (error instanceof Refused) return { accepted: false, refusal: error.refusal };
     // An unexpected fault is still a refusal: a bundle this checker cannot finish
@@ -130,11 +139,14 @@ interface Evidence {
   readonly snapshots: ReadonlyMap<string, Uint8Array>;
 }
 
-async function establish(bundle: Bundle, options: Options): Promise<void> {
+async function establish(bundle: Bundle, options: Options): Promise<Record<string, Value>> {
   const evidence = await readEvidence(bundle, options);
   const rebuilt = relower(evidence);
   await compareLowering(evidence, rebuilt);
   evaluateAndCompare(evidence, rebuilt);
+  // The result AS THIS CHECKER READ IT. Returned so a caller acts on the value that
+  // was established rather than parsing the bytes a second time with another parser.
+  return evidence.result;
 }
 
 async function readEvidence(bundle: Bundle, options: Options): Promise<Evidence> {
@@ -265,6 +277,9 @@ interface RebuiltLeg {
   readonly levels: Level[];
   /** The venue's own id, from the proposal. The IR does not carry it, by design. */
   readonly coin: string;
+  /** The family and the version pinned, so a refusal can name what it could not trust. */
+  readonly family: string;
+  readonly version: string;
 }
 
 interface Rebuilt {
@@ -347,7 +362,10 @@ function relower(evidence: Evidence): Rebuilt {
     }
     const instance = object(leg["instance"], `$proposal.legs.${id}.instance`);
     const coin = text(instance["coin"], `$proposal.legs.${id}.instance.coin`);
-    legs.push({ id, parts, size, premium: total, observationTime, reduced, reductionRule: rule, tight, levels, coin });
+    legs.push({
+      id, parts, size, premium: total, observationTime, reduced, reductionRule: rule, tight, levels, coin,
+      family, version: entry.version,
+    });
   }
 
   return {
@@ -683,14 +701,18 @@ function evaluateAndCompare(evidence: Evidence, rebuilt: Rebuilt): void {
   const lowerFn = sum(lowerParts);
   const upperFn = sum([...upperParts, cash(upperCeiling)]);
 
+  // REDUCTIONS FIRST, because a reduction disagreement CAUSES the profile to differ.
+  //
+  // A reduced leg contributes nothing to the lower profile, so an undeclared reduction
+  // makes the re-derived profile disagree about its piece count. Comparing the profile
+  // first reported the symptom and hid the cause.
+  compareReductions(evidence, rebuilt);
+
   const mine = profile(lowerFn, rebuilt.domainLower, rebuilt.domainUpper);
   compareProfile(mine, list(result["profile"], "$result.profile"), "$result.profile");
 
   // The verdict, re-derived under the tight and loose rules.
   compareVerdict(evidence, rebuilt, lowerFn, upperFn);
-
-  // Reductions: every one this checker derived is declared, with its reason code.
-  compareReductions(evidence, rebuilt);
 
   // Cost and break-evens.
   compareCost(evidence, rebuilt, lowerFn);
@@ -981,6 +1003,31 @@ function compareIntervals(
 function compareReductions(evidence: Evidence, rebuilt: Rebuilt): void {
   const stated = list(evidence.result["reductions"] ?? [], "$result.reductions");
   const mine = rebuilt.legs.filter((leg) => leg.reduced);
+
+  // AN UNDECLARED `unreviewed_family` IS NAMED FOR WHAT IT IS.
+  //
+  // A bundle built against a reviewed copy of an entry, checked here against an
+  // allowlist that does not carry that version, reduces a leg the bundle does not
+  // declare. Every downstream comparison then disagrees, and the FIRST of them used
+  // to be the refusal the operator saw: `PROFILE_COVERAGE at $result.profile`, which
+  // sends them looking for a broken payoff profile. The cause is two steps upstream
+  // and entirely benign, so it is reported before the symptom, with the family, the
+  // version and the reason this checker would not trust it.
+  const declaredFor = new Set(
+    stated.map((entry) => text(object(entry, "$result.reductions[]")["leg"], "$result.reductions[].leg")),
+  );
+  for (const leg of mine) {
+    if (leg.reductionRule === "unreviewed_family" && !declaredFor.has(leg.id)) {
+      refuse(
+        "REDUCTION_UNDECLARED",
+        "$result.reductions",
+        `leg ${leg.id} rests on ${leg.family} at version ${leg.version}, which is not in this ` +
+          `checker's allowlist, so this checker reduces it under unreviewed_family; the result ` +
+          `declares no reduction for that leg`,
+      );
+    }
+  }
+
   if (stated.length !== mine.length) {
     refuse(
       "REDUCTION_UNDECLARED",
