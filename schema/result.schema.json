@@ -39,6 +39,7 @@
       ]
     },
     "execution_readiness": {
+      "description": "`envelope_issued` exactly when `order_envelope` is present, which is only ever on a depth-priced `passes`. `not_evaluated` means nothing about execution was asked; `blocked` means it was and the answer was no.",
       "enum": [
         "not_evaluated",
         "envelope_issued",
@@ -493,6 +494,9 @@
     },
     "capture": {
       "$ref": "defs.schema.json#/$defs/capture"
+    },
+    "order_envelope": {
+      "$ref": "defs.schema.json#/$defs/order_envelope"
     }
   },
   "additionalProperties": false
