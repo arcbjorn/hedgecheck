@@ -82,10 +82,17 @@ test("the acquisition becomes fixed, never a fresh walk", () => {
 
 // THE CASE THE PLAN EXISTS FOR.
 //
-// Hand-derived from fixtures/bundles/good/, not from any implementation:
+// Hand-derived from fixtures/bundles/good/, not from any implementation. EXACT, as
+// rationals -- an earlier version of this comment wrote the rounded -999.91 with an
+// equals sign, which is a discrepancy the next reader would have chased:
 //   quantity 0.1, baseline 77631.4, floor 60000, cap -1000, price 0.17399
-//   at 924 contracts: 0.1*(60000-77631.4) + 924 - 924*0.17399 = -999.91  >= -1000
-//   at 300 contracts: 0.1*(60000-77631.4) + 300 - 300*0.17399 = -1515.34 <  -1000
+//   at 924: 0.1*(60000-77631.4) + 924 - 924*0.17399 = -24997669/25000 = -999.90676
+//   at 300: 0.1*(60000-77631.4) + 300 - 300*0.17399 =  -1515337/1000  = -1515.337
+//
+// The 924 case clears the cap by 0.09324 on a scale of ~1000 -- under 0.01%. That is
+// decisive (double precision is off by ~5.7e-13, eleven orders of magnitude clear)
+// but THIN: a fixture edit nudging the baseline or the price by a fraction of a
+// percent flips it, and the assertion below says so rather than failing obscurely.
 //
 // So a partial fill below the smallest passing size leaves a position that does NOT
 // meet the objective, and the re-check must say so rather than inheriting the
@@ -135,6 +142,102 @@ function ratio(value: string): number {
   }
   return Number(value);
 }
+
+// A NEGATIVE FILL IS REFUSED, NOT RECORDED.
+//
+// A negative price enters the P&L as `- size * price`, so it ADDS value: the 300-lot
+// partial below misses the objective by 515, and a price of -5 makes it clear. The
+// flagship test above only ever feeds well-formed positive fills, so it cannot see
+// this.
+test("a negative size or price is refused rather than written into a proposal", () => {
+  for (const fill of [
+    { size: "-300", avgPx: "0.17399" },
+    { size: "300", avgPx: "-0.17399" },
+    { size: "300", avgPx: "-5" },
+    { size: "-1", avgPx: "-1" },
+  ]) {
+    assert.throws(
+      () => proposalAfterFill(original(), "bucket0-yes", fill),
+      RecheckError,
+      `${JSON.stringify(fill)} was accepted`,
+    );
+  }
+  // And classify refuses it too, rather than calling it an ordinary partial.
+  assert.throws(() => classify("924", { size: "-5", avgPx: "1" }), RecheckError);
+});
+
+// AN AMBIGUOUS LOOKUP IS REFUSED EXACTLY AS AN ABSENT ONE IS.
+//
+// `found` used to be a boolean, so the map rewrote EVERY leg sharing the id: one fill
+// of 7 contracts became a proposal claiming 7 on each of two legs, on two coins.
+test("two legs sharing an id are refused, not both rewritten", () => {
+  const document = parse(original()) as Record<string, Value>;
+  const legs = document["legs"] as Value[];
+  const first = legs[0] as Record<string, Value>;
+  const twin = { ...first, instance: { ...(first["instance"] as Record<string, Value>), coin: "#99999" } };
+  document["legs"] = [first, twin];
+  const doubled = canonical(document as Value);
+
+  assert.throws(
+    () => proposalAfterFill(doubled, "bucket0-yes", { size: "7", avgPx: "0.17399" }),
+    RecheckError,
+    "a duplicated leg id was accepted",
+  );
+});
+
+// AN OVER-FILL STOPS THE PROCEDURE when the ordered size is known.
+//
+// An Ioc cannot fill more than it asked for, so a venue saying it did is a venue
+// disagreeing with the order that was placed -- the wrong moment to build a re-check
+// on that same account of events.
+test("a fill larger than the order is refused when the order is known", () => {
+  assert.throws(
+    () => proposalAfterFill(original(), "bucket0-yes", { size: "1000", avgPx: "0.17399" }, "924"),
+    RecheckError,
+  );
+  // Without the ordered size there is nothing to compare against, and the fill is
+  // taken at face value; the caller that knows the size is the one that must pass it.
+  assert.doesNotThrow(
+    () => proposalAfterFill(original(), "bucket0-yes", { size: "1000", avgPx: "0.17399" }),
+  );
+});
+
+// THE LENIENT READING IS ANCHORED: it accepts trailing zeros and nothing else.
+//
+// The old fallback applied a trailing-zero regex to anything the grammar rejected, so
+// it REPAIRED malformed text into a number nobody stated -- "1.0.0" became 1, and
+// "0.174.0" became 0.174. Truncation only ever shrinks a decimal tail, so a lower
+// recorded price makes the position look better than it is.
+test("a malformed venue number is refused, never repaired", () => {
+  for (const bad of ["1.0.0", "0.174.0", "12.34.00", "5.", "0.", "1.0.000", "1..0", ".5", ""]) {
+    assert.throws(
+      () => proposalAfterFill(original(), "bucket0-yes", { size: "300", avgPx: bad }),
+      RecheckError,
+      `${JSON.stringify(bad)} was accepted as a price`,
+    );
+  }
+  // Genuine trailing zeros are still a reading, not a change of value.
+  for (const [sent, want] of [["0.17400", "0.174"], ["1200.0", "1200"], ["300.0", "300"], ["0.000", "0"]] as const) {
+    const after = proposalAfterFill(original(), "bucket0-yes", { size: "300", avgPx: sent });
+    assert.equal((legOf(after)["acquisition"] as Record<string, Value>)["price"], want, `${sent} was misread`);
+  }
+
+  // AND THE VALUE, not merely that something refused. A loose reading turns "5." into
+  // 5 and "1.0.0" into 1 WITHOUT throwing, so a test that only catches an error is
+  // satisfied by the wrong implementation. Each malformed price is checked for the
+  // number it must never silently become.
+  for (const [bad, mustNotBecome] of [["5.", "5"], ["1.0.0", "1"], ["0.174.0", "0.174"], ["12.34.00", "12.34"]] as const) {
+    let price: unknown = null;
+    try {
+      price = legOf(proposalAfterFill(original(), "bucket0-yes", { size: "300", avgPx: bad }));
+      price = (price as Record<string, Value>)["acquisition"];
+      price = (price as Record<string, Value>)["price"];
+    } catch {
+      continue; // Refused, which is the correct outcome.
+    }
+    assert.fail(`${JSON.stringify(bad)} was silently read as ${String(price)} (must not become ${mustNotBecome})`);
+  }
+});
 
 test("a leg the proposal does not have is refused", () => {
   assert.throws(
