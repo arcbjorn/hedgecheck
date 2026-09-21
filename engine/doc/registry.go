@@ -130,7 +130,12 @@ func decodeEntry(path string, value any) (Entry, error) {
 	out.Review = readReview(r)
 	out.Sources = readSources(r)
 	out.Terms = readTerms(r)
-	out.Reference = r.str("reference", nil, "")
+	// CONSTRAINED. PLAN section 6: reference ids are `source:series:statistic[:window]`,
+	// "never free text", and the schema carries that pattern -- but this read had none, so
+	// the Go reader accepted "free text here", "" and "hl:perp". A reference decides which
+	// price series a payoff is observed on, so an unconstrained one is a leg valued
+	// against a series nobody can name.
+	out.Reference = r.str("reference", refTemplatePattern, "a reference id or template")
 	out.Observation = r.str("observation", nil, "")
 	out.Payoffs = readPayoffs(r)
 	for index, item := range r.list("assumptions_required", 0) {
