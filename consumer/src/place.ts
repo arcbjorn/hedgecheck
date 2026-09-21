@@ -1,8 +1,9 @@
 // An envelope becomes one venue order action, signed and sent.
 //
 // THE KEY COMES FROM THE ENVIRONMENT AND NOWHERE ELSE. It is read once, used once,
-// and never returned, logged or stored. Nothing in this file prints a payload, and
-// `consumer/test/no-key-leak.test.ts` greps the whole directory for another source.
+// and never returned, logged or stored. Nothing in this file prints a payload;
+// `consumer/test/place.test.ts` scans the directory for another source and drives
+// this path with malformed keys to check no thrown message carries the value.
 
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
@@ -21,6 +22,18 @@ export const Exchanges = {
 } as const;
 
 export type Network = keyof typeof Exchanges;
+
+/**
+ * Is this one of the two networks?
+ *
+ * An OWN-property test. `Exchanges` inherits from `Object.prototype`, so an index
+ * test like `Exchanges[name] === undefined` accepted `constructor`, `toString`,
+ * `__proto__` and nine more -- names that then reached a SIGNED order, because the
+ * signature is computed before the URL is used.
+ */
+export function isNetwork(name: string): name is Network {
+  return Object.hasOwn(Exchanges, name);
+}
 
 /** What the venue answered, as bytes plus the status. Nothing is interpreted here. */
 export interface Placed {
@@ -76,6 +89,13 @@ export function actionFor(envelope: OrderEnvelope): OrderAction {
   if (envelope.time_in_force !== "Ioc") {
     throw new PlaceError(`time in force is ${JSON.stringify(envelope.time_in_force)}, not Ioc`);
   }
+  // This is the declared field-for-field boundary, so it checks the fields. It used
+  // to accept "", "abc", "-1" and "1e9999" and pass them straight to the signer.
+  for (const [name, text] of [["size", envelope.size], ["limit price", envelope.limit_price]] as const) {
+    if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(text)) {
+      throw new PlaceError(`${name} ${JSON.stringify(text)} is not a non-negative decimal`);
+    }
+  }
   return {
     type: "order",
     orders: [{
@@ -115,9 +135,15 @@ export function signingDigest(
 ): Uint8Array {
   const connection = actionHash(action, nonce, vault);
   const domain = eip712Domain();
+  // An EXHAUSTIVE match, not a default-to-testnet fallthrough. `network === "mainnet"
+  // ? "a" : "b"` gave every unknown string a valid TESTNET signature, digest-identical
+  // to a real one -- fail-safe only by the accident that mainnet is the single string
+  // mapping to "a".
+  const source = network === "mainnet" ? "a" : network === "testnet" ? "b" : null;
+  if (source === null) throw new PlaceError(`network ${JSON.stringify(network)} has no signing domain`);
   const message = keccak_256(concat([
     keccak_256(utf8("Agent(string source,bytes32 connectionId)")),
-    keccak_256(utf8(network === "mainnet" ? "a" : "b")),
+    keccak_256(utf8(source)),
     connection,
   ]));
   return keccak_256(concat([Uint8Array.from([0x19, 0x01]), domain, message]));
@@ -136,7 +162,16 @@ function eip712Domain(): Uint8Array {
 
 /** The signature, as the venue's JSON wants it. Never returns or logs the key. */
 export function sign(digest: Uint8Array, key: Uint8Array): { r: string; s: string; v: number } {
-  const signature = secp256k1.sign(digest, key, { prehash: false });
+  let signature;
+  try {
+    signature = secp256k1.sign(digest, key, { prehash: false });
+  } catch {
+    // THE LIBRARY'S ERROR IS DISCARDED, never re-thrown or wrapped. @noble/curves
+    // interpolates the key into its message, so the original text and its stack are
+    // both key material. "No error contains the key" is a property of the whole
+    // path, not of the one function that was written for it.
+    throw new PlaceError("signing failed; the key was rejected by the curve");
+  }
   return {
     r: `0x${signature.r.toString(16).padStart(64, "0")}`,
     s: `0x${signature.s.toString(16).padStart(64, "0")}`,
@@ -161,7 +196,23 @@ export function agentKey(env: Record<string, string | undefined>): Uint8Array {
     // The value is NOT in the message. A malformed key is still a key.
     throw new PlaceError(`${KEY_VARIABLE} is not 32 bytes of hex`);
   }
+  // RANGE, not just shape. secp256k1 requires 1 <= k < n. A hex-valid key outside
+  // that range used to reach @noble/curves, which throws with the key interpolated
+  // into the message AS A DECIMAL INTEGER -- and the runbook's own evidence command
+  // redirects stderr into a file it then tells the operator to retain. Checked here,
+  // with a message that never contains the value.
+  if (!inCurveRange(hex)) {
+    throw new PlaceError(`${KEY_VARIABLE} is not a valid secp256k1 key`);
+  }
   return hexBytes(`0x${hex}`);
+}
+
+/** The secp256k1 group order. A key is valid only strictly inside 1..n-1. */
+const CURVE_ORDER = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
+
+function inCurveRange(hex: string): boolean {
+  const value = BigInt(`0x${hex}`);
+  return value > 0n && value < CURVE_ORDER;
 }
 
 // ---------------------------------------------------------------- sending
@@ -185,6 +236,12 @@ export interface PlaceOptions {
 export async function place(envelope: OrderEnvelope, options: PlaceOptions): Promise<Placed> {
   const action = actionFor(envelope);
   const vault = options.vault ?? null;
+  // The nonce is HASHED as an exact 64-bit integer and TRANSMITTED through JSON,
+  // which is lossy above 2^53. Bounded here so the signed value and the sent value
+  // cannot be different numbers; JSON is the binding constraint, so it sets the limit.
+  if (options.nonceMs < 0n || options.nonceMs > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new PlaceError("the nonce is outside the range that survives JSON intact");
+  }
   const digest = signingDigest(action, options.nonceMs, vault, options.network);
   const signature = sign(digest, agentKey(options.env));
   const body = JSON.stringify({
@@ -216,6 +273,12 @@ function concat(parts: readonly Uint8Array[]): Uint8Array {
 
 function hexBytes(hex: string): Uint8Array {
   const body = hex.startsWith("0x") ? hex.slice(2) : hex;
+  // Validated HERE, so every caller is safe rather than only the ones that happen to
+  // pre-check. `parseInt` per pair silently gave 0 for non-hex and dropped the last
+  // nibble of an odd-length string, producing plausible hashes over wrong bytes.
+  if (body.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(body)) {
+    throw new PlaceError("not an even-length hex string");
+  }
   const out = new Uint8Array(body.length / 2);
   for (let index = 0; index < out.length; index += 1) {
     out[index] = Number.parseInt(body.slice(index * 2, index * 2 + 2), 16);
@@ -254,6 +317,13 @@ export function msgpack(value: unknown): Uint8Array {
     const bytes = utf8(value);
     if (bytes.length < 32) return concat([Uint8Array.from([0xa0 | bytes.length]), bytes]);
     if (bytes.length < 256) return concat([Uint8Array.from([0xd9, bytes.length]), bytes]);
+    // REFUSE rather than emit a header that contradicts its payload. Above 65535 the
+    // shifts below silently took the length mod 65536, so the bytes that were hashed
+    // declared a different length than they carried -- a decoder would read a shorter
+    // string, and the signature would cover an action the venue never sees.
+    if (bytes.length >= 65536) {
+      throw new PlaceError(`msgpack: a ${bytes.length}-byte string is too long for this subset`);
+    }
     return concat([Uint8Array.from([0xda, bytes.length >> 8, bytes.length & 0xff]), bytes]);
   }
   if (typeof value === "boolean") return Uint8Array.from([value ? 0xc3 : 0xc2]);
@@ -274,6 +344,13 @@ export function msgpack(value: unknown): Uint8Array {
     return concat([Uint8Array.from([0x90 | value.length]), ...value.map(msgpack)]);
   }
   if (typeof value === "object") {
+    // A PLAIN record only. `Object.entries` sees a Date as {} and a Uint8Array as
+    // {"0":..}, so an unsupported type used to encode as something wrong rather than
+    // refusing -- a hashing encoder claiming to have encoded a value it did not.
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new PlaceError(`msgpack: ${(value as object).constructor?.name ?? "object"} is not a plain record`);
+    }
     const entries = Object.entries(value as Record<string, unknown>);
     if (entries.length >= 16) throw new PlaceError("msgpack: map too large for this subset");
     const parts: Uint8Array[] = [Uint8Array.from([0x80 | entries.length])];
