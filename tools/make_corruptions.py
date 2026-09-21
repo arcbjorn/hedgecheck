@@ -43,7 +43,46 @@ def reviewed(entry):
     return out
 
 
-def build_good(proposal_file="bucket0.proposal.json"):
+def issue_envelope(proposal, lowered, result, versions):
+    """Attach the order the cost bound assumes. PLAN section 7's T3 row.
+
+    A separate step, never part of evaluation: the lowered form carries no instance
+    id (PLAN section 6) and the input digest is computed after the result, so the
+    evaluator cannot know either. Only for a passing, depth-priced, single-leg answer.
+    """
+    if result["model_result"] != "passes":
+        return result
+    if len(proposal["legs"]) != 1:
+        return result
+    leg, priced = proposal["legs"][0], lowered["legs"][0]
+    if priced["premium"]["kind"] != "walked":
+        return result
+
+    size = exact.parse(leg["size"])
+    remaining, cost, limit = size, exact.parse("0"), None
+    for price_text, available in priced["premium"]["levels"]:
+        fill = min(remaining, exact.parse(available))
+        if fill > 0:
+            limit = price_text
+        cost += fill * exact.parse(price_text)
+        remaining -= fill
+        if remaining == 0:
+            break
+    if remaining != 0 or limit is None:
+        return result
+
+    out = dict(result)
+    out["execution_readiness"] = "envelope_issued"
+    out["input_digest"] = lowering.input_digest(proposal, lowered, versions)
+    out["order_envelope"] = {
+        "coin": leg["instance"]["coin"], "side": "buy", "size": exact.format(size),
+        "limit_price": limit, "time_in_force": "Ioc", "max_cost": exact.format(cost),
+        "input_digest": out["input_digest"],
+    }
+    return out
+
+
+def build_good(proposal_file="bucket0.proposal.json", envelope=False):
     """Lower and evaluate an 18 Sep replay proposal against a reviewed entry."""
     proposal = canon.loads((REPLAY / proposal_file).read_bytes())
     entries, snapshots = {}, {}
@@ -57,8 +96,10 @@ def build_good(proposal_file="bucket0.proposal.json"):
     family = proposal["legs"][0]["family"]
     proposal["legs"][0]["semantics_version"] = canon.semantics_version(entries[family])
     parsed = {digest: json.loads(raw) for digest, raw in snapshots.items()}
-    lowered, _versions = lowering.lower(proposal, entries, parsed)
+    lowered, versions = lowering.lower(proposal, entries, parsed)
     result = O.evaluate(lowered)
+    if envelope:
+        result = issue_envelope(proposal, lowered, result, versions)
     return {"proposal": proposal, "entries": entries, "snapshots": snapshots,
             "lowered": lowered, "result": result}
 
@@ -225,14 +266,71 @@ def certificate_negative_weight(parts):
                  "target": "size_windows[0].certificate"}
 
 
-# Two good bundles, because one cannot exercise everything. The passing bundle has a
+def envelope_limit_raised(parts):
+    """Raise the limit one tick above the level the walk ended in.
+
+    The tempting corruption, because it looks harmless and even prudent: a higher
+    limit fills more readily. It is the one that breaks the bound. The walk measured
+    what 924 contracts cost at prices up to 0.17399; at 0.174 the same order may cost
+    more, and `max_cost` would no longer be a maximum.
+    """
+    out = copy.deepcopy(parts)
+    out["result"]["order_envelope"]["limit_price"] = "0.174"
+    return out, {"of": "result", "change": "the limit is raised above the level the walk ended in",
+                 "target": "order_envelope.limit_price"}
+
+
+def envelope_size_raised(parts):
+    """Buy one more contract than the walk priced."""
+    out = copy.deepcopy(parts)
+    envelope = out["result"]["order_envelope"]
+    envelope["size"] = exact.format(exact.parse(envelope["size"]) + 1)
+    return out, {"of": "result", "change": "the envelope buys one more contract than was priced",
+                 "target": "order_envelope.size"}
+
+
+def envelope_digest_swapped(parts):
+    """Point the envelope at some other answer: a stale bound on a live order."""
+    out = copy.deepcopy(parts)
+    out["result"]["order_envelope"]["input_digest"] = "f" * 64
+    return out, {"of": "result", "change": "the envelope names a different input digest",
+                 "target": "order_envelope.input_digest"}
+
+
+def envelope_readiness_dropped(parts):
+    """Keep the envelope, say nothing was evaluated."""
+    out = copy.deepcopy(parts)
+    out["result"]["execution_readiness"] = "not_evaluated"
+    return out, {"of": "result", "change": "an envelope beside a readiness that denies it",
+                 "target": "execution_readiness"}
+
+
+def envelope_on_a_failure(parts):
+    """The envelope stays, the verdict becomes a failure.
+
+    The result is then internally inconsistent in two ways at once -- the profile no
+    longer supports `fails` either -- so this fixture asserts only that it is refused,
+    and the class it is refused with is the checker's to choose. It is here because a
+    bundle where the envelope survives a verdict change is exactly what must never be
+    accepted.
+    """
+    out = copy.deepcopy(parts)
+    out["result"]["model_result"] = "fails"
+    return out, {"of": "result", "change": "the verdict becomes a failure and the envelope stays",
+                 "target": "model_result"}
+
+
+# Three good bundles, because one cannot exercise everything. The passing bundle has a
 # profile, a size window and no reduction; the failing one has a reduction, a failing
-# interval and a witness carrying an adverse state. A corruption is attached to
-# whichever good bundle actually contains the thing it corrupts.
+# interval and a witness carrying an adverse state; the third is the passing one with
+# the order envelope its cost bound assumes. A corruption is attached to whichever good
+# bundle actually contains the thing it corrupts.
 BASES = {
     "good": "bucket0.proposal.json",
     "good-horizon": "bucket0-horizon.proposal.json",
+    "good-envelope": "bucket0.proposal.json",
 }
+ENVELOPE_BASES = {"good-envelope"}
 
 CORRUPTIONS = [
     ("strike-piece-removed", "good", "PROFILE_COVERAGE", strike_piece_removed),
@@ -247,11 +345,17 @@ CORRUPTIONS = [
     ("reduction-without-reason", "good-horizon", "REDUCTION_UNDECLARED", reduction_without_reason),
     ("witness-inadmissible", "good-horizon", "WITNESS_INADMISSIBLE", witness_inadmissible),
     ("interval-widened", "good-horizon", "INTERVAL_MISMATCH", interval_widened),
+    ("envelope-limit-raised", "good-envelope", "ENVELOPE_MISMATCH", envelope_limit_raised),
+    ("envelope-size-raised", "good-envelope", "ENVELOPE_MISMATCH", envelope_size_raised),
+    ("envelope-digest-swapped", "good-envelope", "ENVELOPE_MISMATCH", envelope_digest_swapped),
+    ("envelope-readiness-dropped", "good-envelope", "ENVELOPE_MISMATCH", envelope_readiness_dropped),
+    ("envelope-on-a-failure", "good-envelope", "VERDICT_MISMATCH", envelope_on_a_failure),
 ]
 
 
 def generate():
-    goods = {name: build_good(source) for name, source in BASES.items()}
+    goods = {name: build_good(source, envelope=name in ENVELOPE_BASES)
+             for name, source in BASES.items()}
     if BUNDLES.exists():
         shutil.rmtree(BUNDLES)
     for name, parts in goods.items():
