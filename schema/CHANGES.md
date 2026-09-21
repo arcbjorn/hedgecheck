@@ -162,6 +162,10 @@ error is invisible in the direction the invariants check.
 - **`leg` is not widened to a list.** The subject of the reduction stays one leg, with
   companions named -- so the existing comparison, which matches reductions in order by
   `leg`, keeps working unchanged.
+- **`reductions[].bound` is added, optional, a number.** The declared basis bound the
+  reduction used. A checker re-derives the reduction, and a proposal may declare several
+  bounds, so the one applied is stated rather than guessed. Absent when no bound was
+  declared: PLAN section 2 says the group is then worth zero, and there is no band.
 
 `schema_version` stays `"1"`: the change only adds an optional field.
 
