@@ -21,8 +21,29 @@ import (
 	"hedgecheck/engine/run"
 )
 
-// Endpoint is the only URL this package will call.
-const Endpoint = "https://api.hyperliquid.xyz/info"
+// Mainnet and Testnet are the ONLY two URLs this package will call.
+//
+// Two constants, not a configurable base: an arbitrary URL must stay impossible.
+// The network is chosen by name through EndpointFor, which knows exactly these two
+// names and refuses every other, so a typo or a hostile argument cannot redirect a
+// request to somewhere this package was not built to call.
+const (
+	Mainnet = "https://api.hyperliquid.xyz/info"
+	Testnet = "https://api.hyperliquid-testnet.xyz/info"
+)
+
+// Endpoint is the default, kept so existing callers mean mainnet unless they say
+// otherwise. Choosing testnet is always explicit.
+const Endpoint = Mainnet
+
+// Networks is the closed set of names. A name outside it has no endpoint.
+var Networks = map[string]string{"mainnet": Mainnet, "testnet": Testnet}
+
+// EndpointFor returns the URL for a network name, and false for anything else.
+func EndpointFor(network string) (string, bool) {
+	url, known := Networks[network]
+	return url, known
+}
 
 // Pace and Budget bound a run. The pace is a courtesy to a public endpoint; the
 // budget is a guard against a loop that would otherwise hammer it.
@@ -52,16 +73,44 @@ type Client struct {
 	// venue and nothing outside this package can redirect it. Tests in this package
 	// point it at a local server; no production path ever sets it.
 	endpoint string
-	spent    int
-	last     time.Time
+	// network is the chosen name, empty meaning mainnet. It is set only through
+	// SetNetwork, which refuses a name outside the closed set.
+	network string
+	spent   int
+	last    time.Time
+}
+
+// SetNetwork chooses mainnet or testnet by name. Any other name is refused, so the
+// two constants above remain the only URLs this package can reach.
+func (c *Client) SetNetwork(network string) error {
+	if _, known := EndpointFor(network); !known {
+		return fmt.Errorf("network %q is not one of mainnet, testnet", network)
+	}
+	c.network = network
+	return nil
+}
+
+// Network is the name this client calls, for a record that must say which it was.
+func (c *Client) Network() string {
+	if c.network == "" {
+		return "mainnet"
+	}
+	return c.network
 }
 
 // url is the endpoint this client calls: the real one unless a test overrode it.
 func (c *Client) url() string {
-	if c.endpoint == "" {
-		return Endpoint
+	if c.endpoint != "" {
+		return c.endpoint
 	}
-	return c.endpoint
+	url, known := EndpointFor(c.Network())
+	if !known {
+		// Unreachable: SetNetwork is the only writer and it refuses an unknown name.
+		// Falling back to mainnet rather than to an empty URL keeps a mistake here
+		// from turning into a request to nowhere.
+		return Mainnet
+	}
+	return url
 }
 
 // NewClient builds a client with the pace and budget this package requires.
@@ -125,6 +174,7 @@ func (c *Client) Fetch(body map[string]any) (Response, error) {
 	digest := hex.EncodeToString(sum[:])
 	record, err := json.MarshalIndent(map[string]any{
 		"endpoint":        c.url(),
+		"network":         c.Network(),
 		"method":          http.MethodPost,
 		"request_body":    body,
 		"requested_at":    isoUTC(requestedAt),
