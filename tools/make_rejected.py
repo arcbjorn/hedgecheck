@@ -180,8 +180,14 @@ def cases():
         ("registry-entry", "without-a-source", mutate(entry, ["sources"], []), "an entry without a source"),
         ("registry-entry", "evidence-label-unknown", mutate(entry, ["evidence", 0, "label"], "verified"),
          "an evidence label outside V, T, U"),
+        # A digest, and no reviewer beside it. The whole review block is replaced so
+        # the corruption is the same whether the entry on disk is a draft or reviewed:
+        # setting the digest alone was enough while every entry was a draft, but once
+        # an entry carries a real reviewer it produced a VALID block and the fixture
+        # stopped corrupting anything.
         ("registry-entry", "review-digest-without-reviewer",
-         mutate(entry, ["review", "digest"], canon.semantics_version(entry)),
+         mutate(entry, ["review"],
+                {"state": "reviewed", "drafted_by": "model", "digest": canon.semantics_version(entry)}),
          "a review digest without a reviewer and a date"),
 
         # ---- comparisons
