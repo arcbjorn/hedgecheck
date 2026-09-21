@@ -27,11 +27,12 @@ class UsageError extends Error {}
 
 /** Every argument this script understands. Anything else is a usage error. */
 const VALUED = new Set(["bundle", "network", "captured-at"]);
-const BARE = new Set(["send", "dry-run", "help"]);
+const BARE = new Set(["send", "dry-run", "help", "bundle-is-for-this-network"]);
 
 const USAGE =
   "usage: run.ts --bundle DIR [--network testnet] [--captured-at MS] [--send]\n" +
-  "  Without --send this is a rehearsal: the gate runs and nothing is sent.\n";
+  "  Without --send this is a rehearsal: the gate runs and nothing is sent.\n" +
+  "  --send also needs --bundle-is-for-this-network, which you assert by hand.\n";
 
 interface Args {
   readonly valued: ReadonlyMap<string, string>;
@@ -211,6 +212,26 @@ async function main(): Promise<number> {
   // `--dry-run` is still accepted and still means a rehearsal; it is now the default,
   // so it is kept only so an operator's habit does not become a usage error.
   const send = args.bare.has("send") && !args.bare.has("dry-run");
+
+  // A BUNDLE DOES NOT SAY WHICH NETWORK IT CAME FROM, so the operator must.
+  //
+  // Every bundle in this repository is built from MAINNET books and carries coin
+  // #39710 -- asset id 100,039,710. Testnet's outcomes are a different range, so that
+  // envelope names an instrument that does not exist there. The gate cannot catch it
+  // and should not pretend to: the bundle is internally consistent and the check is
+  // sound. It approves, signs, and sends a mainnet asset id to the testnet exchange.
+  //
+  // Nothing inside a bundle records its network -- the retained REQUEST RECORDS do,
+  // but they are not bundle parts -- so there is no field to check. What is left is to
+  // make the operator say it, and to refuse to send until they have.
+  if (send && !args.bare.has("bundle-is-for-this-network")) {
+    stdout.write(
+      `refusing to send: a bundle does not state its network, so you must.\n` +
+        `  Confirm the bundle's instruments exist on ${networkText}, then add\n` +
+        `  --bundle-is-for-this-network. See consumer/RUNBOOK.md.\n`,
+    );
+    return 2;
+  }
 
   if (directory === undefined) {
     stdout.write(`--bundle is required\n${USAGE}`);
