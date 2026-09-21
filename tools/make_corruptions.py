@@ -82,12 +82,19 @@ def issue_envelope(proposal, lowered, result, versions):
     return out
 
 
-def build_good(proposal_file="bucket0.proposal.json", envelope=False):
-    """Lower and evaluate an 18 Sep replay proposal against a reviewed entry."""
+def build_good(proposal_file="bucket0.proposal.json", envelope=False, settlement=None):
+    """Lower and evaluate an 18 Sep replay proposal against a reviewed entry.
+
+    `settlement` forces the entry's settlement, so a bundle can carry a family whose
+    payout the DEPLOYER submits. That leg is reduced under `deployer_settled`, loosely,
+    so the verdict becomes `needs_review` -- which is the whole point of the fixture.
+    """
     proposal = canon.loads((REPLAY / proposal_file).read_bytes())
     entries, snapshots = {}, {}
     for path in sorted((PROJECT / "registry").glob("*.json")):
         entry = canon.loads(path.read_bytes())
+        if settlement is not None:
+            entry = dict(entry, settlement=settlement)
         entries[entry["family"]] = reviewed(entry)
     for stem in SOURCE.values():
         raw = (REPLAY / f"{stem}.json").read_bytes()
@@ -329,8 +336,12 @@ BASES = {
     "good": "bucket0.proposal.json",
     "good-horizon": "bucket0-horizon.proposal.json",
     "good-envelope": "bucket0.proposal.json",
+    # A family whose payout the deployer SUBMITS. Accepted, and `needs_review`: the leg
+    # is worst-cased under a loose rule, so it can never make a proposal fail.
+    "good-deployer": "bucket0.proposal.json",
 }
 ENVELOPE_BASES = {"good-envelope"}
+DEPLOYER_BASES = {"good-deployer"}
 
 CORRUPTIONS = [
     ("strike-piece-removed", "good", "PROFILE_COVERAGE", strike_piece_removed),
@@ -354,7 +365,8 @@ CORRUPTIONS = [
 
 
 def generate():
-    goods = {name: build_good(source, envelope=name in ENVELOPE_BASES)
+    goods = {name: build_good(source, envelope=name in ENVELOPE_BASES,
+                              settlement="deployer" if name in DEPLOYER_BASES else None)
              for name, source in BASES.items()}
     if BUNDLES.exists():
         shutil.rmtree(BUNDLES)
