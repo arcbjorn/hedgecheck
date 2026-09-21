@@ -38,18 +38,6 @@ export interface Policy {
   readonly maxAgeMs: bigint;
   /** Options handed to the checker: the schemas, and the reviewed digests. */
   readonly checker?: Options;
-  /**
-   * The checker to run. Defaults to `verify` from `checker/src/verify.ts`, which is
-   * what a real caller uses; it is a field so a test can supply one that throws.
-   *
-   * That case is not hypothetical and not reachable any other way: `verify` catches
-   * its own faults and returns `ENGINE_DISAGREES` rather than throwing, so nothing a
-   * bundle contains can make it throw. What CAN throw is the wiring -- a bad import,
-   * an out-of-memory, a future checker that is less careful. The gate must return
-   * "nothing was checked" for those rather than "the bundle was refused", because an
-   * operator reading the second would go looking for a corruption that is not there.
-   */
-  readonly verifier?: Verifier;
 }
 
 /** What `verify` is, stated as a type so the gate can be handed a different one. */
@@ -70,18 +58,30 @@ export interface Capture {
 }
 
 /**
- * THE GATE'S OWN GATE.
+ * A COMPILE-TIME MARKER. Advisory at runtime, and not what holds the property.
  *
- * `brand` is typed by a symbol that is declared in this module and exported from
- * nowhere. TypeScript identifies `unique symbol` types nominally, by declaration
- * site, so no other module can write the type of this field: it cannot name the
- * symbol, and a structurally identical symbol of its own is a different type. There
- * is therefore no object literal, no cast from a plain shape, and no helper anywhere
- * else in the program that produces an `Approved` -- only the one construction inside
- * `gate`, which sits after every condition has been checked.
+ * `brand` is typed by a symbol declared in this module and exported from nowhere.
+ * TypeScript identifies `unique symbol` types nominally, by declaration site, so no
+ * other module can WRITE the type of this field: it cannot name the symbol, and a
+ * structurally identical symbol of its own is a different type. That makes an
+ * `Approved` hard to produce BY ACCIDENT, which is all it makes.
  *
- * A caller that wants to place an order must hold one of these, and the only way to
- * hold one is to have called `gate` and had it say yes.
+ * What it does NOT do, stated plainly because an earlier version of this comment
+ * claimed otherwise:
+ *
+ *   - Types erase. Nothing anywhere reads `.brand` at runtime; it appears only at its
+ *     declaration, at the single construction below, and in tests. A cast defeats it,
+ *     as `test/unrepresentable.ts` already says.
+ *   - It is constructed AFTER `place()` has returned, at the end of `gateWith`. Even a
+ *     caller that did check it would be checking it after the order was sent, so it
+ *     could not gate an order in any case.
+ *   - `place.ts` takes an `OrderEnvelope`, never an `Approved`, so the signing path
+ *     never sees this type.
+ *
+ * WHAT ACTUALLY HOLDS THE PROPERTY: the single `place` call site below, with every
+ * early return above it, and the table in `test/gate.test.ts` that drives every
+ * refusal and counts the calls that reached the other side. Both are verified by
+ * mutation. The brand is a convenience on top of those, not a substitute for them.
  */
 const checked: unique symbol = Symbol("hedgecheck.checked");
 
@@ -146,6 +146,28 @@ export async function gate(
   capture: Capture,
   place: Place,
 ): Promise<Decision> {
+  return await gateWith(verify, bundle, policy, capture, place);
+}
+
+/**
+ * The gate, with the checker as a parameter. NOT part of the production surface.
+ *
+ * A test needs to drive a checker that throws, and that case is unreachable any other
+ * way: `verify` catches its own faults and returns `ENGINE_DISAGREES`, so nothing a
+ * bundle contains can make it throw. What CAN throw is the wiring -- a bad import, an
+ * out-of-memory, a future checker that is less careful.
+ *
+ * It is exported from `testing.ts` and NOT from here, so a production caller has no
+ * way to name it. `gate()` above is the only entry point, and it is bound to the real
+ * checker: a caller cannot substitute one that always accepts.
+ */
+export async function gateWith(
+  verifier: Verifier,
+  bundle: Bundle,
+  policy: Policy,
+  capture: Capture,
+  place: Place,
+): Promise<Decision> {
   // 0. THE BUNDLE IS READ ONCE, HERE.
   //
   // `Bundle` is an interface, so its fields can be accessors. `bundle.result` used to
@@ -183,25 +205,25 @@ export async function gate(
   // A checker that throws is not a checker that accepted. The catch is why the table
   // can drive a throwing checker through the gate at all, and the reason is its own,
   // so "it crashed" never arrives looking like "it said no".
-  let accepted: boolean;
-  let refusal = "";
-  try {
-    const outcome = await (policy.verifier ?? verify)(pinned, policy.checker ?? {});
-    accepted = outcome.accepted;
-    if (!outcome.accepted) {
-      refusal = `${outcome.refusal.class} at ${outcome.refusal.at}: ${outcome.refusal.detail}`;
-    }
-  } catch (error) {
-    return no("CHECKER_THREW", error instanceof Error ? error.message : String(error));
-  }
-  if (!accepted) return no("CHECKER_REFUSED", refusal);
-
-  // 2-4. The result, read only after the checker has established it.
   let result: Record<string, unknown>;
   try {
-    result = JSON.parse(new TextDecoder().decode(pinned.result)) as Record<string, unknown>;
+    const outcome = await verifier(pinned, policy.checker ?? {});
+    if (!outcome.accepted) {
+      return no(
+        "CHECKER_REFUSED",
+        `${outcome.refusal.class} at ${outcome.refusal.at}: ${outcome.refusal.detail}`,
+      );
+    }
+    // THE VALUE THE CHECKER ESTABLISHED, not a second parse of the same bytes.
+    //
+    // The gate used to re-read `pinned.result` with `JSON.parse` -- a laxer parser than
+    // the strict canonical one the checker uses. Nothing exploitable was found, because
+    // the strict parser accepts a subset, but the shape was wrong on the money path:
+    // the gate acted on a value nothing had verified. `verify` now returns what it
+    // established and the gate acts on that.
+    result = outcome.result;
   } catch (error) {
-    return no("UNREADABLE", error instanceof Error ? error.message : String(error));
+    return no("CHECKER_THREW", error instanceof Error ? error.message : String(error));
   }
   if (typeof result !== "object" || result === null || Array.isArray(result)) {
     return no("UNREADABLE", "the result is not an object");
