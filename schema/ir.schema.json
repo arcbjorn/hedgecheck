@@ -189,6 +189,10 @@
               "$ref": "defs.schema.json#/$defs/leg_id"
             },
             "description": "The OTHER legs reduced together with `leg`, when a rule acts on a group rather than one leg. A band reduction is the infimum of the group's SUMMED payoff, and the infimum of a sum is not the sum of infima: two legs whose payoffs cancel have a flat sum that no basis move can hurt, while each alone is stepped. Reducing them separately invents a loss on a perfectly hedged position. Absent for a per-leg rule."
+          },
+          "bound": {
+            "$ref": "defs.schema.json#/$defs/number",
+            "description": "The declared basis bound this reduction used, when the rule is a band. A checker re-derives the reduction, and a proposal may declare several bounds, so the one that was applied is stated rather than guessed. Absent when no bound was declared -- then the group is worth zero and there is no band."
           }
         },
         "additionalProperties": false
