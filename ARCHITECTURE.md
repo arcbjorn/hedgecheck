@@ -347,7 +347,10 @@ this to the reader rather than implying more.
 | A function carries its breakpoints | `oracle/verify.py` — no evaluation function has a `breakpoints` parameter |
 | A schema constraint is never silently ignored | `tools/validate.py` — an unknown keyword or an unanchored pattern is an error; 36 mutations must be refused |
 | Documents agree with each other | `tools/validate.py` — a proposal pins the digest of the registry entry it uses; its coin encodes its outcome and side; every snapshot it cites is retained |
-| A draft registry entry gets no credit | `canon.reviewed` — state and `review.digest` together; reduced by lowering as `unreviewed_family`, loose. Both entries here are **model drafts awaiting the owner's review**, so the on-disk replay returns `needs_review` |
+| A draft registry entry gets no credit | `canon.reviewed` — state and `review.digest` together; reduced by lowering as `unreviewed_family`, loose. Tests drive both states from in-memory copies rather than reading whichever state the tree holds, so reviewing an entry changes the verdict without breaking a test |
+| An unreviewed family is named as the cause, not as a symptom | `checker/src/verify.ts` — `compareReductions` runs **before** `compareProfile`, because a reduced leg contributes nothing to the lower profile and so makes the profile disagree. Refused as `REDUCTION_UNDECLARED` at `$result.reductions`, naming the family, the version, and that the version is absent from this checker's allowlist. Reporting the profile first sent an operator hunting a broken payoff for a benign cause two steps upstream |
+| The gate acts on the value the checker established | `verify` returns the parsed result on acceptance; `gate` reads the verdict and envelope from it and never parses those bytes again. `consumer/test/banned.ts` bans `JSON.parse` and `TextDecoder` in `gate.ts` by name. A second parse, by a laxer parser than the checker's, would be the gate acting on a value nothing verified |
+| The production gate cannot be handed a checker | `gate()` is bound to the real `verify` and takes no verifier. The injectable `gateWith` lives in `consumer/src/testing.ts`, and a guard fails if `run.ts` imports it or names it |
 | A loose bound never fails a proposal | `oracle/verify.py` replay — the tight horizon fixture, re-run with its rule made loose, must move from `fails` to `needs_review` with no failing interval |
 | Reviewing an entry does not move what proposals pin | `tools/validate.py` — `semantics_version` excludes `review`; a review with a stale digest does not count as reviewed |
 | A lowered leg matches the instance it names | `oracle/verify.py` replay — terms against the catalogue, coin against outcome and side, baseline against the contexts snapshot, size against displayed depth |
@@ -366,6 +369,10 @@ this to the reader rather than implying more.
 | The chart cannot mislead about the bound | `engine/screen/chart_test.go` — the vertical extent always includes the cap, and a piece crossing it is **split at the crossing**, solved exactly, so colour marks where the bound is breached and nowhere else. Coordinates are computed as rationals and rounded once, at the moment they become SVG text |
 | Only `cmd` and `service` may reach the network | `engine/arch_test.go` — an import scan for `engine/adapter`, so "pure" cannot come to depend on what the adapter happens to do |
 | Only the adapter's own package can redirect it | `adapter/hyperliquid` — the endpoint field is unexported and empty by default, so a zero client calls the real venue; a request type outside the closed set never opens a connection |
+| A loopback bind is not a security boundary against a web page | `service` — binding 127.0.0.1 keeps other MACHINES out, not other PAGES. Two checks close the two doors: `Host` must name this machine (421 otherwise, so a DNS-rebound name gets nothing), and a write must be `application/json` (415 otherwise, the one content type a cross-origin `fetch` cannot send unpreflighted — and the preflight fails, since no CORS header is ever sent). Before them, a `text/plain` POST from a foreign Origin returned 200 and the check ran. The content type is checked after the method, so a POST to a read-only path is still 405 |
+| A served result does not contradict the digest it is served under | `service` — a snapshot is content-addressed and re-hashed by the store; a result is filed under `input_digest`, a CLAIM about its inputs, so nothing in the store catches a swapped file. A document naming a different input is refused 500. It is "does not contradict" rather than "states", because `input_digest` is written during bundle assembly and `evaluate` does not emit it |
+| Purity is not transitive through an import | `engine/arch_test.go` — a pure package may not import `store`, `service`, `adapter` or `cmd` either. Banning `os` and `net` missed the likelier drift: the kernel importing a sibling for one helper. Proved by making `pwa` import `store` and watching the guard pass before the check existed |
+| A reader constrains what its schema constrains | `engine/doc` — `execution_readiness`, `evaluation_scope` and the payoff selector's `index` are read with `enum` and a pattern, not a bare string. The reader accepted `execution_readiness: "banana"` while the schema allowed three values, and that field is what says whether an order envelope may exist |
 | A name is refused as a name, before it reaches a path | `service` — every path parameter is matched against its pattern and answered **400**, not 404. A 404 is what a handler with no validation also returns, so the status is what proves the check happened. Percent-encoded traversal is used in the test, because a plain `../..` is cleaned away by the client and the mux and never reaches a handler |
 | A refusal never names a path on this machine | `service` — the shape of the message is asserted across every error route, so a new route that forwards a raw `os` error is caught too |
 | A refusal is not a verdict | `service` — a proposal that cannot be lowered is 422 with its refusal **class**, and is never readable as a result. Missing evidence and a lowering refusal are separate routes and separately tested |
@@ -373,6 +380,31 @@ this to the reader rather than implying more.
 | The validator's one deviation from JSON Schema 2020-12 stays deliberate | `tools/validate.py` — 1.0 is not an integer here, and `integer` is asserted to appear only in `snapshot-record` |
 
 Each guard was run against a deliberate violation before it was trusted.
+
+### Lints and proofs
+
+A guard that reads SOURCE TEXT is a lint. It catches an accident and not an adversary:
+the text can always be spelled another way. The rows above that scan for `fetch`,
+`Date`, `node:`, `place(` or an import path are lints, and are labelled as such here so
+nobody mistakes one for a proof later.
+
+What they are worth was measured rather than assumed. Inserting
+`globalThis["fet"+"ch"](…)` into `gate.ts` matches none of the patterns. Wrapped in
+`try {} catch {}` so it changes no behaviour, it also passes every behavioural test —
+the call throws, but silently, and the gate's answer is unchanged. **Greps and
+behavioural tests both stay green.**
+
+`consumer/test/tripwire.test.ts` is the proof. It instruments `fetch`,
+`XMLHttpRequest`, `WebSocket`, `Date.now`, `performance.now` and `setTimeout`, drives
+every row of the gate table, and counts what was actually called:
+
+- every refusing row: zero network calls, zero clock reads
+- the approving row: exactly one `place` call, and still no clock of its own
+
+The count is on the function that runs, so the spelling does not matter and neither
+does whether the call happens to break anything. The lints stay, because a lint that
+fires at review time is cheaper than a test that fires at run time — but the property
+rests on the harness.
 
 ---
 
