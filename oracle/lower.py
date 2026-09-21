@@ -153,6 +153,27 @@ def resolve(leg, registry):
     if leg["semantics_version"] != version:
         _refuse("SEMANTICS_PIN_MISMATCH",
                 f"{leg['id']}: pins {leg['semantics_version'][:12]}, the registry entry is {version[:12]}")
+    if entry["status"] == "bounded":
+        # A bounded family's payoff is NOT a function of the terminal price. `priceTouch`
+        # is the case: whether the price ever touched a level is path-dependent, and a
+        # terminal-price kernel cannot compute it. PLAN section 2 gives the bound -- the
+        # inclusive terminal digital at the target, and only when the touch window covers
+        # the valuation time -- but no such family exists yet, so there is no rule here to
+        # apply. Until one does, refusing is the safe direction: evaluating a bounded
+        # family with the terminal machinery would silently treat a path payoff as a
+        # terminal one, which over-credits it at prices it may never have touched.
+        _refuse("UNSUPPORTED_FAMILY",
+                f"{leg['id']}: {entry['family']} is bounded, not computed, and lowering has no bound for it yet")
+    if entry["status"] == "refused":
+        # The registry says this family is not understood (PLAN section 6: "Everything
+        # else -- Refused"). A REFUSAL, not a reduction: a reduction still produces a
+        # verdict, and there is no verdict to produce about a payoff nobody has read.
+        # Worst-casing it to zero would answer a question this project has declared
+        # unanswerable, and `needs_review` would invite someone to review a reading that
+        # does not exist. UNSUPPORTED_FAMILY is exactly the existing code for "lowering
+        # has no rule for this family"; here the registry says so itself.
+        _refuse("UNSUPPORTED_FAMILY",
+                f"{leg['id']}: the registry refuses {entry['family']}: its reading is not established")
     return entry, version
 
 
