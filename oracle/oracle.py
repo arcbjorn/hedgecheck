@@ -628,6 +628,7 @@ def _clip(interval, lower, upper):
 ADVERSE_STATES = {
     "horizon_mismatch": "the leg's own observation pays zero",
     "unreviewed_family": "nothing is established about what the leg pays",
+    "deployer_settled": "the deployer chooses what the leg pays",
 }
 
 
