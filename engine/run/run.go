@@ -1,9 +1,5 @@
 // Package run turns a capture set into proposals, results and a comparison. Pure:
 // bytes and options in, documents out. Nothing here fetches, and nothing here waits.
-//
-// The same function serves a live run and a replay, which is what makes the two
-// byte-identical. A replay that went down a different path would prove nothing about
-// the run it claims to reproduce.
 package run
 
 import (
@@ -22,11 +18,6 @@ import (
 )
 
 // MaxSkewMs bounds how far apart the snapshots in one result may have been captured.
-//
-// Proposed from 31 measurements on 19-20 September: book venue time minus local
-// retrieval ran from -796 ms to -291 ms. This is roughly six times the observed worst.
-// It is a bound on an ASSERTION, not a derivation: the contexts response carries no
-// venue timestamp, so nobody can re-derive the spread from the bytes (EVIDENCE §4).
 const MaxSkewMs = 5000
 
 // Options are the question a run answers. Baseline and valuation time have no
@@ -387,12 +378,6 @@ func slug(id string) string {
 }
 
 // BookTime reads an l2Book's venue timestamp, in milliseconds.
-//
-// Pure: it reads a number out of retained bytes and does no timekeeping, so it lives
-// here rather than in the adapter and a replay can call it without touching the
-// network package. Its counterpart, the LOCAL retrieval time, is an RFC 3339 instant
-// that needs a clock library to parse, so that one stays in the adapter and is handed
-// to Measure as a function.
 func BookTime(raw []byte) (int64, bool) {
 	value, err := parseVenue(raw)
 	if err != nil {
@@ -469,13 +454,6 @@ func (e *TooSkewed) Error() string {
 
 // Assert turns a measured skew into the assertion a result carries, refusing a
 // capture that is too spread out to be one moment.
-//
-// Two questions are asked of one number and only one is about magnitude. Whether the
-// capture is trustworthy is about distance from zero, so the bound compares the
-// absolute value. What the document RECORDS keeps its sign, because the sign is the
-// content: it says which clock was ahead. The assertion is carried inside the result,
-// so it feeds the input digest -- dropping the sign would change the digest and lose
-// the only readable fact in the claim.
 func (s Skew) Assert(measuredBy string) (*doc.Capture, error) {
 	if abs(s.WorstMs) > MaxSkewMs {
 		return nil, &TooSkewed{WorstMs: s.WorstMs, MaxMs: MaxSkewMs}
