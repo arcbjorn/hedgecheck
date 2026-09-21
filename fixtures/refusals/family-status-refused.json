@@ -1,0 +1,404 @@
+{
+ "expects": "UNSUPPORTED_FAMILY",
+ "name": "family-status-refused",
+ "proposal": {
+  "assumptions": [
+   "common_reference",
+   "zero_base_fee"
+  ],
+  "baseline": {
+   "kind": "analysis_time",
+   "price": "77631.4",
+   "source": {
+    "coin": "BTC",
+    "snapshot": "ed779f0670253d58214b98a18efe79bf08e65312b5364ebd9b49a5fd708ee1d1"
+   }
+  },
+  "capture": {
+   "max_skew_ms": "5000",
+   "measured_by": "research/2026-09-18/capture.py, recomputed from the retained request records",
+   "skew_ms": "-687"
+  },
+  "domain": {
+   "lower": "60000",
+   "upper": "110000"
+  },
+  "exposure": {
+   "kind": "linear_spot",
+   "quantity": "0.1",
+   "reference": "hl:perp:BTC:mark-interp",
+   "underlying": "BTC"
+  },
+  "legs": [
+   {
+    "acquisition": {
+     "kind": "book_walk",
+     "path": "direct_book",
+     "snapshot": "00118f3902a1a8c491d1dd22782527524e71eea68f610918fa5495d5105b1218"
+    },
+    "family": "recurring.priceBucket",
+    "id": "bucket0-yes",
+    "instance": {
+     "catalogue": "a1692390028fdbfa2f81df15768431347fab42faa8add5e96b24a8813e9f99ac",
+     "coin": "#39710",
+     "outcome": "3971"
+    },
+    "semantics_version": "b1c92fc2b95b14d835c250e2261007d641235370f79fb6b5a99dea74ff1b237f",
+    "side": "yes",
+    "size": "924",
+    "terms": {
+     "expiry": "2026-09-19T06:00:00Z",
+     "index": "0",
+     "period": "1d",
+     "thresholds": [
+      "75908",
+      "79007"
+     ],
+     "underlying": "BTC"
+    }
+   }
+  ],
+  "objective": [
+   {
+    "id": "loss_cap",
+    "min_pnl": "-1000"
+   }
+  ],
+  "objective_reference": "hl:perp:BTC:mark-interp",
+  "objective_valuation_time": "2026-09-19T06:00:00Z",
+  "other_costs": "0",
+  "schema_version": "1",
+  "units": {
+   "exposure": "BTC",
+   "money": "USDC",
+   "price": "USDC per BTC",
+   "size": "contracts"
+  }
+ },
+ "registry": {
+  "recurring.priceBinary": {
+   "ambiguities": [
+    "Inclusivity at the target rests on the official text alone: none of twenty observed settlements landed on its target.",
+    "The interpolation cannot be replayed from the public info and WebSocket API. Node-level data has not been examined."
+   ],
+   "assumptions_required": [],
+   "evidence": [
+    {
+     "claim": "YES pays at or above the target and NO strictly below it",
+     "label": "V",
+     "where": "EVIDENCE.md section 1: official text, retained"
+    },
+    {
+     "claim": "Reported fractions agree with reported prices in twenty settlements",
+     "label": "V",
+     "where": "EVIDENCE.md section 2"
+    },
+    {
+     "claim": "The venue applies the rule as written when the price equals the target",
+     "label": "U",
+     "where": "EVIDENCE.md section 2: never observed"
+    }
+   ],
+   "family": "recurring.priceBinary",
+   "observation": "One instant, the expiry: linear interpolation between the HyperCore mark price updates immediately before and after it. Not a TWAP, not a candle close, not the oracle price.",
+   "payoffs": [
+    {
+     "pays": [
+      {
+       "pays_on": {
+        "lower": {
+         "term": "target_price"
+        },
+        "lower_inclusive": true
+       },
+       "primitive": "indicator"
+      }
+     ],
+     "select": {
+      "side": "yes"
+     }
+    },
+    {
+     "pays": [
+      {
+       "pays_on": {
+        "upper": {
+         "term": "target_price"
+        },
+        "upper_inclusive": false
+       },
+       "primitive": "indicator"
+      }
+     ],
+     "select": {
+      "side": "no"
+     }
+    }
+   ],
+   "reference": "hl:perp:{underlying}:mark-interp",
+   "review": {
+    "digest": "6fa3d6ba76bb0b092bcb0fbaa22e783f5f84cf45df18eca47d7b11100615cf63",
+    "drafted_by": "model",
+    "reviewed_by": "fixture",
+    "reviewed_on": "2026-09-19",
+    "state": "reviewed"
+   },
+   "schema_version": "1",
+   "settlement": "protocol",
+   "sources": [
+    {
+     "quotes": [
+      "the contract settles to YES if and only if `markPrice0 + (settlementTime - t0) / (t1 - t0) * (markPrice1 - markPrice0) ≥ targetPrice`"
+     ],
+     "retained_at": "research/2026-09-18-decisions/contract-specifications.md at commit 085ccfb",
+     "retrieved": "2026-09-18",
+     "sha256": "59ef08be4b7e3d7cc0f4245abd4f133d743a983820df5b2ef0ce1ceb6af50ea3",
+     "title": "Hyperliquid docs: Contract specifications, Recurring outcomes",
+     "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/contract-specifications"
+    },
+    {
+     "quotes": [
+      "Settlement automatically converts either Yes to `settleFraction` quote tokens and No to `1 - settleFraction` quote tokens."
+     ],
+     "retained_at": "research/2026-09-18-decisions/hip-4-outcome-markets.md at commit 085ccfb",
+     "retrieved": "2026-09-18",
+     "sha256": "087859f228fc6d64d8cec8d43d3e544d054c144f4343cf4cf1cba58e44f64fa6",
+     "title": "Hyperliquid docs: HIP-4 Outcome markets, Mechanics",
+     "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/hyperliquid-improvement-proposals-hips/hip-4-outcome-markets"
+    }
+   ],
+   "status": "computed",
+   "terms": [
+    {
+     "name": "underlying",
+     "type": "text"
+    },
+    {
+     "name": "target_price",
+     "type": "number"
+    },
+    {
+     "name": "expiry",
+     "type": "time"
+    },
+    {
+     "name": "period",
+     "type": "text"
+    }
+   ],
+   "version": "1"
+  },
+  "recurring.priceBucket": {
+   "ambiguities": [
+    "That index 0, 1, 2 mean the documented buckets in that order is observed, not documented: it held in three settlements.",
+    "The top bucket has never been observed paying.",
+    "The official example is a 15-minute series; only the 1-day series has been seen live."
+   ],
+   "assumptions_required": [],
+   "evidence": [
+    {
+     "claim": "Three buckets with the stated endpoint ownership, exactly one paying",
+     "label": "V",
+     "where": "EVIDENCE.md section 1: official text, retained"
+    },
+    {
+     "claim": "Index order matches bucket order",
+     "label": "V",
+     "where": "EVIDENCE.md section 2: three settlements"
+    },
+    {
+     "claim": "Index order is a rule rather than a pattern",
+     "label": "U",
+     "where": "EVIDENCE.md section 2"
+    }
+   ],
+   "family": "recurring.priceBucket",
+   "observation": "One instant, the expiry: linear interpolation between the HyperCore mark price updates immediately before and after it. Not a TWAP, not a candle close, not the oracle price.",
+   "payoffs": [
+    {
+     "pays": [
+      {
+       "pays_on": {
+        "upper": {
+         "at": "0",
+         "term": "thresholds"
+        },
+        "upper_inclusive": false
+       },
+       "primitive": "indicator"
+      }
+     ],
+     "select": {
+      "index": "0",
+      "side": "yes"
+     }
+    },
+    {
+     "pays": [
+      {
+       "pays_on": {
+        "lower": {
+         "at": "0",
+         "term": "thresholds"
+        },
+        "lower_inclusive": true
+       },
+       "primitive": "indicator"
+      }
+     ],
+     "select": {
+      "index": "0",
+      "side": "no"
+     }
+    },
+    {
+     "pays": [
+      {
+       "pays_on": {
+        "lower": {
+         "at": "0",
+         "term": "thresholds"
+        },
+        "lower_inclusive": true,
+        "upper": {
+         "at": "1",
+         "term": "thresholds"
+        },
+        "upper_inclusive": false
+       },
+       "primitive": "indicator"
+      }
+     ],
+     "select": {
+      "index": "1",
+      "side": "yes"
+     }
+    },
+    {
+     "pays": [
+      {
+       "pays_on": {
+        "upper": {
+         "at": "0",
+         "term": "thresholds"
+        },
+        "upper_inclusive": false
+       },
+       "primitive": "indicator"
+      },
+      {
+       "pays_on": {
+        "lower": {
+         "at": "1",
+         "term": "thresholds"
+        },
+        "lower_inclusive": true
+       },
+       "primitive": "indicator"
+      }
+     ],
+     "select": {
+      "index": "1",
+      "side": "no"
+     }
+    },
+    {
+     "pays": [
+      {
+       "pays_on": {
+        "lower": {
+         "at": "1",
+         "term": "thresholds"
+        },
+        "lower_inclusive": true
+       },
+       "primitive": "indicator"
+      }
+     ],
+     "select": {
+      "index": "2",
+      "side": "yes"
+     }
+    },
+    {
+     "pays": [
+      {
+       "pays_on": {
+        "upper": {
+         "at": "1",
+         "term": "thresholds"
+        },
+        "upper_inclusive": false
+       },
+       "primitive": "indicator"
+      }
+     ],
+     "select": {
+      "index": "2",
+      "side": "no"
+     }
+    }
+   ],
+   "reference": "hl:perp:{underlying}:mark-interp",
+   "review": {
+    "digest": "b1c92fc2b95b14d835c250e2261007d641235370f79fb6b5a99dea74ff1b237f",
+    "drafted_by": "model",
+    "reviewed_by": "fixture",
+    "reviewed_on": "2026-09-19",
+    "state": "reviewed"
+   },
+   "schema_version": "1",
+   "settlement": "protocol",
+   "sources": [
+    {
+     "quotes": [
+      "There are three price buckets depending on the target price at the time of settlement: `< P1`, `[P1, P2)` and `≥ P2.`",
+      "Exactly one of the 3 outcomes settles to 1, and the others settle to 0.",
+      "The target price computation uses the same interpolation as binary markets described above."
+     ],
+     "retained_at": "research/2026-09-18-decisions/contract-specifications.md at commit 085ccfb",
+     "retrieved": "2026-09-18",
+     "sha256": "59ef08be4b7e3d7cc0f4245abd4f133d743a983820df5b2ef0ce1ceb6af50ea3",
+     "title": "Hyperliquid docs: Contract specifications, Recurring outcomes",
+     "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/contract-specifications"
+    },
+    {
+     "quotes": [
+      "Settlement automatically converts either Yes to `settleFraction` quote tokens and No to `1 - settleFraction` quote tokens."
+     ],
+     "retained_at": "research/2026-09-18-decisions/hip-4-outcome-markets.md at commit 085ccfb",
+     "retrieved": "2026-09-18",
+     "sha256": "087859f228fc6d64d8cec8d43d3e544d054c144f4343cf4cf1cba58e44f64fa6",
+     "title": "Hyperliquid docs: HIP-4 Outcome markets, Mechanics",
+     "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/hyperliquid-improvement-proposals-hips/hip-4-outcome-markets"
+    }
+   ],
+   "status": "refused",
+   "terms": [
+    {
+     "name": "underlying",
+     "type": "text"
+    },
+    {
+     "name": "thresholds",
+     "type": "numbers"
+    },
+    {
+     "name": "index",
+     "type": "index"
+    },
+    {
+     "name": "expiry",
+     "type": "time"
+    },
+    {
+     "name": "period",
+     "type": "text"
+    }
+   ],
+   "version": "1"
+  }
+ },
+ "schema_version": "1",
+ "why": "a family the registry refuses: its reading is not established"
+}
