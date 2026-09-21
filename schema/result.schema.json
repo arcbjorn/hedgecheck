@@ -488,6 +488,14 @@
           },
           "reason_code": {
             "$ref": "defs.schema.json#/$defs/code"
+          },
+          "with": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "defs.schema.json#/$defs/leg_id"
+            },
+            "description": "The OTHER legs reduced together with `leg`, when a rule acts on a group. Mirrors the field in ir.schema.json, because a checker compares the result's reductions with the ones it re-derives, field for field."
           }
         },
         "additionalProperties": false
