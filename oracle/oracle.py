@@ -462,18 +462,47 @@ def evaluate(lowered):
     premium = sum((leg_cost(leg) for leg in lowered["legs"]), F(0))
     other = num(lowered["other_costs"])
     reductions = lowered.get("reductions", [])
-    zeroed = {reduction["leg"] for reduction in reductions}
+
+    # A BAND REDUCTION IS BANDED, NOT ZEROED.
+    #
+    # Every other reduction worst-cases its leg to zero. A declared basis bound says more
+    # than that: the group is observed on another series that cannot move more than `b`
+    # away, so its worth is the infimum of the group's SUMMED payoff over [S - b, S + b].
+    # Zeroing it would throw the bound away and make a declared bound worth exactly as
+    # much as none -- which it was until this rule existed.
+    #
+    # GROUPED. The infimum of a sum is not the sum of infima: two legs whose payoffs
+    # cancel have a flat sum no basis move can hurt, while each alone is stepped.
+    banded, band_parts = set(), []
+    for reduction in reductions:
+        if reduction["rule"] != "basis_band":
+            continue
+        members = [reduction["leg"]] + list(reduction.get("with", []))
+        banded.update(members)
+        group = [_leg(leg) for leg in lowered["legs"] if leg["id"] in set(members)]
+        band_parts.append(band_infimum(total(group), num(reduction["bound"])))
+
+    zeroed = {reduction["leg"] for reduction in reductions} - banded
     loose_legs = {reduction["leg"] for reduction in reductions if not reduction["tight"]}
 
     # A reduced leg is valued at zero in the lower profile. Its premium still counts:
     # it was paid whatever the leg turns out to be worth.
     costs = cash(-premium - other)
-    kept = [leg for leg in lowered["legs"] if leg["id"] not in zeroed]
-    pnl = total([exposure] + [_leg(leg) for leg in kept] + [costs])
+    kept = [leg for leg in lowered["legs"] if leg["id"] not in zeroed and leg["id"] not in banded]
+    pnl = total([exposure] + [_leg(leg) for leg in kept] + band_parts + [costs])
     # A long fully collateralized token is worth at most its size (EVIDENCE section 1),
     # so the upper profile credits every reduced leg with its full size.
     ceiling = sum((num(leg["size"]) for leg in lowered["legs"] if leg["id"] in zeroed), F(0))
     upper_pnl = (pnl + cash(ceiling)) if ceiling else pnl
+    # A BANDED group's upper bound is its UNBANDED payoff, not its size.
+    #
+    # The band already gives a real lower bound, so crediting the full size here would be
+    # looser than what is known. The best the group can be worth is what it pays when the
+    # basis does not move at all -- so the correction is the unbanded payoff less the
+    # banded one, which is non-negative everywhere by construction.
+    if banded:
+        upper_parts = [_leg(leg) for leg in lowered["legs"] if leg["id"] in banded]
+        upper_pnl = total([upper_pnl] + upper_parts + [-part for part in band_parts])
 
     failing, undecided, codes = [], [], []
     for clause in lowered["objective"]:
