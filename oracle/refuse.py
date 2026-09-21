@@ -348,6 +348,84 @@ def _check_size_windows(bundle, lowered):
 # --------------------------------------------------------------------------- entry point
 
 
+def _check_envelope(bundle, lowered):
+    """The order envelope, against a walk of the book bytes done here.
+
+    `lowered` is what this refuser re-derived from the proposal, so the levels and the
+    size come from the evidence rather than from the result being checked. The coin
+    comes from the proposal, because the lowered form does not carry an instance id.
+
+    The envelope is what turns a bound into an order, so it is checked after the
+    verdict it depends on: an envelope on a result whose verdict is already wrong
+    should be reported as the wrong verdict.
+    """
+    result = bundle["result"]
+    envelope = result.get("order_envelope")
+    present = envelope is not None
+    if present != (result.get("execution_readiness") == "envelope_issued"):
+        _refuse("ENVELOPE_MISMATCH",
+                f"execution_readiness is {result.get('execution_readiness')!r} "
+                f"and an envelope is {'present' if present else 'absent'}",
+                "execution_readiness")
+    if not present:
+        return
+
+    if result["model_result"] != "passes":
+        _refuse("ENVELOPE_MISMATCH", f"an envelope on a {result['model_result']}", "order_envelope")
+    if len(lowered["legs"]) != 1:
+        _refuse("ENVELOPE_MISMATCH",
+                f"the proposal has {len(lowered['legs'])} legs; an envelope describes one order",
+                "order_envelope")
+    leg, priced = bundle["proposal"]["legs"][0], lowered["legs"][0]
+    if priced["premium"]["kind"] != "walked":
+        _refuse("ENVELOPE_MISMATCH", "the leg is not priced on a book", "order_envelope")
+
+    if envelope["coin"] != leg["instance"]["coin"]:
+        _refuse("ENVELOPE_MISMATCH",
+                f"the envelope names {envelope['coin']}, the proposal names {leg['instance']['coin']}",
+                "order_envelope.coin")
+    if envelope["side"] != "buy":
+        _refuse("ENVELOPE_MISMATCH", f"side is {envelope['side']!r}", "order_envelope.side")
+    if envelope["time_in_force"] != "Ioc":
+        _refuse("ENVELOPE_MISMATCH", f"time in force is {envelope['time_in_force']!r}",
+                "order_envelope.time_in_force")
+
+    size = exact.parse(priced["size"])
+    if exact.parse(envelope["size"]) != size:
+        _refuse("ENVELOPE_MISMATCH",
+                f"the envelope buys {envelope['size']}, the proposal asks for {priced['size']}",
+                "order_envelope.size")
+
+    remaining, cost, limit = size, exact.parse("0"), None
+    for price_text, available in priced["premium"]["levels"]:
+        if remaining == 0:
+            break
+        fill = min(remaining, exact.parse(available))
+        if fill > 0:
+            limit = price_text
+        cost += fill * exact.parse(price_text)
+        remaining -= fill
+    if remaining != 0 or limit is None:
+        _refuse("ENVELOPE_MISMATCH", "the depth does not fill the size", "order_envelope")
+    if exact.parse(envelope["limit_price"]) != exact.parse(limit):
+        _refuse("ENVELOPE_MISMATCH",
+                f"the envelope says {envelope['limit_price']}, the walk ends in {limit}",
+                "order_envelope.limit_price")
+    if exact.parse(envelope["max_cost"]) != cost:
+        _refuse("ENVELOPE_MISMATCH",
+                f"the envelope says {envelope['max_cost']}, the walk costs {exact.format(cost)}",
+                "order_envelope.max_cost")
+
+    stated = result.get("input_digest")
+    if not stated:
+        _refuse("ENVELOPE_MISMATCH",
+                "an envelope was issued for a result that does not name its input digest", "input_digest")
+    if envelope["input_digest"] != stated:
+        _refuse("ENVELOPE_MISMATCH",
+                f"the envelope belongs to {envelope['input_digest'][:12]}, the result is {stated[:12]}",
+                "order_envelope.input_digest")
+
+
 def refuse(bundle):
     """accept, or the first refusal class found. Ordered cheapest and most fundamental first."""
     try:
@@ -366,6 +444,7 @@ def refuse(bundle):
         _check_intervals(bundle, result)
         _check_witnesses(bundle, lowered)
         _check_size_windows(bundle, lowered)
+        _check_envelope(bundle, lowered)
     except Refusal as refusal:
         out = {"accepted": False, "refusal": {"class": refusal.klass, "detail": refusal.detail}}
         if refusal.at:
