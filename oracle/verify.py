@@ -585,6 +585,10 @@ def bundles():
 
     directory = PROJECT / "fixtures" / "bundles"
     found = sorted(path for path in directory.iterdir() if path.is_dir())
+
+    def manifest_expects(path):
+        return canon.loads((path / "manifest.json").read_bytes())["expects"]
+
     check(found, "bundles: the fixtures exist")
     accepted, refused = 0, {}
     for path in found:
@@ -600,8 +604,16 @@ def bundles():
         else:
             refused[manifest["expects"]] = refused.get(manifest["expects"], 0) + 1
             check("corruption" in manifest, f"bundles: {path.name} is refused and documents its one change")
-    check(accepted == 2, "bundles: two good bundles, one passing and one failing")
-    check(len(refused) == len(found) - accepted, "bundles: each corruption has a distinct refusal class")
+    check(accepted == 3, "bundles: three good bundles -- passing, failing, and passing with its envelope")
+    # Every class the fixtures claim to exercise is exercised, and every corruption is
+    # refused. These were one check while every corruption had a class to itself; the
+    # envelope corruptions are four ways to be wrong about one thing, so counting
+    # classes and counting corruptions became two different claims. Both are asserted:
+    # collapsing them would have let a whole class quietly stop being covered.
+    check(sum(refused.values()) == len(found) - accepted, "bundles: every corruption is refused")
+    check(len(refused) >= 12, f"bundles: only {len(refused)} refusal classes are exercised")
+    expected_classes = {manifest_expects(path) for path in found} - {"accept"}
+    check(set(refused) == expected_classes, "bundles: every class a manifest names is the class the refuser gave")
 
     # The kernel-level corruption, which is not a bundle: a band reduction that shifts
     # the middle bucket instead of shrinking it. Shifting claims value below P1 that the
