@@ -70,7 +70,76 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/checker.js", s.checkerModule)
 	mux.HandleFunc("/result/", s.resultPage)
 	mux.HandleFunc("/", notFound)
-	return mux
+	return s.guard(mux)
+}
+
+// Host NAMES this service answers as. The port is not part of the rule: the bind
+// address decides the port, and a test or a second instance may use another one. What
+// matters is the name, because the name is what DNS can re-point.
+var allowedHostNames = map[string]bool{
+	"localhost": true,
+	"127.0.0.1": true,
+	"::1":       true,
+	"[::1]":     true,
+}
+
+// hostAllowed reports whether `Host` names this machine's loopback interface.
+//
+// An empty Host is refused: HTTP/1.1 requires one, and a request without it is not a
+// request a browser made.
+func hostAllowed(host string) bool {
+	if host == "" {
+		return false
+	}
+	name := host
+	// Strip a port, taking care with the bracketed IPv6 form.
+	if strings.HasPrefix(name, "[") {
+		if end := strings.LastIndex(name, "]"); end >= 0 {
+			name = name[:end+1]
+		}
+	} else if colon := strings.LastIndex(name, ":"); colon >= 0 {
+		name = name[:colon]
+	}
+	return allowedHostNames[strings.ToLower(name)]
+}
+
+// guard is what makes a loopback bind mean something.
+//
+// BINDING TO 127.0.0.1 KEEPS OTHER MACHINES OUT. It does not keep other WEB PAGES out:
+// any page the operator visits can post to this port, and the browser attaches their
+// cookies and their loopback reachability rather than the attacker's. Two checks close
+// the two ways in.
+//
+//   - HOST. A name that resolves to 127.0.0.1 today can be re-pointed by whoever owns
+//     the DNS, and the browser will still send their `Host`. Answering only for names
+//     this service chose means a rebound name gets nothing. 421 says "not me", which is
+//     exactly what happened.
+//   - CONTENT TYPE on a write. A cross-origin `fetch` needs no preflight for
+//     `text/plain`, `application/x-www-form-urlencoded` or `multipart/form-data`, so a
+//     page can post those silently. Requiring `application/json` means a write MUST be
+//     preflighted, and the preflight is refused because no CORS headers are ever sent.
+//
+// Neither is a substitute for the other: Host alone still lets a same-name page write,
+// and content type alone still lets a rebound name read.
+func (s *Server) guard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hostAllowed(r.Host) {
+			// 421 Misdirected Request: the name is not one this service answers for.
+			fail(w, http.StatusMisdirectedRequest, "wrong_host",
+				"this service answers only as localhost")
+			return
+		}
+		// A server with no store cannot answer anything, and every handler that reaches
+		// for one dereferences nil. `serve` refuses without `--store`, so this is
+		// unreachable from the CLI -- but `Handler()` is exported, and a caller that
+		// forgets deserves a 503 rather than a panic in a goroutine. Checked AFTER the
+		// host, so a stranger learns nothing about how this server was built.
+		if s.Store == nil {
+			fail(w, http.StatusServiceUnavailable, "no_store", "this server was built without a store")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // NewHTTPServer wires the handler with the timeouts a public-facing socket needs,
@@ -94,6 +163,20 @@ func (s *Server) NewHTTPServer(address string) *http.Server {
 func (s *Server) checks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	// A WRITE IS application/json, AND THAT IS A SECURITY RULE, not a formality.
+	//
+	// A cross-origin `fetch` sends `text/plain`, `application/x-www-form-urlencoded` or
+	// `multipart/form-data` with NO preflight, so any page the operator visits could
+	// drive this endpoint silently -- confirmed before this check existed: a
+	// `text/plain` post from a foreign Origin returned 200 and the check ran. Requiring
+	// JSON forces a preflight, and the preflight fails because no CORS headers are ever
+	// sent from here. Checked after the method, so a POST to a read-only path is still
+	// answered 405: the method is the primary objection.
+	if !isJSON(r.Header.Get("Content-Type")) {
+		fail(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
+			"a write is application/json, which a cross-origin page cannot send unpreflighted")
 		return
 	}
 	body, err := readBody(r)
@@ -200,7 +283,52 @@ func (s *Server) checkByDigest(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "no_result", "nothing stored under that input digest")
 		return
 	}
+
+	// THE SERVED RESULT SAYS WHICH QUESTION IT ANSWERS, and it has to be this one.
+	//
+	// A snapshot is content-addressed, so `Store.Get` re-hashes it and returns `Corrupt`
+	// on a mismatch. A result is filed under `input_digest` -- a CLAIM INSIDE the
+	// document, not a hash of it -- so nothing in the store catches a file that was
+	// swapped or mis-filed, and a result answering a DIFFERENT question was served under
+	// this digest as authentic.
+	if err := resultAnswers(encoded, digest); err != nil {
+		fail(w, http.StatusInternalServerError, "result_mismatch", err.Error())
+		return
+	}
 	writeCanonical(w, http.StatusOK, encoded)
+}
+
+// isJSON reports whether a Content-Type names JSON, ignoring parameters and case.
+// `application/json; charset=utf-8` counts; `text/plain` does not.
+func isJSON(header string) bool {
+	mediaType := strings.TrimSpace(strings.Split(header, ";")[0])
+	return strings.EqualFold(mediaType, "application/json")
+}
+
+// resultAnswers reports whether a stored result contradicts the digest it is filed
+// under.
+//
+// `input_digest` is OPTIONAL in a result: it is written during bundle assembly, and
+// `evaluate` does not produce it, so a result filed by this service carries none. The
+// check is therefore "does not contradict" rather than "states": a document that names
+// a DIFFERENT input is refused, and one that names no input is served, because the path
+// is the only claim there is.
+//
+// That is weaker than re-hashing a snapshot, and unavoidably so -- a result is filed
+// under a claim about its inputs, not under a hash of itself. What it does catch is the
+// case that matters: a file swapped for one that answers another question.
+//
+// The message names neither a path nor the stored value: a caller learns that this
+// server will not vouch for the file, and nothing about its filesystem.
+func resultAnswers(encoded []byte, digest string) error {
+	result, err := doc.ReadResult(encoded)
+	if err != nil {
+		return fmt.Errorf("the stored result under %s cannot be read back", short(digest))
+	}
+	if result.InputDigest != "" && result.InputDigest != digest {
+		return fmt.Errorf("the stored result under %s answers a different input", short(digest))
+	}
+	return nil
 }
 
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
