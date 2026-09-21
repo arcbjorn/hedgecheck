@@ -44,6 +44,19 @@ func TestPurePackagesStayPure(t *testing.T) {
 					t.Errorf("%s imports %s; pure packages compute and do nothing else", path, name)
 				}
 			}
+			// AN IMPURE PROJECT PACKAGE IS AS IMPURE AS `os`.
+			//
+			// The stdlib list above missed the likelier route: `hedgecheck/engine/store`
+			// carries no dot in its first segment and is in no banned list, so the pure
+			// kernel could import it and this test stayed green -- proven by making
+			// `pwa` import `store` and watching it pass. Purity is not "does not name
+			// os", it is "cannot reach the outside world", and an import of something
+			// that can reaches it too.
+			if inner, ok := strings.CutPrefix(name, "hedgecheck/engine/"); ok {
+				if impure[strings.Split(inner, "/")[0]] {
+					t.Errorf("%s imports %s, which is impure; purity is not transitive through an import", path, name)
+				}
+			}
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			if ident, ok := node.(*ast.Ident); ok && (ident.Name == "float32" || ident.Name == "float64") {
