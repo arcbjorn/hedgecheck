@@ -164,6 +164,46 @@ func (s *Store) ResultVersions(inputDigest string) ([]string, error) {
 	return out, nil
 }
 
+// PutBundlePart stores a proposal or lowered proposal beside the result it belongs
+// to, so a browser can fetch the whole bundle and verify it for itself.
+//
+// A result alone cannot be checked: a checker that re-derives nothing is reading the
+// engine's own answer back. The proposal is what the answer is derived FROM, and the
+// lowered proposal is the intermediate the result's ir_digest covers.
+func (s *Store) PutBundlePart(inputDigest, part string, document []byte) error {
+	path, err := s.bundlePath(inputDigest, part)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return writeAtomic(path, document)
+}
+
+// BundlePart returns a stored proposal or lowered proposal.
+func (s *Store) BundlePart(inputDigest, part string) ([]byte, error) {
+	path, err := s.bundlePath(inputDigest, part)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+}
+
+// bundlePart is the closed set of parts a bundle carries beside its result. Closed,
+// so a caller cannot invent a file name that reaches a path.
+var bundleParts = map[string]bool{"proposal": true, "lowered": true}
+
+func (s *Store) bundlePath(inputDigest, part string) (string, error) {
+	if !digestPattern.MatchString(inputDigest) {
+		return "", fmt.Errorf("store: %q is not a SHA-256", inputDigest)
+	}
+	if !bundleParts[part] {
+		return "", fmt.Errorf("store: %q is not a bundle part", part)
+	}
+	return filepath.Join(s.Root, "results", inputDigest, part+".json"), nil
+}
+
 // PutRun stores a run document under its input digest.
 func (s *Store) PutRun(inputDigest string, document []byte) error {
 	if !digestPattern.MatchString(inputDigest) {
