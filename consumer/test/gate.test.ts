@@ -18,6 +18,7 @@ import { schemas, type Schemas } from "../../checker/src/doc.ts";
 import { parseVenue, type VenueValue } from "../../checker/src/venue.ts";
 import type { Bundle } from "../../checker/src/verify.ts";
 import { type Capture, gate, type OrderEnvelope, type Place, type Policy, type Reason } from "../src/gate.ts";
+import { gateWith, type Verifier } from "../src/testing.ts";
 import { code } from "./source.ts";
 
 const here = (path: string) => new URL(path, import.meta.url);
@@ -96,6 +97,21 @@ function withResult(bundle: Bundle, change: (result: Record<string, unknown>) =>
   const result = JSON.parse(new TextDecoder().decode(bundle.result)) as Record<string, unknown>;
   change(result);
   return { ...bundle, result: new TextEncoder().encode(JSON.stringify(result)) };
+}
+
+/**
+ * A checker that accepts, handing back the result document the bundle actually holds.
+ *
+ * `verify` returns the value it established, so a stub must too -- otherwise the gate
+ * reads a result nobody supplied. Parsed with the strict canonical parser, the same one
+ * the real checker uses, so these rows exercise the gate's own conditions rather than a
+ * shape only this file can produce.
+ */
+function acceptsWith(bundle: Bundle): Verifier {
+  return () => Promise.resolve({
+    accepted: true as const,
+    result: parse(bundle.result) as Record<string, Value>,
+  });
 }
 
 // The capture instant and the policy.
@@ -204,9 +220,10 @@ test("the table: every refusal makes zero downstream calls", async () => {
         const bundle = withResult(good.bundle, (result) => {
           result["model_result"] = "fails";
         });
-        const decision = await gate(
+        const decision = await gateWith(
+          acceptsWith(bundle),
           bundle,
-          { ...base, verifier: () => Promise.resolve({ accepted: true as const }) },
+          base,
           CAPTURE,
           place,
         );
@@ -220,9 +237,10 @@ test("the table: every refusal makes zero downstream calls", async () => {
         const bundle = withResult(good.bundle, (result) => {
           result["model_result"] = "needs_review";
         });
-        const decision = await gate(
+        const decision = await gateWith(
+          acceptsWith(bundle),
           bundle,
-          { ...base, verifier: () => Promise.resolve({ accepted: true as const }) },
+          base,
           CAPTURE,
           place,
         );
@@ -286,9 +304,10 @@ test("the table: every refusal makes zero downstream calls", async () => {
         const bundle = withResult(good.bundle, (result) => {
           (result["order_envelope"] as Record<string, unknown>)["input_digest"] = "f".repeat(64);
         });
-        const decision = await gate(
+        const decision = await gateWith(
+          acceptsWith(bundle),
           bundle,
-          { ...base, verifier: () => Promise.resolve({ accepted: true as const }) },
+          base,
           CAPTURE,
           place,
         );
@@ -303,9 +322,10 @@ test("the table: every refusal makes zero downstream calls", async () => {
         const bundle = withResult(good.bundle, (result) => {
           delete result["input_digest"];
         });
-        const decision = await gate(
+        const decision = await gateWith(
+          acceptsWith(bundle),
           bundle,
-          { ...base, verifier: () => Promise.resolve({ accepted: true as const }) },
+          base,
           CAPTURE,
           place,
         );
@@ -331,9 +351,10 @@ test("the table: every refusal makes zero downstream calls", async () => {
         const bundle = withResult(good.bundle, (result) => {
           delete result["order_envelope"];
         });
-        const decision = await gate(
+        const decision = await gateWith(
+          acceptsWith(bundle),
           bundle,
-          { ...base, verifier: () => Promise.resolve({ accepted: true as const }) },
+          base,
           CAPTURE,
           place,
         );
@@ -362,9 +383,10 @@ test("the table: every refusal makes zero downstream calls", async () => {
         const bundle = withResult(good.bundle, (result) => {
           delete (result["order_envelope"] as Record<string, unknown>)["limit_price"];
         });
-        const decision = await gate(
+        const decision = await gateWith(
+          acceptsWith(bundle),
           bundle,
-          { ...base, verifier: () => Promise.resolve({ accepted: true as const }) },
+          base,
           CAPTURE,
           place,
         );
@@ -387,9 +409,10 @@ test("the table: every refusal makes zero downstream calls", async () => {
       name: `a result that parses to ${text}`,
       run: async (place: Place) => {
         const bundle = { ...good.bundle, result: new TextEncoder().encode(text) };
-        const decision = await gate(
+        const decision = await gateWith(
+          (async () => ({ accepted: true, result: null })) as unknown as Verifier,
           bundle,
-          { ...base, verifier: async () => ({ accepted: true }) as never },
+          base,
           CAPTURE,
           place,
         );
@@ -405,9 +428,10 @@ test("the table: every refusal makes zero downstream calls", async () => {
       // correctly and this row proving nothing. So the throwing checker is injected.
       name: "a checker that throws",
       run: async (place) => {
-        const decision = await gate(
+        const decision = await gateWith(
+          () => Promise.reject(new Error("the checker fell over")),
           good.bundle,
-          { ...base, verifier: () => Promise.reject(new Error("the checker fell over")) },
+          base,
           CAPTURE,
           place,
         );
@@ -419,14 +443,12 @@ test("the table: every refusal makes zero downstream calls", async () => {
       // await: a function that never returns a promise at all.
       name: "a checker that throws before it returns a promise",
       run: async (place) => {
-        const decision = await gate(
-          good.bundle,
-          {
-            ...base,
-            verifier: () => {
-              throw new Error("the checker fell over before starting");
-            },
+        const decision = await gateWith(
+          () => {
+            throw new Error("the checker fell over before starting");
           },
+          good.bundle,
+          base,
           CAPTURE,
           place,
         );
@@ -458,9 +480,10 @@ test("the table: every refusal makes zero downstream calls", async () => {
 test("a checker that throws is CHECKER_THREW, not CHECKER_REFUSED", async () => {
   const good = loadBundle("good-envelope");
   const recorder = new Recorder();
-  const decision = await gate(
+  const decision = await gateWith(
+    () => Promise.reject(new Error("the checker fell over")),
     good.bundle,
-    { ...policy(), verifier: () => Promise.reject(new Error("the checker fell over")) },
+    policy(),
     CAPTURE,
     recorder.place,
   );
@@ -596,6 +619,28 @@ test("a policy that is not bigints refuses, and places nothing", async () => {
   }
 });
 
+// THE BRAND COMMENT STAYS TRUE.
+//
+// It claims two things a future edit could quietly falsify: that nothing reads `.brand`
+// at runtime, and that it is constructed after `place()` returns. If either changes, the
+// comment becomes a false claim in the file that authorises orders -- which is what it
+// was before the audit -- so both are asserted rather than trusted.
+test("the brand is advisory: nothing reads it, and it is built after place returns", () => {
+  const source = code(here("../src/gate.ts"));
+
+  // Read nowhere. The declaration and the single construction are the only mentions.
+  const mentions = source.match(/\bbrand\b/g) ?? [];
+  assert.equal(mentions.length, 2, `brand appears ${mentions.length} times in code, want 2`);
+  assert.match(source, /readonly brand: typeof checked;/, "the brand field is gone");
+  assert.match(source, /brand: checked/, "the brand construction is gone");
+
+  // Constructed AFTER the order is sent, so it could not gate one even if read.
+  const send = source.indexOf("await place(envelope)");
+  const build = source.indexOf("brand: checked");
+  assert.ok(send > 0 && build > 0, "the call site or the construction moved");
+  assert.ok(build > send, "the brand is now built before place() returns; the comment is stale");
+});
+
 /** The gate never reads a clock: a policy is the only source of "now". */
 test("the gate reads no clock", () => {
   const source = code(here("../src/gate.ts"));
@@ -625,7 +670,7 @@ test("the gate cannot reach a sender of its own", () => {
   const names = readdirSync(here("../src/")).filter((name) => name.endsWith(".ts")).sort();
   assert.deepEqual(
     names,
-    ["gate.ts", "place.ts", "recheck.ts", "run.ts"],
+    ["gate.ts", "place.ts", "recheck.ts", "run.ts", "testing.ts"],
     "consumer/src holds an unexpected module",
   );
   // Nor does the gate reach the re-check: a gate that could re-propose after a fill
@@ -648,7 +693,15 @@ test("only run.ts can reach a venue, and only through the gate", () => {
   // the old regex was anchored to one line and three leading keywords, so the same
   // call spread across lines -- ordinary formatting, or a `prettier` pass -- slipped
   // past it while placing an order on a refusal. A count is spelling-independent.
+  // THE INJECTABLE GATE IS OUT OF RUN.TS'S REACH.
+  //
+  // `gateWith` takes the checker as a parameter, so a caller holding it can supply one
+  // that always accepts. It lived in `Policy.verifier` -- in the signature run.ts
+  // itself calls -- and now lives in `testing.ts`, which the production path must not
+  // import. Nor may it reach `gateWith` by any other spelling.
   const run = code(here("../src/run.ts"));
+  assert.doesNotMatch(run, /["']\.\/testing\.ts["']/, "run.ts imports the test-only gate");
+  assert.doesNotMatch(run, /\bgateWith\b/, "run.ts names the injectable gate");
   assert.match(run, /\bgate\s*\(/, "run.ts does not call the gate");
   const calls = run.match(/\bplace\s*\(/g) ?? [];
   assert.equal(calls.length, 1, `run.ts calls place at ${calls.length} sites, not 1`);
