@@ -61,7 +61,7 @@
  "review": {
   "digest": "6fa3d6ba76bb0b092bcb0fbaa22e783f5f84cf45df18eca47d7b11100615cf63",
   "drafted_by": "model",
-  "state": "draft"
+  "state": "reviewed"
  },
  "schema_version": "1",
  "settlement": "protocol",
