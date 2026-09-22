@@ -211,6 +211,39 @@ so the ambiguous state is the common case, not the exotic one.
 `schema_version` stays `"1"` on both: the `defs` change is additive, and a new schema
 carries its own version from the start.
 
+## Forced by synthesis (T5)
+
+Several instruments at once, and an answer that must be checkable without the solver.
+
+| Change | Forcing case |
+|---|---|
+| **`synthesis.schema.json` is added**, the eleventh schema. It carries the question — objective, domain, base holding, candidate instruments with their prices, lot — and the answer: sizes, a Farkas certificate, or `rounding_failed`. | A synthesis answers a different question from a result. A result asks "do THESE terms, costs and holdings satisfy my objective", about a proposal that already names its legs and sizes, and its `size_windows` is the one-leg special case of sizing. A synthesis asks "what sizes WOULD satisfy it, over these instruments": the input is a set of candidates, and the output is sizes that do not exist yet. Different input, different output, different question. |
+
+**Why not a field on `result`.** Two reasons, and the second is the binding one. First, a
+result is about a proposal, and a synthesis has no proposal until its answer exists.
+Second, `result.size_windows[].certificate` pins `weights` to **exactly two** items —
+the hand-derived two-line certificate for one leg at one flat price. A synthesis
+certificate has one weight per constraint row it uses, which is neither two nor bounded
+by two, so carrying it there would mean changing a frozen field in place. That needs a new
+`schema_version` and every one of the 837 documents pinning `"1"` regenerated, for a claim
+the existing field was never about.
+
+**The certificate names its sites, and carries only its non-zero weights.** A bare weight
+vector would be ordered by the constraint rows, which makes row ORDER an implicit contract
+between three implementations — unchecked, and the kind that drifts. Naming each site lets
+a checker look it up among its own rows: order stops mattering, and a site the checker
+cannot find is a refusal rather than a silent misalignment against the wrong constraint.
+Sparse because a Farkas certificate is sparse — PLAN §3's example uses **3 of 7** rows —
+and because it is then readable: "the floor at 60,000 weighted 0.5 against the strike at
+90,000" is a sentence someone can check by hand.
+
+**No solver state.** No tableau, no pivot order, no basis. A certificate that needed the
+search replayed would not be a certificate: the feasible case is checked by one evaluation
+of the rows at the reported sizes, and the infeasible case by one multiplication.
+
+`schema_version` stays `"1"`: a new schema carries its own version from the start, and no
+existing schema changed.
+
 ## Not changed, and why
 
 - **`schema_version` stays `"1"`.** Every change above is additive: no field was removed, no field became required, no existing value became invalid. A document valid at `062a245` is valid now.
