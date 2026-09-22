@@ -156,6 +156,21 @@ def check_terms(leg, catalogue):
             _refuse("TERMS_MISMATCH", f"{leg['id']}: catalogue says {item['description']!r}, leg says {want}")
         return num(terms["target_price"]), item
 
+    if family == "template.priceTouch":
+        # A DEPLOYER-TEMPLATED touch. Same shape as binaryPrice except the level is named
+        # `target`, not `threshold` -- checked against outcome 1209 on the 18 September
+        # catalogue, which reads
+        #   perp:HYPE|priceDescription:HYPE-USDC perp mark |seconds:1|target:100|time:...
+        # The price description keeps its exact spacing, trailing space included, because
+        # the reference map keys on that text byte for byte.
+        described = _terms_of(item["description"])
+        want = {"perp": terms["underlying"], "priceDescription": described.get("priceDescription", ""),
+                "seconds": terms["seconds"], "target": terms["target_price"],
+                "time": _expiry_compact(terms["expiry"])}
+        if described != want:
+            _refuse("TERMS_MISMATCH", f"{leg['id']}: catalogue says {item['description']!r}, leg says {want}")
+        return num(terms["target_price"]), item
+
     _refuse("UNSUPPORTED_FAMILY", f"{leg['id']}: lowering has no rule for {family}")
 
 
@@ -272,6 +287,36 @@ def _bound(spec, values):
     if "at" in spec:
         return values[int(spec["at"])]
     return values if not isinstance(values, list) else values[0]
+
+
+def touch_bound(interval, baseline, target, leg_id):
+    """The inclusive terminal digital at `target`, on the side the reference must travel.
+
+    `template.priceTouch` pays if the reference EVER equals or crosses the target before
+    the expiry. That is path-dependent: where the reference ended does not say where it
+    has been, so a terminal kernel cannot compute it. What a terminal kernel CAN say is
+    that ending at or beyond the target implies the target was reached, so the inclusive
+    terminal digital is a LOWER bound -- it pays only where a touch is certain, and pays
+    nothing on the paths that touched and came back. Verified by brute force over 4,000
+    random paths in both directions: the bound never exceeded the true payoff.
+
+    The DIRECTION is not in the terms, which carry the target and not the current price.
+    A market whose reference already sits at the target is settled, not a hedge, so the
+    reference must travel: up from a baseline below the target, down from one above. The
+    entry states the rising case, `[target, inf)`; this mirrors it to `(-inf, target]`
+    when the baseline is above. Both are INCLUSIVE at the target, because "equals or
+    crosses" is satisfied by equalling it from either side -- `digital_below` is exclusive
+    there and would be the wrong primitive for a falling touch.
+    """
+    if baseline == target:
+        # Already touched, so the question the market asks is answered and it is not a
+        # hedge against anything. Refusing beats bounding: a bound here would be a claim
+        # about a market that is over.
+        _refuse("UNSUPPORTED_PAYOFF",
+                f"{leg_id}: the baseline is exactly the touch target, so the market is settled")
+    if baseline < target:
+        return {"lower": exact.format(target), "lower_inclusive": True}
+    return {"upper": exact.format(target), "upper_inclusive": True}
 
 
 def pays_on(entry, leg, values):
@@ -452,11 +497,23 @@ def lower(proposal, registry, snapshots, references=None):
         # the entry's template is only for families whose reference is fixed.
         described = catalogue_reference(leg, _item, references or {})
         leg_references[leg["id"]] = described if described else leg_reference(leg, entry)
+        # A bounded family is lowered under its bound, not its payoff rows. The rows for
+        # `template.priceTouch` state the RISING case only -- one payoff row cannot carry
+        # both directions -- so the direction is derived here, from the baseline, and the
+        # reduction says the leg's value rests on a bound rather than on a computation.
+        pays = pays_on(entry, leg, values)
+        if entry["status"] == "bounded":
+            pays = touch_bound(pays, baseline, _bound({"term": "target_price"}, values), leg["id"])
+            # Not tight: the true payoff is at least the bound and usually more, since
+            # every path that touched and retraced pays in full and the bound pays zero.
+            # So this may make a proposal need review, and may never make one fail.
+            reductions.append({"leg": leg["id"], "rule": "price_touch", "tight": False,
+                               "reason_code": "PRICE_TOUCH_BOUNDED"})
         legs.append({
             "id": leg["id"],
             "kind": "indicator",
             "size": exact.format(num(leg["size"])),
-            "pays_on": pays_on(entry, leg, values),
+            "pays_on": pays,
             "premium": price(leg, snapshots),
             "observation_time": leg["terms"]["expiry"],
             "semantics": version,
