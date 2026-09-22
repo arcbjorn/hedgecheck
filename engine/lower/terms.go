@@ -161,6 +161,33 @@ func checkTerms(leg doc.ProposalLeg, catalogue any) ([]exact.Q, error) {
 		}
 		return out, nil
 	}
+	if leg.Family == "template.binaryPrice" {
+		// A DEPLOYER-TEMPLATED binary. Every field the catalogue carries is checked, the
+		// price description included: the reference map keys on that exact text, so a leg
+		// that disagreed about it would be mapped to a series its instance does not name.
+		described, err := termsOf(description)
+		if err != nil {
+			return nil, err
+		}
+		expiry, err := expiryCompact(text(leg.Terms["expiry"]))
+		if err != nil {
+			return nil, err
+		}
+		want := map[string]string{
+			"perp": text(leg.Terms["underlying"]), "priceDescription": described["priceDescription"],
+			"seconds": text(leg.Terms["seconds"]), "threshold": text(leg.Terms["target_price"]),
+			"time": expiry,
+		}
+		if !sameTerms(described, want) {
+			return nil, refuse("TERMS_MISMATCH",
+				"%s: catalogue says %q, leg says %v", leg.ID, description, want)
+		}
+		value, err := exact.ParseQ(text(leg.Terms["target_price"]))
+		if err != nil {
+			return nil, refuse("TERMS_MISMATCH", "%s: the threshold is not a number", leg.ID)
+		}
+		return []exact.Q{value}, nil
+	}
 	return nil, refuse("UNSUPPORTED_FAMILY", "%s: lowering has no rule for %s", leg.ID, leg.Family)
 }
 
