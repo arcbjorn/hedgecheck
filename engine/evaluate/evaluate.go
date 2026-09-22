@@ -44,8 +44,54 @@ func Evaluate(ir doc.IR) (doc.Result, error) {
 	}
 
 	parts := []pwa.Fn{exposure, pwa.Cash(premium.Add(other).Neg())}
+
+	// A BAND REDUCTION IS BANDED, NOT ZEROED.
+	//
+	// Every other reduction worst-cases its leg to zero. A declared basis bound says more:
+	// the group is observed on another series that cannot move more than `b` away, so it is
+	// worth the infimum of its SUMMED payoff over [S-b, S+b]. Zeroing it would discard the
+	// bound and make a declared bound worth exactly as much as none.
+	//
+	// GROUPED. The infimum of a sum is not the sum of infima: two legs whose payoffs cancel
+	// have a flat sum no basis move can hurt, while each alone is stepped.
+	banded := map[string]bool{}
+	var bandParts, unbandedParts []pwa.Fn
+	for _, reduction := range ir.Reductions {
+		if reduction.Rule != "basis_band" || !reduction.HasBound() {
+			continue
+		}
+		members := map[string]bool{reduction.Leg: true}
+		for _, other := range reduction.With {
+			members[other] = true
+		}
+		var group []pwa.Fn
+		for _, leg := range ir.Legs {
+			if !members[leg.ID] {
+				continue
+			}
+			banded[leg.ID] = true
+			fn, err := legFn(leg)
+			if err != nil {
+				return doc.Result{}, err
+			}
+			group = append(group, fn)
+		}
+		eroded, err := pwa.Sum(group...).BandInfimum(reduction.Bound)
+		if err != nil {
+			return doc.Result{}, err
+		}
+		bandParts = append(bandParts, eroded)
+		// The best a banded group can be worth is its UNBANDED payoff, not its size, so the
+		// upper profile takes the pieces themselves.
+		unbandedParts = append(unbandedParts, group...)
+	}
+	parts = append(parts, bandParts...)
+
 	ceiling := exact.Zero()
 	for _, leg := range ir.Legs {
+		if banded[leg.ID] {
+			continue
+		}
 		if zeroed[leg.ID] {
 			// A long fully collateralized token is worth at most its size, so the upper
 			// profile credits a reduced leg with exactly that.
@@ -62,6 +108,15 @@ func Evaluate(ir doc.IR) (doc.Result, error) {
 	upperPnl := pnl
 	if ceiling.Sign() != 0 {
 		upperPnl = pnl.Add(pwa.Cash(ceiling))
+	}
+	if len(unbandedParts) > 0 {
+		// Add the unbanded payoff and remove the banded one, so the upper profile is the
+		// group at its best rather than at its worst.
+		upperParts := append([]pwa.Fn{upperPnl}, unbandedParts...)
+		for _, part := range bandParts {
+			upperParts = append(upperParts, part.Neg())
+		}
+		upperPnl = pwa.Sum(upperParts...)
 	}
 
 	failing, undecided, codes := []doc.FailingInterval{}, []doc.FailingInterval{}, []string{}
@@ -174,7 +229,17 @@ func Evaluate(ir doc.IR) (doc.Result, error) {
 		result.SetReductions(ir.Reductions)
 		result.SetUpperProfile(pieces(upperPnl.Profile(lower, upper)))
 	}
-	windows, err := sizeWindows(ir, zeroed, baseline, cap, lower, upper)
+	// A BANDED leg is still sized. Only a leg valued at ZERO is skipped: a band leaves a
+	// real payoff to size against, and the reference oracle sizes one too. `zeroed` here
+	// includes every reduction, so the banded ones are taken back out -- matching how the
+	// lower profile above treats them.
+	sizable := map[string]bool{}
+	for id := range zeroed {
+		if !banded[id] {
+			sizable[id] = true
+		}
+	}
+	windows, err := sizeWindows(ir, sizable, baseline, cap, lower, upper)
 	if err != nil {
 		return doc.Result{}, err
 	}
