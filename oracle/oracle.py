@@ -554,9 +554,20 @@ def synthesise(base, units, prices, floor_pnl, lower, upper, lot=1):
     status, point, certificate = _simplex(program, [F(p) for p in prices], len(units))
 
     if status == "infeasible":
-        return {"status": "infeasible",
-                "certificate": {"kind": "farkas", "weights": list(certificate),
-                                "sites": [(at, side) for at, side, _, _ in net]}}
+        # THE CERTIFICATE NAMES ITS SITES, and carries only the non-zero weights.
+        #
+        # A bare weight vector would be ordered by the rows, which makes row ORDER an
+        # implicit contract between three implementations -- unchecked, and the kind that
+        # drifts. Naming each site lets a checker look it up among its own rows: order stops
+        # mattering, and a site the checker cannot find is a refusal rather than a silent
+        # misalignment against the wrong constraint.
+        #
+        # Sparse because a Farkas certificate is sparse: PLAN section 3's is two rows out of
+        # ten. It is also then readable -- "the floor at 60,000 weighted 0.2 against the
+        # strike at 90,000 weighted 0.8" is a sentence someone can check by hand.
+        weights = [{"price": at, "side": side, "weight": weight}
+                   for (at, side, _, _), weight in zip(net, certificate) if weight != 0]
+        return {"status": "infeasible", "certificate": {"kind": "farkas", "weights": weights}}
     if status != "optimal":
         return {"status": status}
 
@@ -573,6 +584,82 @@ def synthesise(base, units, prices, floor_pnl, lower, upper, lot=1):
     return {"status": "feasible", "sizes": sizes,
             "cost": sum((F(p) * n for p, n in zip(prices, sizes)), F(0)),
             "relaxed": list(point)}
+
+
+def _base_part(part):
+    """One term of what the holder already has.
+
+    Its own reader, not `_leg`: that one decodes an IR leg, whose `kind` is part of the
+    frozen IR contract. A synthesis request describes a HOLDING, which may be linear spot
+    exposure or a position already taken, so widening `_leg` would put a shape into the IR
+    that the IR does not have.
+    """
+    kind = part["kind"]
+    if kind == "linear":
+        return linear(num(part["quantity"]), num(part["baseline"]))
+    if kind == "indicator":
+        return indicator(num(part["size"]), **_pays_on_kwargs(part["pays_on"]))
+    if kind == "cash":
+        return cash(num(part["amount"]))
+    raise ValueError(f"unsupported base part: {kind}")
+
+
+def synthesis_document(request):
+    """A synthesis answer as a document, self-contained enough to check without this code.
+
+    `request` is the question, as data (schema/synthesis.schema.json): the objective's floor
+    and domain, the `base` legs the holder already has, the `candidates` offered with their
+    prices, and the lot. The answer is appended; nothing else is.
+
+    THE DOCUMENT CARRIES THE QUESTION, not just the answer. A checker rebuilds the rows from
+    `base` and `candidates` and checks the answer against them -- which is the only way the
+    answer means anything, since a checker that re-added the numbers this solver emitted
+    would be confirming arithmetic rather than verifying a claim.
+
+    IT CARRIES NO SOLVER STATE. No tableau, no pivot order, no basis. A certificate that
+    needed the search replayed would not be a certificate; `weights` is checked by one
+    multiplication and the feasible case by one evaluation.
+    """
+    floor_pnl = num(request["objective"]["min_pnl"])
+    lower, upper = num(request["domain"]["lower"]), num(request["domain"]["upper"])
+    base = total([_base_part(part) for part in request["base"]]) if request["base"] else cash(F(0))
+    units = [indicator(F(1), **_pays_on_kwargs(candidate["pays_on"]))
+             for candidate in request["candidates"]]
+    prices = [num(candidate["price"]) for candidate in request["candidates"]]
+    lot = num(request.get("lot", "1"))
+
+    answer = synthesise(base, units, prices, floor_pnl, lower, upper, lot=lot)
+    out = {"schema_version": "1", "request": request, "status": answer["status"]}
+    if answer["status"] == "feasible":
+        out["sizes"] = [{"candidate": candidate["id"], "size": fmt(size)}
+                        for candidate, size in zip(request["candidates"], answer["sizes"])]
+        out["cost"] = fmt(answer["cost"])
+        out["relaxed"] = [fmt(value) for value in answer["relaxed"]]
+    elif answer["status"] == "infeasible":
+        out["certificate"] = {
+            "kind": "farkas",
+            "weights": [{"price": fmt(weight["price"]), "side": weight["side"],
+                         "weight": fmt(weight["weight"])}
+                        for weight in answer["certificate"]["weights"]],
+        }
+    elif answer["status"] == "rounding_failed":
+        # The relaxation was feasible and no whole-contract rounding of it met the objective.
+        # That is a statement about this SEARCH, never about existence: PLAN section 3 allows
+        # claiming infeasibility only when the relaxation itself is infeasible.
+        out["relaxed"] = [fmt(value) for value in answer["relaxed"]]
+    return out
+
+
+def _pays_on_kwargs(pays_on):
+    """A `pays_on` document as keyword arguments for `indicator`."""
+    kwargs = {}
+    if "lower" in pays_on:
+        kwargs["lower"] = num(pays_on["lower"])
+        kwargs["lower_inclusive"] = pays_on["lower_inclusive"]
+    if "upper" in pays_on:
+        kwargs["upper"] = num(pays_on["upper"])
+        kwargs["upper_inclusive"] = pays_on["upper_inclusive"]
+    return kwargs
 
 
 # ---------------------------------------------------------------- results
