@@ -179,15 +179,21 @@ def generate():
 
 def main():
     checking = "--check" in sys.argv
-    before = {}
-    if checking and OUT.exists():
-        before = {path.name: path.read_bytes() for path in sorted(OUT.glob("*.json"))}
     written, verdicts = generate()
     if checking:
-        after = {path.name: path.read_bytes() for path in sorted(OUT.glob("*.json"))}
-        if before != after:
-            changed = sorted({name for name in set(before) | set(after) if before.get(name) != after.get(name)})
-            print(f"generated IR cases are stale: {', '.join(changed[:3])}", file=sys.stderr)
+        # REPRODUCIBLE, not merely present. The corpus is derived and is not in git, so
+        # "does the checkout match?" has no answer on a fresh clone -- `before` would be
+        # empty and every file would read as stale. What still has to hold is that the
+        # generator is a function of its source alone: run it twice, get the same bytes.
+        # A corpus that moved between two runs of one unchanged program would mean an
+        # unseeded draw or a dict iteration leaking into the output, which is the failure
+        # this gate exists to catch.
+        first = {path.name: path.read_bytes() for path in sorted(OUT.glob("*.json"))}
+        generate()
+        second = {path.name: path.read_bytes() for path in sorted(OUT.glob("*.json"))}
+        if first != second:
+            moved = sorted({name for name in set(first) | set(second) if first.get(name) != second.get(name)})
+            print(f"generated IR cases are not reproducible: {', '.join(moved[:3])}", file=sys.stderr)
             return 1
     summary = ", ".join(f"{count} {verdict}" for verdict, count in sorted(verdicts.items()))
     print(f"{written} lowered proposals with the oracle's results: {summary}")
