@@ -133,7 +133,15 @@ def write_bundle(directory, parts, name, expects, corruption=None):
     (directory / "proposal.json").write_bytes(canon.canonical(parts["proposal"]) + b"\n")
     (directory / "lowered.json").write_bytes(canon.canonical(parts["lowered"]) + b"\n")
     (directory / "result.json").write_bytes(canon.canonical(parts["result"]) + b"\n")
+    # ONLY THE READINGS THIS BUNDLE USES. Copying the whole registry made every bundle
+    # carry every family -- four entries for a proposal that names one -- so a bundle's
+    # contents depended on the repository's registry rather than on its own proposal, and
+    # grew with every family added. A corruption that edits an entry still works: it edits
+    # the entry its proposal pins.
+    used = {leg["family"] for leg in parts["proposal"]["legs"]}
     for family, entry in parts["entries"].items():
+        if family not in used:
+            continue
         path = f"registry-{family}.json"
         (directory / path).write_bytes(canon.canonical(entry) + b"\n")
         files["registry"].append({"family": family, "path": path})
