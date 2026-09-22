@@ -238,6 +238,13 @@ full size, which a long fully collateralized token can never exceed
 **A loose bound can never produce a failing interval.** It is a statement about
 what has not been established, not about what the contract pays.
 
+**Every row above is conditioned on where a violation lives, so with NO violation no row
+applies and the verdict is `passes`.** A loose rule downgrades a failure to undecided; it
+does not manufacture doubt where nothing broke. The checker read this as
+`anyLoose ? "needs_review" : "passes"` on the unbroken branch and so demanded review of a
+proposal that breaches nothing — found by the first bundle with a loose reduction and no
+failing interval, a banded group whose bound is exactly what keeps it inside the cap.
+
 The band infimum is a group operation on purpose. Evaluated leg by leg it is
 sound but loose; on the group's sum it is exact. And it is not a shift: the middle
 bucket `[P1, P2)` shrinks from both sides to `[P1 + b, P2 − b)`, which
