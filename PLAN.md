@@ -532,9 +532,18 @@ order. It is the one step no agent performs, and `consumer/RUNBOOK.md` is writte
 human to follow with a key in their environment. Two things about it are worth stating
 where the gate is, not only in the runbook:
 
-- **It cannot be run today, and the reason is sharper than "no liquidity".** Testnet has
-  no expiry carrying both a binary and a bucket, so no testnet proposal can be built at
-  all — `check --live --network testnet` refuses and says so. Meanwhile every bundle in
+- **It cannot be run today, and the binding reason is liquidity after all.** Corrected
+  22 Sep. What was written here — "no expiry carrying both a binary and a bucket" — is true
+  but was the wrong blocker, because **a bucket is not required.** Testnet carries no price
+  bucket of any kind (the only `*Bucket` outcomes are `policyRateBucket`, on Fed rates), but
+  it does carry **strike ladders of binaries at one expiry**: `BTC` at `20260921-1200` has
+  three at 81,100 / 81,500 / 81,900, same 90-second TWAP, same `priceDescription`; both
+  `xyz:AAPL` and `xyz:XYZ100` at `20260921-1900` have five each. A long position plus YES at
+  one strike and NO at another is a hedge this project verifies, and it needs no bucket. So
+  the market SHAPE exists on testnet routinely. What does not exist is depth: both retained
+  testnet books are empty, 0 bids and 0 asks, and a hedge priced by walking displayed asks
+  refuses with `INSUFFICIENT_DEPTH` — correctly. **The blocker is liquidity, not listing.**
+  Meanwhile every bundle in
   the repository is built from MAINNET books and carries coin `#39710`, asset id
   `100,039,710`; testnet's outcomes are 10217–20497, a disjoint range. **Aiming an
   existing bundle at testnet would sign an order for an instrument that does not exist
