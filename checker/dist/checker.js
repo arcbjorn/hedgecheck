@@ -979,6 +979,34 @@ function touches(a, b) {
   if (a.upperInclusive && b.lowerInclusive) return false;
   return true;
 }
+function infimum(f, lower, upper) {
+  let best = null;
+  const offer = (value, attained, at2) => {
+    if (best === null || lt(value, best.value) || equals(value, best.value) && attained && !best.attained) {
+      best = {
+        value,
+        attained,
+        at: at2
+      };
+    }
+  };
+  for (const atom of window(f, lower, upper)) {
+    if (equals(atom.lower, atom.upper)) {
+      offer(evaluate(f, atom.lower), true, atom.lower);
+      continue;
+    }
+    const sample = midpoint(atom.lower, atom.upper);
+    const piece = pieceAt(f, sample);
+    if (sign(piece.slope) === 0) {
+      offer(valueAt(piece, sample), true, sample);
+      continue;
+    }
+    offer(valueAt(piece, atom.lower), false, atom.lower);
+    offer(valueAt(piece, atom.upper), false, atom.upper);
+  }
+  if (best === null) throw new KernelError("an empty window has no infimum");
+  return best;
+}
 function below(f, threshold, lower, upper, cuts = []) {
   const parts = [];
   for (const atom of window(f, lower, upper, cuts)) {
@@ -1038,6 +1066,111 @@ function mergeIntervals(parts) {
     out.push(part);
   }
   return out;
+}
+function bandInfimumFn(f, band) {
+  if (sign(band) < 0) throw new KernelError("a negative band");
+  if (sign(band) === 0) return f;
+  const lines = [];
+  const plateaus = [];
+  const marks = [];
+  for (const piece of f.pieces) {
+    for (const delta of [
+      neg(band),
+      band
+    ]) {
+      lines.push({
+        slope: piece.slope,
+        intercept: add(piece.intercept, mul(piece.slope, delta))
+      });
+    }
+    for (const bound of [
+      piece.lo,
+      piece.hi
+    ]) {
+      if (bound.value !== null) {
+        marks.push(sub(bound.value, band), bound.value, add(bound.value, band));
+        plateaus.push(add(mul(piece.slope, bound.value), piece.intercept));
+      }
+    }
+  }
+  for (let i = 0; i < lines.length; i += 1) {
+    const a = lines[i];
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const b = lines[j];
+      if (!equals(a.slope, b.slope)) {
+        marks.push(div(sub(b.intercept, a.intercept), sub(a.slope, b.slope)));
+      }
+    }
+  }
+  for (const line of lines) {
+    if (sign(line.slope) !== 0) {
+      for (const value of plateaus) {
+        marks.push(div(sub(value, line.intercept), line.slope));
+      }
+    }
+  }
+  const cuts = uniqueSorted(marks);
+  const at2 = (price) => infimum(f, sub(price, band), add(price, band)).value;
+  return fromSamples(cuts, at2);
+}
+function fromSamples(cuts, at2) {
+  const pieces = [];
+  const edges = [
+    ...cuts
+  ];
+  const spanLine = (lo, hi) => {
+    const step = ONE;
+    const left = lo === null ? sub(hi, add(step, step)) : hi === null ? add(lo, step) : midpoint(lo, hi);
+    const right = lo === null ? sub(hi, step) : hi === null ? add(lo, add(step, step)) : midpoint(left, hi);
+    const fl = at2(left);
+    const fr = at2(right);
+    const slope = equals(left, right) ? ZERO : div(sub(fr, fl), sub(right, left));
+    return {
+      slope,
+      intercept: sub(fl, mul(slope, left))
+    };
+  };
+  let previous = null;
+  for (const edge of edges) {
+    const line = spanLine(previous, edge);
+    pieces.push({
+      lo: {
+        value: previous,
+        closed: false
+      },
+      hi: {
+        value: edge,
+        closed: false
+      },
+      ...line
+    });
+    pieces.push({
+      lo: {
+        value: edge,
+        closed: true
+      },
+      hi: {
+        value: edge,
+        closed: true
+      },
+      slope: ZERO,
+      intercept: at2(edge)
+    });
+    previous = edge;
+  }
+  const tail = spanLine(previous, null);
+  pieces.push({
+    lo: {
+      value: previous,
+      closed: false
+    },
+    hi: {
+      value: null,
+      closed: false
+    },
+    ...tail
+  });
+  return fn(pieces);
 }
 function askCost(levels, size) {
   let remaining = size;
@@ -1408,6 +1541,8 @@ function relower(evidence) {
     }
   }
   const legs = [];
+  const references = /* @__PURE__ */ new Map();
+  const bandGroups = [];
   let premium = ZERO;
   for (const rawLeg of list(proposal["legs"], "$proposal.legs")) {
     const leg = object(rawLeg, "$proposal.legs[]");
@@ -1463,9 +1598,52 @@ function relower(evidence) {
       version: entry.version,
       reductionRules: rules
     });
+    references.set(id, legReference(entry.value, terms, id, family));
+  }
+  const objectiveReference = proposal["objective_reference"];
+  if (typeof objectiveReference === "string") {
+    const declared = /* @__PURE__ */ new Map();
+    for (const raw of list(proposal["basis_bounds"] ?? [], "$proposal.basis_bounds")) {
+      const item = object(raw, "$proposal.basis_bounds[]");
+      const pair = list(item["between"], "$proposal.basis_bounds[].between");
+      const left = text(pair[0], "$proposal.basis_bounds[].between[0]");
+      const right = text(pair[1], "$proposal.basis_bounds[].between[1]");
+      declared.set([
+        left,
+        right
+      ].sort().join("\0"), number(item["bound"], "$proposal.basis_bounds[].bound"));
+    }
+    const groups = /* @__PURE__ */ new Map();
+    for (const [id, reference] of references) {
+      if (reference === objectiveReference) continue;
+      const members = groups.get(reference) ?? [];
+      members.push(id);
+      groups.set(reference, members);
+    }
+    for (const reference of [
+      ...groups.keys()
+    ].sort()) {
+      const members = groups.get(reference).slice().sort();
+      const bound = declared.get([
+        objectiveReference,
+        reference
+      ].sort().join("\0"));
+      const head = members[0];
+      const leg = legs.find((each) => each.id === head);
+      leg.reductionRules.push({
+        rule: bound === void 0 ? "basis_unbridged" : "basis_band",
+        tight: false
+      });
+      bandGroups.push({
+        leg: head,
+        members,
+        bound
+      });
+    }
   }
   return {
     legs,
+    bandGroups,
     baseline: claimedBaseline,
     quantity,
     domainLower,
@@ -1474,6 +1652,16 @@ function relower(evidence) {
     premium,
     valuationTime
   };
+}
+function legReference(entry, terms, id, family) {
+  const template = text(entry["reference"], `$registry.${family}.reference`);
+  return template.replace(/\{([a-z_]+)\}/g, (_match, name) => {
+    const value = terms[name];
+    if (typeof value !== "string") {
+      refuse("SEMANTICS_PIN", `$proposal.legs.${id}.terms.${name}`, `the entry's reference names {${name}}, which the leg's terms do not carry as a single value`);
+    }
+    return value;
+  });
 }
 function checkInstance(evidence, leg, terms, id, family) {
   const instance = leg["instance"];
@@ -1709,8 +1897,20 @@ function evaluateAndCompare(evidence, rebuilt) {
     ...lowerParts
   ];
   let upperCeiling = ZERO;
+  const bandedLegs = /* @__PURE__ */ new Set();
+  for (const group of rebuilt.bandGroups) {
+    if (group.bound === void 0) continue;
+    for (const member of group.members) bandedLegs.add(member);
+    const parts = [];
+    for (const leg of rebuilt.legs) {
+      if (group.members.includes(leg.id)) parts.push(...leg.parts);
+    }
+    lowerParts.push(bandInfimumFn(sum(parts), group.bound));
+    upperParts.push(...parts);
+  }
   for (const leg of rebuilt.legs) {
-    if (leg.reduced) {
+    if (bandedLegs.has(leg.id)) continue;
+    if (leg.reduced || leg.reductionRules.length > 0) {
       upperCeiling = add(upperCeiling, leg.size);
       continue;
     }
@@ -1847,7 +2047,7 @@ function intervalOf(raw) {
 }
 function compareVerdict(evidence, rebuilt, lowerFn, upperFn) {
   const clauses = clausesOf(evidence);
-  const anyLoose = rebuilt.legs.some((leg) => leg.reduced && !leg.tight);
+  const anyLoose = rebuilt.legs.some((leg) => leg.reductionRules.some((each) => !each.tight));
   let broken = false;
   for (const clause of clauses) {
     const lower = clause.on === null ? rebuilt.domainLower : clause.on.lower;
@@ -1855,7 +2055,7 @@ function compareVerdict(evidence, rebuilt, lowerFn, upperFn) {
     if (below(lowerFn, clause.minPnl, lower, upper).length > 0) broken = true;
   }
   let expected;
-  if (!broken) expected = anyLoose ? "needs_review" : "passes";
+  if (!broken) expected = "passes";
   else expected = anyLoose ? "needs_review" : "fails";
   const claimed = evidence.result["model_result"];
   if (claimed !== expected) {
@@ -1892,7 +2092,7 @@ function compareIntervals(evidence, rebuilt, lowerFn, clauses) {
 }
 function compareReductions(evidence, rebuilt) {
   const stated = list(evidence.result["reductions"] ?? [], "$result.reductions");
-  const mine = rebuilt.legs.filter((leg) => leg.reduced);
+  const mine = rebuilt.legs.filter((leg) => leg.reductionRules.length > 0);
   const declaredFor = new Set(stated.map((entry) => text(object(entry, "$result.reductions[]")["leg"], "$result.reductions[].leg")));
   for (const leg of mine) {
     if (leg.reductionRule === "unreviewed_family" && !declaredFor.has(leg.id)) {
