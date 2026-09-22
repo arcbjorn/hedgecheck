@@ -513,7 +513,34 @@ def constraints(base, units, floor_pnl, lower, upper):
         for at, side in ((lo, "above"), (hi, "below")):
             rows.append((at, side, slope * at + intercept,
                          [piece[3] * at + piece[4] for piece in pieces[1:]]))
-    return rows
+
+    # DISTINCT CONSTRAINTS ONLY, keeping the first name for each.
+    #
+    # Walking atoms emits a site per atom END, so a price where the function is continuous
+    # yields the same inequality two or three times: on the PLAN section 3 example, 7 rows
+    # carry 4 distinct constraints. Dropping an exact duplicate cannot change the program --
+    # it is the same inequality written twice -- and it has to go, because the certificate
+    # NAMES its sites and a second implementation deriving rows from maximal pieces finds
+    # the 4, not the 7. Keeping the duplicates would mean either porting an artifact of this
+    # implementation's atom walk, or resolving names by a fallback that could silently
+    # accept the wrong row.
+    #
+    # The key is the WHOLE constraint, alpha and every coefficient. Two rows at one price
+    # with different coefficients are different constraints and both stay.
+    # THE NAME IS CANONICAL, not whichever the walk reached first. `at` is preferred: a
+    # constraint the function ATTAINS at a price is primarily a fact about that price, and
+    # `above`/`below` are limits, which only need naming where the limit differs from the
+    # value. Without this rule the surviving name depends on walk order -- the domain's top
+    # comes out `below` from an atom walk and `at` from a maximal-piece walk -- and the
+    # certificate names its sites, so a second implementation could not resolve them.
+    order = {"at": 0, "below": 1, "above": 2}
+    best = {}
+    for at, side, alpha, coefficients in rows:
+        key = (alpha, tuple(coefficients))
+        if key not in best or order[side] < order[best[key][1]]:
+            best[key] = (at, side, alpha, coefficients)
+    # In price order, then by side, so the row list itself is deterministic.
+    return sorted(best.values(), key=lambda row: (row[0], order[row[1]]))
 
 
 def synthesise(base, units, prices, floor_pnl, lower, upper, lot=1):
