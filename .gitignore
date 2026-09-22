@@ -33,3 +33,9 @@ fixtures/refusals/
 # corruption per refusal class, rewritten from scratch on every run. What is asserted is
 # the CLASS each one is refused with, not its bytes.
 fixtures/bundles/
+
+# Derived the same way, by tools/make_rejected.py: one document per thing a schema must
+# refuse. What is asserted is that the Python validator AND the Go decoder both refuse each
+# one -- and that Go has a decoder for every schema present, which is what makes a new
+# schema land in both implementations or not at all.
+fixtures/rejected/
