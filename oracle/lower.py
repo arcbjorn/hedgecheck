@@ -26,6 +26,37 @@ import oracle
 
 SCHEMA_VERSION = "1"
 
+# THE ASSUMPTION VOCABULARY IS CLOSED.
+#
+# An assumption is carried into the result and shown to a reader, who relies on what it
+# MEANS. An invented slug means nothing, so it must be refused rather than displayed beside
+# the real ones with equal standing -- which is what happened until 22 Sep: the schema types
+# `assumptions` as any slug, so a proposal declaring `nothing_can_go_wrong` validated,
+# lowered, and appeared in the result's own `assumptions` list.
+#
+# Enforced here rather than in the schema. The schema is frozen and narrowing `slug` to an
+# enum would make previously-valid documents invalid, which needs a new `schema_version` and
+# every pinned document regenerated. And the vocabulary is a SEMANTIC rule, like the family
+# whitelist: what an assumption means is a fact about this system, not about JSON shape.
+#
+# Each entry says what declaring it asserts, because a name a reader cannot interpret is no
+# better than an invented one.
+ASSUMPTIONS = {
+    # Pricing at displayed asks assumes the venue takes no base fee. Required by lowering:
+    # a cost bound read off a book is wrong by the fee if there is one.
+    "zero_base_fee": "the venue charges no base fee on an outcome trade",
+    # A deployer submits `settleFraction` rather than having it computed (EVIDENCE section 1),
+    # so a templated family's payoff holds only if the deployer settles as the template reads.
+    # Required by `template.*` registry entries.
+    "deployer_settles_as_written": "the deployer settles as the template is written",
+    # A NOTE, not a gate. It does not switch the basis rule off: a leg observed on another
+    # series still earns `basis_band` or `basis_unbridged` whether or not this is declared,
+    # because the reduction rests on the RESOLVED references and not on an assertion about
+    # them. Kept in the vocabulary because proposals carry it and a reader should be able to
+    # look it up; if it ever gates anything, that will be a change with its own reason.
+    "common_reference": "the holder believes every leg is observed on the objective's series",
+}
+
 # Families whose payoff is path-dependent AND for which lowering carries a sound bound.
 # A `bounded` family absent from this set is refused: the status says a terminal kernel
 # cannot compute it, and without a bound there is nothing to put in its place.
@@ -477,6 +508,11 @@ def lower(proposal, registry, snapshots, references=None):
     """
     if proposal["schema_version"] != SCHEMA_VERSION:
         _refuse("UNSUPPORTED_SCHEMA", f"proposal schema_version {proposal['schema_version']!r}")
+    for declared in proposal["assumptions"]:
+        if declared not in ASSUMPTIONS:
+            _refuse("ASSUMPTION_UNKNOWN",
+                    f"{declared!r} is not an assumption this system defines, so it means nothing "
+                    f"to a reader; the vocabulary is {sorted(ASSUMPTIONS)}")
     for required in ("zero_base_fee",):
         if required not in proposal["assumptions"]:
             _refuse("ASSUMPTION_REQUIRED", f"pricing at displayed asks requires the {required!r} assumption")
