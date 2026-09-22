@@ -295,6 +295,7 @@ def main():
                 checked_sizes += 1
         print(f"size windows: {checked_sizes} reported sizes verified against the lower profile")
 
+    payoff_is_data()
     price_touch_bound()
     reference_map()
     basis_band()
@@ -348,6 +349,34 @@ BETTER = {
 # worth nothing then, its premium still counts, so P&L(S) = 0.1*(S - 77631.4) - 160.76676.
 HORIZON = {"pieces": [("0.1", "-7923.90676")], "fails_on": ("60000", True, "69239.0676", False),
            "worst": {"pnl": "-1923.90676", "attained": True, "price": "60000"}}
+
+
+def payoff_is_data():
+    """`pays_on` transcribes the entry. It never computes an interval from proposal state.
+
+    This is what makes a payoff reviewable: a reviewer reads the entry and knows what a leg
+    pays. A REDUCTION may read the proposal -- `horizon_mismatch` compares the leg's expiry
+    against the objective's valuation time, and the basis band reads the objective's
+    reference -- so the rule is not "never read the proposal". It is that the INTERVAL comes
+    from the entry, which is why the priceTouch direction is a reduction and not a payoff.
+    """
+    import inspect
+    import lower
+
+    source = inspect.getsource(lower.pays_on)
+    # The signature is the check: pays_on takes the entry, the leg and the resolved term
+    # values, and nothing else. A baseline or a proposal parameter would be the drift.
+    parameters = list(inspect.signature(lower.pays_on).parameters)
+    check(parameters == ["entry", "leg", "values"],
+          f"payoff as data: pays_on takes {parameters}, want entry, leg, values")
+    for forbidden in ("proposal", "baseline", "snapshots", "objective"):
+        check(forbidden not in source,
+              f"payoff as data: pays_on mentions {forbidden!r}, so an interval may depend on it")
+
+    # Inclusivity is transcribed, never decided. A computed `lower_inclusive` would be an
+    # interval the entry does not state, and a reviewer would be reading the wrong thing.
+    check("spec[\"lower_inclusive\"]" in source and "spec[\"upper_inclusive\"]" in source,
+          "payoff as data: pays_on no longer takes endpoint ownership straight from the spec")
 
 
 def price_touch_bound():
