@@ -155,8 +155,17 @@ def _payoff(lowered, include_reduced):
     baseline = exact.parse(lowered["baseline"]["price"])
     reductions = lowered.get("reductions", [])
     premium = sum((O.leg_cost(leg) for leg in lowered["legs"]), F(0))
-    parts = [O.linear(exact.parse(lowered["exposure"]["quantity"]), baseline),
-             O.cash(-premium - exact.parse(lowered["other_costs"]))]
+    # A LIQUIDATED EXPOSURE IS WORTH MINUS ITS MARGIN, at every terminal price. With the
+    # liquidation price inside the path domain the path may reach it, and reaching it closes
+    # the position permanently -- so the exposure stops being a function of the terminal price.
+    # Rebuilding it as linear here would make this refuser reject the very bundles the
+    # lowering it checks produces, which is how the band difference above was found.
+    liquidated = any(reduction["rule"] == "liquidated_in_path" for reduction in reductions)
+    if liquidated:
+        holding = O.cash(-exact.parse(lowered["exposure"]["isolated_margin"]))
+    else:
+        holding = O.linear(exact.parse(lowered["exposure"]["quantity"]), baseline)
+    parts = [holding, O.cash(-premium - exact.parse(lowered["other_costs"]))]
 
     banded = set()
     if not include_reduced:
