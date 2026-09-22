@@ -113,6 +113,14 @@ def cases():
          mutate(proposal, ["assumptions"],
                 sorted(proposal["assumptions"] + ["nothing_can_go_wrong"])), entries, snapshots,
          "an assumption outside the vocabulary this system defines"),
+        # A NEGATIVE ISOLATED MARGIN is not a position. Reducing by it would CREDIT the
+        # holder for being liquidated, turning the worst case into a gain.
+        ("exposure-unsound", "EXPOSURE_UNSOUND",
+         mutate(proposal, ["exposure"],
+                {"kind": "isolated_perp", "underlying": "BTC", "quantity": "0.1",
+                 "reference": proposal["exposure"]["reference"],
+                 "liquidation_price": "80000", "isolated_margin": "-5000"}), entries, snapshots,
+         "an isolated margin below zero, which would pay the holder for liquidation"),
         ("unknown-family", "UNKNOWN_FAMILY",
          proposal, {"recurring.priceBinary": entries["recurring.priceBinary"]}, snapshots,
          "a leg naming a family the registry does not carry"),
