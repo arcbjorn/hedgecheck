@@ -48,12 +48,12 @@ var (
 	// defs.schema.json #/$defs/digits: a non-negative integer with no leading zero.
 	digitsPattern = regexp.MustCompile(`\A(?:0|[1-9][0-9]*)\z`)
 	coinPattern   = regexp.MustCompile(`\A#[0-9]{1,12}\z`)
-	refPattern    = regexp.MustCompile(`\A(?:synthetic|[a-z0-9]+(?::[A-Za-z0-9/._-]+){2,3})\z`)
+	refPattern    = regexp.MustCompile(`\A(?:synthetic|[a-z0-9]+(?::[A-Za-z0-9/._-]+){2,4})\z`)
 	// A reference TEMPLATE, as a registry entry carries: like a reference id, but a whole
 	// segment may be a {placeholder} an instance resolves. PLAN section 6 says a reference
 	// is "never free text"; the entry's was read with no pattern at all, so "free text
 	// here" and "" were accepted.
-	refTemplatePattern = regexp.MustCompile(`\A(?:synthetic|[a-z0-9]+(?::(?:\{[a-z_]+\}|[A-Za-z0-9/._-])+){2,3})\z`)
+	refTemplatePattern = regexp.MustCompile(`\A(?:synthetic|[a-z0-9]+(?::(?:\{[a-z_]+\}|[A-Za-z0-9/._-])+){2,4})\z`)
 )
 
 // reader consumes an object's keys one at a time and refuses whatever is left.
