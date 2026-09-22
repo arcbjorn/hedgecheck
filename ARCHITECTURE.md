@@ -458,7 +458,9 @@ fixtures/   golden/   lowered proposal and its generated expected result
             replay/   retained responses, their request records, and the real
                       proposals lowered from them (2026-09-18), including the
                       horizon fixture valued a day after its leg is observed
-registry/   semantics entries as data: recurring.priceBinary, recurring.priceBucket
+registry/   semantics entries as data: recurring.priceBinary, recurring.priceBucket,
+            template.binaryPrice and template.priceTouch as model drafts
+references/ what a venue's free-text price description denotes, versioned separately
 oracle/     exact.py  canon.py  oracle.py (kernel, evaluate)  lower.py  verify.py
 engine/     exact/  canon/  arch_test.go          ── built
             pwa/  doc/  lower/  evaluate/  discover/  run/  screen/  ── pure
