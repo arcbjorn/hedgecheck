@@ -668,11 +668,19 @@ test("the gate cannot reach a sender of its own", () => {
   const source = readFileSync(here("../src/gate.ts"), "utf8");
   assert.doesNotMatch(source, /from\s*["']\.\/place\.ts["']/, "gate.ts imports place.ts");
   const names = readdirSync(here("../src/")).filter((name) => name.endsWith(".ts")).sort();
+  // THE INVENTORY IS ASSERTED, so a new module in the one package that can reach a venue has
+  // to be justified rather than just added. `corewriter.ts` is here because it does the same
+  // job as place.ts -- turn an envelope into an order -- for the on-chain path, and it is safe
+  // for the reason the next test PROVES rather than assumes: it cannot fetch, sign, or read a
+  // key. Bytes in, bytes out.
   assert.deepEqual(
     names,
-    ["gate.ts", "place.ts", "recheck.ts", "run.ts", "testing.ts"],
+    ["corewriter.ts", "gate.ts", "place.ts", "recheck.ts", "run.ts", "testing.ts"],
     "consumer/src holds an unexpected module",
   );
+  // Nor does the gate reach the on-chain encoder: a gate that could build an action could
+  // describe an order without deciding on one.
+  assert.doesNotMatch(source, /from\s*["']\.\/corewriter\.ts["']/, "gate.ts imports corewriter.ts");
   // Nor does the gate reach the re-check: a gate that could re-propose after a fill
   // could place again on its own, and topping up is the caller's decision.
   assert.doesNotMatch(source, /from\s*["']\.\/recheck\.ts["']/, "gate.ts imports recheck.ts");
@@ -685,8 +693,16 @@ test("the gate cannot reach a sender of its own", () => {
 // asserted rather than left to the reading of the list: every other module keeps
 // `send` a parameter, and nothing but run.ts can reach the network by itself.
 test("only run.ts can reach a venue, and only through the gate", () => {
-  for (const name of ["gate.ts", "place.ts", "recheck.ts"]) {
+  for (const name of ["gate.ts", "place.ts", "recheck.ts", "corewriter.ts"]) {
     assert.doesNotMatch(code(here(`../src/${name}`)), /\bfetch\s*\(/, `${name} calls fetch`);
+  }
+  // AND THE ON-CHAIN ENCODER IS PURE, which is why it is allowed to live in this package: it
+  // describes what an order would be and can do nothing with it. Checked against the same
+  // patterns gate.ts is held to, since both are modules that must not be able to act.
+  const onchain = code(here("../src/corewriter.ts"));
+  for (const pattern of [/\bfetch\b/, /\bXMLHttpRequest\b/, /\bWebSocket\b/, /\bsign\w*\(/,
+    /\bprivateKey\b/, /\bmnemonic\b/, /["']node:/, /process\.env/]) {
+    assert.doesNotMatch(onchain, pattern, `corewriter.ts uses ${pattern}`);
   }
 
   // And run.ts sends only inside the gate's callback. COUNTED, not pattern-matched:
