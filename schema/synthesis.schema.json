@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "synthesis.schema.json",
+  "title": "Synthesis answer",
+  "$comment": "Added after the v1 freeze; see schema/CHANGES.md for the case that forced it. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored.",
+  "description": "Cheapest whole-contract sizes over several candidate instruments meeting a stated objective, or a certificate that none exist. SEPARATE from a result, and a different question: a result answers 'do THESE terms, costs and holdings satisfy my objective', about a proposal that already names its legs and their sizes, and its `size_windows` is the one-leg special case. A synthesis answers 'what sizes WOULD satisfy it, over these instruments' -- its input is a set of candidates and an objective, and its output is sizes that do not exist yet. The document carries the QUESTION as well as the answer, because a checker that re-added the numbers the solver emitted would be confirming arithmetic rather than verifying a claim. It carries NO solver state: no tableau, no pivot order, no basis. A certificate that needed the search replayed would not be a certificate.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "request",
+    "status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "request": {
+      "description": "The question, in full. Everything a checker needs to rebuild the same program.",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "objective",
+        "domain",
+        "units",
+        "base",
+        "candidates"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1"
+        },
+        "objective": {
+          "$ref": "defs.schema.json#/$defs/clause"
+        },
+        "domain": {
+          "$ref": "defs.schema.json#/$defs/domain"
+        },
+        "units": {
+          "$ref": "defs.schema.json#/$defs/units"
+        },
+        "base": {
+          "description": "What the holder already has. May be empty: synthesising from nothing is a legitimate question.",
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "id",
+                  "kind",
+                  "quantity",
+                  "baseline"
+                ],
+                "properties": {
+                  "id": {
+                    "$ref": "defs.schema.json#/$defs/leg_id"
+                  },
+                  "kind": {
+                    "const": "linear"
+                  },
+                  "quantity": {
+                    "$ref": "defs.schema.json#/$defs/number"
+                  },
+                  "baseline": {
+                    "$ref": "defs.schema.json#/$defs/number"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "id",
+                  "kind",
+                  "size",
+                  "pays_on"
+                ],
+                "properties": {
+                  "id": {
+                    "$ref": "defs.schema.json#/$defs/leg_id"
+                  },
+                  "kind": {
+                    "const": "indicator"
+                  },
+                  "size": {
+                    "$ref": "defs.schema.json#/$defs/number"
+                  },
+                  "pays_on": {
+                    "$ref": "defs.schema.json#/$defs/pays_on"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "id",
+                  "kind",
+                  "amount"
+                ],
+                "properties": {
+                  "id": {
+                    "$ref": "defs.schema.json#/$defs/leg_id"
+                  },
+                  "kind": {
+                    "const": "cash"
+                  },
+                  "amount": {
+                    "$ref": "defs.schema.json#/$defs/number"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "candidates": {
+          "description": "The instruments offered, one unit each. `price` is what one contract costs, a hypothetical per-unit price rather than a book walk: a synthesis asks what size to buy, and the size is what a walk needs before it can price anything. A depth-priced answer is the size window's question, per leg, on a size already chosen.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "pays_on",
+              "price"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "defs.schema.json#/$defs/leg_id"
+              },
+              "pays_on": {
+                "$ref": "defs.schema.json#/$defs/pays_on"
+              },
+              "price": {
+                "$ref": "defs.schema.json#/$defs/number"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "lot": {
+          "description": "The whole-contract increment sizes are rounded to. One when absent.",
+          "$ref": "defs.schema.json#/$defs/number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "description": "`feasible`: sizes were found and re-checked against the objective. `infeasible`: the RELAXATION is infeasible, so no whole-contract answer exists either, and `certificate` proves it. `rounding_failed`: the relaxation was feasible and no rounding of it met the objective -- a statement about this search, never about existence.",
+      "enum": [
+        "feasible",
+        "infeasible",
+        "rounding_failed"
+      ]
+    },
+    "sizes": {
+      "description": "Present exactly when `status` is `feasible`. Whole contracts, named by candidate rather than by position.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "candidate",
+          "size"
+        ],
+        "properties": {
+          "candidate": {
+            "$ref": "defs.schema.json#/$defs/leg_id"
+          },
+          "size": {
+            "$ref": "defs.schema.json#/$defs/number"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "cost": {
+      "description": "What the reported sizes cost, present with `sizes`.",
+      "$ref": "defs.schema.json#/$defs/number"
+    },
+    "relaxed": {
+      "description": "The linear program's own answer, before rounding. Carried with `feasible` and with `rounding_failed`, so a reader sees how far the rounding moved and, when it failed, what it was rounding.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "defs.schema.json#/$defs/number"
+      }
+    },
+    "certificate": {
+      "description": "Present exactly when `status` is `infeasible`. A Farkas certificate: non-negative weights on the constraint rows with `A^T y <= 0` and `b . y > 0`, which is exactly the statement that no non-negative sizes satisfy the rows. The checker verifies it by one multiplication, never by re-solving.",
+      "type": "object",
+      "required": [
+        "kind",
+        "weights"
+      ],
+      "properties": {
+        "kind": {
+          "const": "farkas"
+        },
+        "weights": {
+          "description": "Sparse, and each weight NAMES ITS SITE. A bare vector would be ordered by the rows, making row order an implicit contract between three implementations; naming the site lets a checker look it up among its own rows, so order stops mattering and a site the checker cannot find is a refusal rather than a silent misalignment. Sparse because a Farkas certificate is: PLAN section 3's uses two rows out of ten.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "price",
+              "side",
+              "weight"
+            ],
+            "properties": {
+              "price": {
+                "$ref": "defs.schema.json#/$defs/number"
+              },
+              "side": {
+                "description": "Which constraint at that price: `at` is the value there, `above` and `below` are the limits from either side of it. A jump makes the three different numbers, and a sloped piece attains its infimum only in the limit.",
+                "enum": [
+                  "at",
+                  "above",
+                  "below"
+                ]
+              },
+              "weight": {
+                "$ref": "defs.schema.json#/$defs/number"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
