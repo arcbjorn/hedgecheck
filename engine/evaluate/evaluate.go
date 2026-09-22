@@ -281,15 +281,34 @@ func Evaluate(ir doc.IR) (doc.Result, error) {
 		result.SetReductions(ir.Reductions)
 		result.SetUpperProfile(pieces(upperPnl.Profile(lower, upper)))
 	}
-	// A BANDED leg is still sized. Only a leg valued at ZERO is skipped: a band leaves a
-	// real payoff to size against, and the reference oracle sizes one too. `zeroed` here
-	// includes every reduction, so the banded ones are taken back out -- matching how the
-	// lower profile above treats them.
+	// A leg alone in its band group is still sized: a band leaves a real payoff to size
+	// against, and the oracle sizes one too. A leg in a MULTI-LEG group is NOT sized.
+	//
+	// "The smallest size of this leg" presumes the rest of the answer holds still while
+	// this leg moves, and for a banded group it does not: the verdict values the group at
+	// the infimum of its SUMMED payoff over the band, so resizing one member changes the
+	// sum and with it the infimum. Measured on good-basis-grouped, sizing binary-no at
+	// 0 / 500 / 1409 / 3000 moves the group's value at 76,000 by exactly as much. The two
+	// implementations answered it anyway and disagreed -- this engine credited a banded
+	// sibling with its full unbanded payoff while the oracle credited zero -- so they
+	// reported different binding prices for one bundle. Neither is right.
+	joint := map[string]bool{}
+	for _, reduction := range ir.Reductions {
+		if len(reduction.With) > 0 {
+			joint[reduction.Leg] = true
+			for _, other := range reduction.With {
+				joint[other] = true
+			}
+		}
+	}
 	sizable := map[string]bool{}
 	for id := range zeroed {
 		if !banded[id] {
 			sizable[id] = true
 		}
+	}
+	for id := range joint {
+		sizable[id] = true
 	}
 	windows, err := sizeWindows(ir, sizable, baseline, cap, lower, upper)
 	if err != nil {
