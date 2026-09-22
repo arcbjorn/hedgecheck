@@ -139,9 +139,9 @@ def cases():
          with_leg(["acquisition", "path"], "split_and_sell"), entries, snapshots,
          "an acquisition path lowering does not price yet"),
         ("unsupported-family", "UNSUPPORTED_FAMILY", *repin(
-            with_leg(["family"], "template.priceTouch"),
-            dict(entries, **{"template.priceTouch": touch_entry(entries)}),
-            "template.priceTouch"), snapshots,
+            with_leg(["family"], "template.scalarPrice"),
+            dict(entries, **{"template.scalarPrice": no_rule_entry(entries)}),
+            "template.scalarPrice"), snapshots,
          "a family lowering has no rule for"),
         ("family-bounded-not-computed", "UNSUPPORTED_FAMILY", *repin(
             proposal, status_entries(entries, "bounded"), "recurring.priceBucket"), snapshots,
@@ -189,10 +189,15 @@ def repin(proposal, entries, family):
     return proposal, out
 
 
-def touch_entry(entries):
-    """A priceTouch entry, so the refusal is the family rule and not a missing entry."""
+def no_rule_entry(entries):
+    """An entry for a family LOWERING HAS NO RULE FOR, so the refusal is the family rule.
+
+    `template.scalarPrice` is the case: the schema lists it, so a proposal may name it, and
+    `check_terms` has no branch for it. This used to be `template.priceTouch`, which stopped
+    testing anything once the touch bound gave that family a rule of its own.
+    """
     out = copy.deepcopy(entries["recurring.priceBucket"])
-    out["family"] = "template.priceTouch"
+    out["family"] = "template.scalarPrice"
     return out
 
 
@@ -273,14 +278,19 @@ def generate():
 
 def main():
     checking = "--check" in sys.argv
-    before = {}
-    if checking and OUT.exists():
-        before = {path.name: path.read_bytes() for path in sorted(OUT.glob("*.json"))}
     written, produced = generate()
     if checking:
-        after = {path.name: path.read_bytes() for path in sorted(OUT.glob("*.json"))}
-        if before != after:
-            print("refusal fixtures are stale; run python3 tools/make_refusals.py", file=sys.stderr)
+        # REPRODUCIBLE, not merely present. These fixtures are derived and are not in git,
+        # so "does the checkout match?" has no answer on a fresh clone. What still has to
+        # hold is that the generator is a function of its source alone. The assertions that
+        # carry the real weight are below: every fixture's ACTUAL refusal code must equal
+        # the one it declares, and every code `lower.py` can raise must have a fixture.
+        first = {path.name: path.read_bytes() for path in sorted(OUT.glob("*.json"))}
+        generate()
+        second = {path.name: path.read_bytes() for path in sorted(OUT.glob("*.json"))}
+        if first != second:
+            moved = sorted({name for name in set(first) | set(second) if first.get(name) != second.get(name)})
+            print(f"refusal fixtures are not reproducible: {', '.join(moved[:3])}", file=sys.stderr)
             return 1
     wrong = {name: got for name, got in produced.items()
              if got != next(expected for n, expected, *_ in cases() if n == name)}
