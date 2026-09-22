@@ -585,6 +585,27 @@ def reference_map():
     document = canon.loads((PROJECT / "references" / "reference-map.json").read_bytes())
     index = lower.reference_index(document)
     mappings = document["mappings"]
+
+    # ---- AN UNREVIEWED MAP RESOLVES NOTHING
+    #
+    # The same seal the registry uses, and until 22 Sep nothing enforced it here: every
+    # mapping was honoured whatever the document said about itself, while
+    # `catalogue_reference` refused with "no REVIEWED mapping" -- a word the code did not
+    # mean. It is not cosmetic. A mapping nobody reviewed can point a leg at the objective's
+    # OWN series, and then the basis reduction never fires: measured on the 18 September
+    # bucket proposal, pointing a foreign series at `hl:perp:BTC:mark-interp` turns a
+    # `needs_review` worst case of -1923.90676 into a `passes` at -999.90676.
+    check(canon.reviewed(document), "reference map: the map on disk is reviewed")
+    check(index, "reference map: a reviewed map yields its mappings")
+    for label, broken in (
+        ("a draft", {**document, "review": {"state": "draft", "drafted_by": "model"}}),
+        ("a forged digest", {**document, "review": {**document["review"], "digest": "0" * 64}}),
+        ("an edited mapping", {**document, "mappings": mappings + [
+            {"venue": "out", "price_description": "invented", "seconds": "1",
+             "state": "interpreted", "reference": "hl:perp:BTC:mark-interp", "why": "unreviewed"}]}),
+    ):
+        check(lower.reference_index(broken) == {},
+              f"reference map: {label} must resolve nothing, not be honoured")
     catalogue = json.loads((PROJECT / "fixtures" / "replay" / "2026-09-18" / "outcome-meta.json").read_text())
     outcomes = catalogue["outcomes"]
 
@@ -1312,8 +1333,45 @@ def bundles():
         else:
             refused[manifest["expects"]] = refused.get(manifest["expects"], 0) + 1
             check("corruption" in manifest, f"bundles: {path.name} is refused and documents its one change")
-    check(accepted == 6, "bundles: six good bundles -- passing, failing, passing with its envelope, "
-                         "a deployer-settled family, and a foreign reference with and without a bound")
+    check(accepted == 7, "bundles: seven good bundles -- passing, failing, passing with its envelope, "
+                         "a deployer-settled family, a foreign reference with and without a bound, "
+                         "and two legs on one foreign reference banded as a GROUP")
+    # THE GROUP IS CARRIED, not merely present. A `with` list is the only part of a
+    # reduction that names other legs, and until the grouped bundle existed no fixture had
+    # one -- so Go and the TypeScript checker each implemented grouping and neither was
+    # held to agreeing with the other two about it.
+    # A LEG IN A MULTI-LEG BAND GROUP HAS NO SIZE WINDOW, in any implementation.
+    #
+    # The group's value is the infimum of its SUMMED payoff over the band, so resizing one
+    # member moves the sum and with it the infimum -- the question "the smallest size of
+    # this leg" presumes a separability the evaluator does not have. Both implementations
+    # answered it anyway and disagreed about the base: the oracle credited a banded sibling
+    # with zero, Go with its full unbanded payoff, and they reported different binding
+    # prices for this one bundle. Neither was right, and the fix is to report neither.
+    group_dir = directory / "good-basis-grouped"
+    check(group_dir.is_dir(), "bundles: the grouped basis bundle exists")
+    group_ir = canon.loads((group_dir / "lowered.json").read_bytes())
+    rows = [r for r in group_ir["reductions"] if r["rule"] == "basis_band"]
+    check(len(rows) == 1 and rows[0].get("with"),
+          "bundles: the grouped bundle carries one band reduction naming its other leg")
+    members = {rows[0]["leg"], *rows[0]["with"]}
+    check(members == {leg["id"] for leg in group_ir["legs"]},
+          f"bundles: the band group is not both legs, it is {sorted(members)}")
+    group_result = canon.loads((group_dir / "result.json").read_bytes())
+    check("size_windows" not in group_result,
+          "bundles: a jointly banded leg has no size window, because the group is not separable")
+    # And the non-separability is a FACT about the arithmetic, not a policy: resizing one
+    # member really does move the group's banded value. Without this the rule above could
+    # be deleted and replaced by any other reason for omitting the window.
+    band = O.num(group_ir["reductions"][0]["bound"])
+    values = []
+    for size in ("0", "500", "1409", "3000"):
+        resized = [dict(leg, size=size) if leg["id"] == "binary-no" else leg
+                   for leg in group_ir["legs"]]
+        eroded = O.band_infimum(O.total([O._leg(leg) for leg in resized]), band)
+        values.append(eroded(F(76000)))
+    check(len(set(values)) == len(values),
+          f"basis: resizing a group member must move the group's banded value, got {values}")
     # Every class the fixtures claim to exercise is exercised, and every corruption is
     # refused. These were one check while every corruption had a class to itself; the
     # envelope corruptions are four ways to be wrong about one thing, so counting
