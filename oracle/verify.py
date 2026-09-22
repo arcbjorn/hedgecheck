@@ -347,6 +347,7 @@ def main():
     price_touch_lowering()
     established_failures()
     reference_map()
+    review_seals()
     basis_band()
     replay()
 
@@ -480,6 +481,57 @@ def price_touch_bound():
           "priceTouch: no path touched and returned, so the corpus cannot show the bound is strict")
 
 
+def review_seals():
+    """Every reviewed entry ON DISK carries a digest of its own current text.
+
+    `semantics_version` is the canonical digest of an entry WITHOUT its `review` key, so a
+    review cannot sign itself and any edit to the entry invalidates it. That is the whole
+    mechanism, and until 22 Sep nothing checked it against the files: the replay guard reads
+    only the families its two proposals name (deliberately -- a draft for an unused family
+    must not send the replay down the draft branch), so `template.priceTouch` was reviewed
+    with its seal unverified. A forged digest and an entry edited after review BOTH passed.
+
+    This reads the directory rather than a list, so an entry added later cannot be reviewed
+    without its seal being checked.
+    """
+    entries = sorted((PROJECT / "registry").glob("*.json"))
+    check(len(entries) >= 4, "review seals: the registry is meant to hold every family")
+    sealed = 0
+    for path in entries:
+        entry = json.loads(path.read_text())
+        review = entry.get("review", {})
+        if review.get("state") != "reviewed":
+            # A draft carries no digest to check, and must not claim one.
+            check("digest" not in review, f"review seals: {path.name} is a draft but carries a digest")
+            continue
+        check(review.get("reviewed_by"), f"review seals: {path.name} is reviewed by nobody")
+        check(review.get("reviewed_on"), f"review seals: {path.name} is reviewed on no date")
+        truth = canon.semantics_version(entry)
+        check(review.get("digest") == truth,
+              f"review seals: {path.name} claims {review.get('digest')} but its text digests to {truth}")
+        check(canon.reviewed(entry), f"review seals: {path.name} does not read as reviewed")
+        sealed += 1
+    check(sealed >= 3, f"review seals: only {sealed} reviewed entries, so this proves little")
+
+    # AND THE SEAL DETECTS AN EDIT. Checking a digest against the text it was computed from
+    # is circular unless tampering is shown to break it, so each reviewed entry is edited in
+    # memory -- never on disk -- and must stop reading as reviewed.
+    for path in entries:
+        entry = json.loads(path.read_text())
+        if entry.get("review", {}).get("state") != "reviewed":
+            continue
+        for label, mutate in (
+            ("a payoff endpoint", lambda e: e["payoffs"][0]["pays"][0]["pays_on"].update(
+                {k: not v for k, v in e["payoffs"][0]["pays"][0]["pays_on"].items() if isinstance(v, bool)})),
+            ("the status", lambda e: e.update(status="computed" if e["status"] != "computed" else "bounded")),
+            ("an ambiguity", lambda e: e["ambiguities"].append("added after review")),
+        ):
+            tampered = json.loads(json.dumps(entry))
+            mutate(tampered)
+            check(not canon.reviewed(tampered),
+                  f"review seals: {path.name} still reads as reviewed after editing {label}")
+
+
 def reference_map():
     """A venue's free text resolves to a canonical id, or to nothing it can name."""
     import lower
@@ -531,7 +583,19 @@ def reference_map():
     trimmed = {m["price_description"].strip() for m in mappings}
     check(len(trimmed) < len(mappings), "reference map: no two descriptions differ only by spacing any more")
 
-    # Ambiguity is the COMMON case, and each ambiguous row says why.
+    # Ambiguity is now the MINORITY case, and each ambiguous row says why.
+    #
+    # It was 6 descriptions over 61 of 78 instances until 22 Sep, when the 42 Pyth instances
+    # were mapped. Four rows refused them on a contradiction that does not exist: the
+    # restriction "This market must refer to the price of a Hyperliquid perp" constrains
+    # {perp}, the market's SUBJECT, while settlement is "according to the {seconds}-second
+    # TWAP of {priceDescription} price" -- a different template field, and the settlement
+    # source by the template's own words. The retained text at
+    # research/2026-09-18/outcome-templates.json (085ccfb) is the evidence.
+    #
+    # What remains is genuinely unmappable: `1-minute candle` (18 instances) names no source,
+    # no instrument and no statistic, and its 300-second window contradicts its own stated
+    # period; `xyz:CL` (1) names a ticker with no venue or statistic. 18 + 1 = 19.
     counts = {}
     for o in described:
         terms = O_terms(o)
@@ -539,8 +603,16 @@ def reference_map():
             counts.get((o["venue"], terms["priceDescription"], terms.get("seconds", "")), 0) + 1
     ambiguous = [m for m in mappings if m["state"] == "ambiguous"]
     instances = sum(counts[(m["venue"], m["price_description"], m["seconds"])] for m in ambiguous)
-    check((len(ambiguous), instances) == (6, 61),
-          f"reference map: 6 ambiguous descriptions over 61 instances, found {len(ambiguous)} over {instances}")
+    check((len(ambiguous), instances) == (2, 19),
+          f"reference map: 2 ambiguous descriptions over 19 instances, found {len(ambiguous)} over {instances}")
+    # And the 42 that were freed are really mapped, to PYTH ids and not to Hyperliquid ones.
+    # Mapping them to hl:* would assert two different series are the same price, which is
+    # exactly the silent resolution the basis rule exists to prevent.
+    pyth = [m for m in mappings if "Pyth" in m["price_description"]]
+    freed = sum(counts[(m["venue"], m["price_description"], m["seconds"])] for m in pyth)
+    check(freed == 42, f"reference map: the Pyth rows cover 42 instances, found {freed}")
+    check(all(m["state"] == "interpreted" and m["reference"].startswith("pyth:") for m in pyth),
+          "reference map: every Pyth description resolves to a pyth: id, never a Hyperliquid one")
     check(all(m.get("why") for m in mappings), "reference map: every mapping says why")
     check(all(m.get("reference") for m in mappings if m["state"] != "ambiguous"),
           "reference map: a non-ambiguous mapping names a reference")
