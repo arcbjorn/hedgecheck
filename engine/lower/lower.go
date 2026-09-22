@@ -94,8 +94,25 @@ func (s Snapshots) cited(digest, what string) (any, error) {
 	return snapshot.value, nil
 }
 
+// References maps a venue's exact price description to what it denotes. The key is
+// (venue, price_description, seconds), spacing included.
+type References map[[3]string]doc.ReferenceMapping
+
+// ReferenceKey builds the lookup key for one description.
+func ReferenceKey(venue, description, seconds string) [3]string {
+	return [3]string{venue, description, seconds}
+}
+
 // Lower produces the lowered proposal and the semantics versions it used.
-func Lower(proposal doc.Proposal, registry map[string]doc.Entry, snapshots Snapshots) (doc.IR, []string, error) {
+//
+// `references` is variadic so every existing caller keeps working: a proposal whose legs
+// are all canonical families never consults it, because no `recurring` outcome carries a
+// price description.
+func Lower(proposal doc.Proposal, registry map[string]doc.Entry, snapshots Snapshots, references ...References) (doc.IR, []string, error) {
+	var refs References
+	if len(references) > 0 {
+		refs = references[0]
+	}
 	if proposal.SchemaVersion != "1" {
 		return doc.IR{}, nil, refuse("UNSUPPORTED_SCHEMA", "proposal schema_version %q", proposal.SchemaVersion)
 	}
@@ -111,7 +128,7 @@ func Lower(proposal doc.Proposal, registry map[string]doc.Entry, snapshots Snaps
 
 	legs := []doc.Leg{}
 	// Each leg's resolved price series, for the basis-band grouping after the loop.
-	references := map[string]string{}
+	legReferences := map[string]string{}
 	versions := []string{}
 	reductions := []doc.Reduction{}
 	for _, leg := range proposal.Legs {
@@ -193,11 +210,19 @@ func Lower(proposal doc.Proposal, registry map[string]doc.Entry, snapshots Snaps
 			ID: leg.ID, Kind: "indicator", Size: size, PaysOn: paysOn,
 			Premium: premium, ObservationTime: expiry, Semantics: version,
 		})
-		reference, err := legReference(leg, entry)
+		// A DEPLOYER-TEMPLATED instance names its own series, so the catalogue governs and
+		// the entry's template is only for families whose reference is fixed.
+		reference, err := catalogueReference(leg, catalogue, refs)
 		if err != nil {
 			return doc.IR{}, nil, err
 		}
-		references[leg.ID] = reference
+		if reference == "" {
+			reference, err = legReference(leg, entry)
+			if err != nil {
+				return doc.IR{}, nil, err
+			}
+		}
+		legReferences[leg.ID] = reference
 	}
 
 	// ---- the basis band: legs observed on a reference the objective is not stated on
@@ -213,8 +238,8 @@ func Lower(proposal doc.Proposal, registry map[string]doc.Entry, snapshots Snaps
 		}
 		groups := map[string][]string{}
 		for _, leg := range proposal.Legs {
-			if references[leg.ID] != proposal.ObjectiveReference {
-				groups[references[leg.ID]] = append(groups[references[leg.ID]], leg.ID)
+			if legReferences[leg.ID] != proposal.ObjectiveReference {
+				groups[legReferences[leg.ID]] = append(groups[legReferences[leg.ID]], leg.ID)
 			}
 		}
 		foreign := make([]string, 0, len(groups))
@@ -550,3 +575,37 @@ func referenceKey(a, b string) string {
 }
 
 var placeholderPattern = regexp.MustCompile(`\{[a-z_]+\}`)
+
+// catalogueReference is the reference a DEPLOYER-TEMPLATED instance is observed on, or "".
+//
+// No `recurring` outcome on the 18 September catalogue carries a price description (0 of
+// 32) and all 78 that do are `template:*`, so this governs the templated families only.
+//
+// AN UNMAPPABLE DESCRIPTION IS REFUSED, never resolved. Returning "" would fall back to the
+// entry's own reference, so a leg nobody can map would be treated as sharing the objective's
+// series -- the silent resolution PLAN section 6 forbids by name.
+func catalogueReference(leg doc.ProposalLeg, catalogue any, refs References) (string, error) {
+	item, err := findOutcome(catalogue, leg.Instance.Outcome)
+	if err != nil {
+		return "", err
+	}
+	described, err := termsOf(text(item["description"]))
+	if err != nil {
+		return "", err
+	}
+	description, ok := described["priceDescription"]
+	if !ok {
+		return "", nil
+	}
+	key := ReferenceKey(text(item["venue"]), description, described["seconds"])
+	mapping, known := refs[key]
+	if !known {
+		return "", refuse("AMBIGUOUS_RULES",
+			"%s: no reviewed mapping for %q at %ss on %q",
+			leg.ID, description, described["seconds"], text(item["venue"]))
+	}
+	if mapping.State == "ambiguous" {
+		return "", refuse("AMBIGUOUS_RULES", "%s: %s", leg.ID, mapping.Why)
+	}
+	return mapping.Reference, nil
+}
