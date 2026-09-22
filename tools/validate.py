@@ -155,7 +155,7 @@ def mutate(document, path, value=DELETE):
 def main():
     # ---- the schemas stay inside the subset this validator enforces
     names = sorted(p.name for p in SCHEMAS.glob("*.schema.json"))
-    check(names == ["bundle-manifest.schema.json", "comparison.schema.json", "defs.schema.json", "ir.schema.json", "proposal.schema.json", "refusal.schema.json", "registry-entry.schema.json", "result.schema.json", "snapshot-record.schema.json"], "the nine schema files")
+    check(names == ["bundle-manifest.schema.json", "comparison.schema.json", "defs.schema.json", "ir.schema.json", "proposal.schema.json", "reference-map.schema.json", "refusal.schema.json", "registry-entry.schema.json", "result.schema.json", "snapshot-record.schema.json"], "the ten schema files")
     for name in names:
         lint(load(name), name)
         check(True, f"{name}: only enforced keywords")
@@ -164,6 +164,7 @@ def main():
     documents = {}
     plan = [("fixtures/golden/*.ir.json", "ir.schema.json"), ("fixtures/golden/*.result.json", "result.schema.json"),
             ("fixtures/replay/*/*.proposal.json", "proposal.schema.json"), ("registry/*.json", "registry-entry.schema.json"),
+            ("references/*.json", "reference-map.schema.json"),
             # Every bundle manifest, and the documents of the GOOD bundles. A corrupted
             # bundle is corrupt on purpose, and some corruptions are schema-invalid --
             # that is the refuser's business (oracle/verify.py), not the validator's.
