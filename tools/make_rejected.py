@@ -22,6 +22,7 @@ PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT / "oracle"))
 
 import canon  # noqa: E402
+import oracle as O  # noqa: E402
 
 OUT = PROJECT / "fixtures" / "rejected"
 
@@ -59,7 +60,17 @@ def sources():
         "ranking": ["bucket0", "binary"],
         "engine_version": "reference-oracle-3",
     }
-    return lowered, result, entry, proposal, manifest, comparison
+    synthesis = O.synthesis_document({
+        "schema_version": "1",
+        "objective": {"id": "loss_cap", "min_pnl": "-1000"},
+        "domain": {"lower": "60000", "upper": "110000"},
+        "units": lowered["units"],
+        "base": [{"id": "spot", "kind": "linear", "quantity": "0.1", "baseline": "100000"}],
+        "candidates": [{"id": "put-90k", "pays_on": {"upper": "90000", "upper_inclusive": False},
+                        "price": "0.2"}],
+        "lot": "1",
+    })
+    return lowered, result, entry, proposal, manifest, comparison, synthesis
 
 
 def envelope(**changes):
@@ -83,7 +94,7 @@ def envelope(**changes):
 
 
 def cases():
-    lowered, result, entry, proposal, manifest, comparison = sources()
+    lowered, result, entry, proposal, manifest, comparison, synthesis = sources()
     book = "d62ba1359f45abc313840ed63deef8d705fcc9bd988ca0f29e9412d8e2cd1ef1"
     return [
         # ---- the number grammar, which a rational library would accept and the schema must not
@@ -230,6 +241,43 @@ def cases():
          "an expectation outside the closed list of refusal classes"),
         ("bundle-manifest", "files-missing", mutate(manifest, ["files"]),
          "a manifest that lists no files"),
+
+        # ---- synthesis answers
+        #
+        # The status is a closed set, because a reader acts on it: `infeasible` means no
+        # sizes exist, `rounding_failed` means this search found none. Anything else would
+        # be a fourth meaning nobody has defined.
+        ("synthesis", "status-unknown", mutate(synthesis, ["status"], "maybe"),
+         "a status outside the closed set of three"),
+        # A certificate weight names the constraint it weights. `side` is which of the three
+        # constraints at a price -- the value there, or the limit from either side -- and a
+        # fourth value would name a row no implementation derives.
+        ("synthesis", "certificate-side-unknown",
+         mutate(synthesis, ["certificate", "weights", 0, "side"], "sideways"),
+         "a certificate weight on a side that is not at, above or below"),
+        ("synthesis", "certificate-weight-missing",
+         mutate(synthesis, ["certificate", "weights", 0, "weight"]),
+         "a certificate weight with no weight, which names a row and claims nothing about it"),
+        ("synthesis", "certificate-empty",
+         mutate(synthesis, ["certificate", "weights"], []),
+         "an empty certificate, which proves nothing while claiming infeasibility"),
+        # The document must carry the QUESTION. Without it a checker can only re-add the
+        # numbers the solver emitted, which confirms arithmetic rather than verifying a claim.
+        ("synthesis", "request-missing", mutate(synthesis, ["request"]),
+         "an answer with no question, which cannot be checked against anything"),
+        ("synthesis", "no-candidates",
+         mutate(synthesis, ["request", "candidates"], []),
+         "a synthesis over no instruments at all"),
+        # A price is a number under the grammar, never a float: a repeating decimal read
+        # through a float is a different number from the one that was observed.
+        ("synthesis", "candidate-price-float",
+         mutate(synthesis, ["request", "candidates", 0, "price"], 0.2),
+         "a candidate price as a JSON float"),
+        # Strings, not JSON numbers: otherwise the canonical-JSON profile refuses this
+        # first and the check never reaches the unknown key it is about.
+        ("synthesis", "solver-state-carried",
+         mutate(synthesis, ["tableau"], [["1", "0"], ["0", "1"]]),
+         "solver state in the document, which a certificate exists to make unnecessary"),
     ]
 
 
@@ -250,16 +298,26 @@ def generate():
 
 def main():
     checking = "--check" in sys.argv
-    before = {}
-    if checking and OUT.exists():
-        before = {path.relative_to(OUT): path.read_bytes() for path in sorted(OUT.rglob("*"))
-                  if path.is_file()}
     written = generate()
     if checking:
-        after = {path.relative_to(OUT): path.read_bytes() for path in sorted(OUT.rglob("*")) if path.is_file()}
-        if before != after:
-            changed = sorted({str(name) for name in set(before) | set(after) if before.get(name) != after.get(name)})
-            print(f"rejected fixtures are stale: {', '.join(changed[:3])}", file=sys.stderr)
+        # REPRODUCIBLE, not merely present. These documents are derived and are not in git,
+        # so "does the checkout match?" has no answer on a fresh clone -- `before` would be
+        # empty and every file would read as stale. What still has to hold is that the
+        # generator is a function of its source alone. The assertions that carry the weight
+        # are elsewhere: `tools/validate.py` requires the Python validator to refuse every
+        # document here, and `engine/doc/parity_test.go` requires the Go decoder to refuse
+        # the same files -- and to have a decoder for every schema at all, which is what
+        # forced `doc.ReadSynthesis` into existence.
+        def snapshot():
+            return {path.relative_to(OUT): path.read_bytes()
+                    for path in sorted(OUT.rglob("*")) if path.is_file()}
+        first = snapshot()
+        generate()
+        second = snapshot()
+        if first != second:
+            moved = sorted({str(name) for name in set(first) | set(second)
+                            if first.get(name) != second.get(name)})
+            print(f"rejected fixtures are not reproducible: {', '.join(moved[:3])}", file=sys.stderr)
             return 1
     schemas = sorted({schema for schema, _, _, _ in cases()})
     print(f"{written} rejected documents across {len(schemas)} schemas: {', '.join(schemas)}")
