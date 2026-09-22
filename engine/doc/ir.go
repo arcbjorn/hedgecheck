@@ -69,7 +69,19 @@ type Reduction struct {
 	Rule       string
 	Tight      bool
 	ReasonCode string
+	// With names the OTHER legs reduced together with Leg, when a rule acts on a group.
+	// A band reduction is the infimum of the group's SUMMED payoff, and the infimum of a
+	// sum is not the sum of infima: two legs whose payoffs cancel have a flat sum no
+	// basis move can hurt, while each alone is stepped.
+	With []string
+	// Bound is the declared basis bound a band reduction used. A proposal may declare
+	// several, so the one applied is stated rather than guessed.
+	Bound    exact.Q
+	hasBound bool
 }
+
+// HasBound reports whether this reduction states the bound it used.
+func (r Reduction) HasBound() bool { return r.hasBound }
 
 // Capture is how the evidence was gathered, as asserted by whatever gathered it. It
 // cannot be re-derived: the contexts response carries no venue timestamp.
@@ -366,6 +378,19 @@ func readReductions(r *reader) []Reduction {
 			Tight:      child.boolean("tight"),
 			ReasonCode: child.str("reason_code", codePattern, "an upper-case reason code"),
 		}
+		// The other legs of a grouped reduction, and the bound a band used. Both optional:
+		// a per-leg rule has neither.
+		if members, present := child.optionalList("with", 1); present {
+			for at, member := range members {
+				text, ok := member.(string)
+				if !ok || !legIDPattern.MatchString(text) {
+					child.note(fail(at2(child.path, "with", at), "a leg id"))
+					break
+				}
+				reduction.With = append(reduction.With, text)
+			}
+		}
+		reduction.Bound, reduction.hasBound = child.optionalNumber("bound")
 		if err := child.done(); err != nil {
 			r.note(err)
 			break
