@@ -634,6 +634,114 @@ export function bandInfimum(
   });
 }
 
+/**
+ * inf over [S - band, S + band], AS A FUNCTION -- the band reduction's payoff.
+ *
+ * `bandInfimum` above samples the envelope at given probes, which is enough to check a
+ * value and not enough to add into a profile. This returns the envelope itself.
+ *
+ * ITS BREAKPOINTS MUST BE A SUPERSET OF THE TRUE ONES, and getting that superset right is
+ * the whole difficulty. Three families are needed, and omitting the third was a bug in the
+ * reference oracle until 20 Sep:
+ *
+ *   1. every original breakpoint, shifted both ways and unshifted;
+ *   2. every crossing of two candidate lines, where the envelope switches which piece
+ *      attains the minimum;
+ *   3. every crossing of a candidate line with a CONSTANT equal to a jump value, where the
+ *      band slides off the end of a piece and a plateau takes over.
+ *
+ * Extra breakpoints are harmless. A missing one makes the function describe something it
+ * is not, silently, because a sampled check hits the inside of a span and not its edge.
+ */
+export function bandInfimumFn(f: Fn, band: Rational): Fn {
+  if (sign(band) < 0) throw new KernelError("a negative band");
+  if (sign(band) === 0) return f;
+
+  const lines: { slope: Rational; intercept: Rational }[] = [];
+  const plateaus: Rational[] = [];
+  const marks: Rational[] = [];
+  for (const piece of f.pieces) {
+    // A sloped piece shifts: for an increasing line the infimum over [S-b, S+b] is at
+    // S-b. Both shifts are candidates because the slope's sign decides which one wins.
+    for (const delta of [neg(band), band]) {
+      lines.push({ slope: piece.slope, intercept: add(piece.intercept, mul(piece.slope, delta)) });
+    }
+    for (const bound of [piece.lo, piece.hi]) {
+      if (bound.value !== null) {
+        // Family 1.
+        marks.push(sub(bound.value, band), bound.value, add(bound.value, band));
+        // A value at a piece's own end becomes a plateau of the envelope wherever the
+        // band covers it.
+        plateaus.push(add(mul(piece.slope, bound.value), piece.intercept));
+      }
+    }
+  }
+  // Family 2: where two candidate lines cross.
+  for (let i = 0; i < lines.length; i += 1) {
+    const a = lines[i] as { slope: Rational; intercept: Rational };
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const b = lines[j] as { slope: Rational; intercept: Rational };
+      if (!equals(a.slope, b.slope)) {
+        marks.push(div(sub(b.intercept, a.intercept), sub(a.slope, b.slope)));
+      }
+    }
+  }
+  // Family 3: where a sloped candidate meets a plateau value.
+  for (const line of lines) {
+    if (sign(line.slope) !== 0) {
+      for (const value of plateaus) {
+        marks.push(div(sub(value, line.intercept), line.slope));
+      }
+    }
+  }
+
+  const cuts = uniqueSorted(marks);
+  const at = (price: Rational): Rational => infimum(f, sub(price, band), add(price, band)).value;
+  return fromSamples(cuts, at);
+}
+
+/**
+ * The piecewise-affine function agreeing with `at` on every span between `cuts`.
+ *
+ * Each span is affine by construction -- that is what the cuts are for -- so two interior
+ * points determine its line, and the endpoints are sampled to place the jumps. A span
+ * whose value is not affine would be a missing cut, which is why the caller computes all
+ * three families rather than guessing.
+ */
+function fromSamples(cuts: readonly Rational[], at: (price: Rational) => Rational): Fn {
+  const pieces: Piece[] = [];
+  const edges = [...cuts];
+  const spanLine = (lo: Rational | null, hi: Rational | null): { slope: Rational; intercept: Rational } => {
+    // Two probes inside the span. An unbounded side probes one step out from its edge.
+    const step = ONE;
+    const left = lo === null ? sub(hi as Rational, add(step, step)) : (hi === null ? add(lo, step) : midpoint(lo, hi));
+    const right = lo === null ? sub(hi as Rational, step) : (hi === null ? add(lo, add(step, step)) : midpoint(left, hi as Rational));
+    const fl = at(left);
+    const fr = at(right);
+    const slope = equals(left, right) ? ZERO : div(sub(fr, fl), sub(right, left));
+    return { slope, intercept: sub(fl, mul(slope, left)) };
+  };
+
+  // EXACTLY ONE NEIGHBOUR OWNS EACH BOUNDARY, which is the kernel's invariant. A cut is
+  // its own closed singleton, so a jump is exact, and the spans on either side are open at
+  // that end -- otherwise the price would be owned twice.
+  let previous: Rational | null = null;
+  for (const edge of edges) {
+    const line = spanLine(previous, edge);
+    pieces.push({ lo: { value: previous, closed: false }, hi: { value: edge, closed: false }, ...line });
+    pieces.push({
+      lo: { value: edge, closed: true },
+      hi: { value: edge, closed: true },
+      slope: ZERO,
+      intercept: at(edge),
+    });
+    previous = edge;
+  }
+  const tail = spanLine(previous, null);
+  pieces.push({ lo: { value: previous, closed: false }, hi: { value: null, closed: false }, ...tail });
+  return fn(pieces);
+}
+
 // ---------------------------------------------------------------- ask walk
 
 export interface Level {
