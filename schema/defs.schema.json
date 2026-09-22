@@ -49,10 +49,10 @@
       "maxLength": 2000
     },
     "reference": {
-      "description": "source:series:statistic[:window], never free text. 'synthetic' for fixtures.",
+      "description": "source:series:statistic[:window], never free text. 'synthetic' for fixtures. Up to FOUR segments after the source: PLAN section 6 names hl:perp:BTC:mark-twap:60s and hl:perp:BTC:trade-twap:90s, where the series is itself two parts and the window is a fourth. The pattern allowed three, so it refused two of the four ids that document lists -- undetected because no fixture used a windowed hl: id.",
       "type": "string",
       "maxLength": 80,
-      "pattern": "^(?:synthetic|[a-z0-9]+(?::[A-Za-z0-9/._-]+){2,3})$"
+      "pattern": "^(?:synthetic|[a-z0-9]+(?::[A-Za-z0-9/._-]+){2,4})$"
     },
     "family": {
       "type": "string",
