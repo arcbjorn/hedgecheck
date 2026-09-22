@@ -376,6 +376,34 @@ worst-cased. Basis bounds between ids are declared by the user and never
 defaulted; an observed historical deviation may be displayed, labeled as an
 observation.
 
+**THE 42 PYTH INSTANCES ARE MAPPED, ruled 22 Sep.** They are 42 of the 78 templated
+instances on the 18 September catalogue — 15 BTC/USD, 9 HYPE/USD, 9 US100, 9 US500, all on
+venue `skew` at 90 seconds — and four map rows had refused them all as `AMBIGUOUS_RULES`,
+on the ground that naming Pyth contradicts the template metadata "This market must refer to
+the price of a Hyperliquid perp".
+
+**There is no contradiction, and the retained template text settles it.** The full
+`binaryPrice` description reads "Settlement is according to the {seconds}-second TWAP of
+{priceDescription} price ending at {time}" — so `priceDescription` **is** the settlement
+source, whatever it names. The restriction is `semanticRestriction` and constrains `{perp}`,
+the market's *subject*, which is a different template field. Every one of the 42 pairs
+coherently: `perp:BTC` settling on Pyth BTC/USD, `perp:HYPE` on Pyth HYPE/USD,
+`perp:xyz:XYZ100` on Pyth US100, `perp:xyz:SP500` on Pyth US500. Evidence:
+`research/2026-09-18/outcome-templates.json` at commit 085ccfb.
+
+Two corrections to what those rows claimed: the count was **42, not 15**; and the US100 row
+said "there is no Hyperliquid perp for US100 at all", which is wrong on the data — all nine
+carry `perp:xyz:XYZ100`.
+
+They are mapped **`interpreted`**, to `pyth:*` ids and never to `hl:*`. Mapping them does
+not make them comparable: a leg observed on `pyth:BTC/USD:price-twap:90s` against an
+objective stated on `hl:perp:BTC:mark-interp` earns **`basis_unbridged`** and is worth zero
+unless the owner declares a bound — verified on outcome 3069. That is the honest answer, and
+it is why refusing was the wrong one: refusing discarded 54% of the live catalogue to avoid a
+question the basis rule already answers correctly. What stays ambiguous is what genuinely
+names no series: `1-minute candle` (18 instances, no source, no instrument, and a 300-second
+window contradicting its own stated period) and `xyz:CL` (1, a bare ticker). 19 of 78.
+
 Family identifiers are whitelisted. Familiar tickers do not bypass validation. A
 model may draft an entry for review; it is never in the evaluation path.
 
@@ -597,7 +625,7 @@ inspection. Record a day with a non-empty window and a day with an empty one.
 | Interview question | Honest answer, and the artifact |
 |---|---|
 | Which rule, and did you verify it? | The contract specifications page. Verified: twenty reported fractions agree with twenty reported prices. **Not** verified: inclusivity — none settled at its target — nor interpolation |
-| Why not deployer markets? | Four different reference strings for one asset, fifteen naming Pyth under a "must be a Hyperliquid perp" restriction; the registry and the `priceTouch` bound |
+| Why not deployer markets? | Four different reference strings for one asset, **42 of 78** settling on Pyth while the template restricts the SUBJECT to a Hyperliquid perp; the registry, the reference map and the `priceTouch` bound |
 | What happens at the threshold? | 999.90 for one dollar; endpoint ownership in the certificate |
 | Can size fix it? | `D + p·A` against the cap; the window with its binding constraints; the certificate when it is empty |
 | Is a passing hedge a good one? | No — the comparison table |
