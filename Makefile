@@ -61,7 +61,8 @@ bundlecheck:
 checker: generated
 	@cd checker && deno check --quiet src/*.ts
 	@cd checker && deno check --quiet --node-modules-dir=none test/*.ts
-	@cd checker && node --test "test/*.test.ts" > .test.log 2>&1; status=$$?; grep -E "^(ℹ (tests|pass|fail)|✖)" .test.log; rm -f .test.log; exit $$status
+	@cd checker && node --test "test/*.test.ts" > .test.log 2>&1; status=$$?; grep -E "^(ℹ (tests|pass|fail)|✖)" .test.log; \
+		if [ $$status -eq 0 ]; then rm -f .test.log; else echo "checker: full output kept at checker/.test.log"; fi; exit $$status
 
 # The approval gate. It runs its own copy of the checker, so it is checked after it.
 #
@@ -72,7 +73,8 @@ checker: generated
 consumer:
 	@cd consumer && deno check --quiet --node-modules-dir=none src/*.ts
 	@cd consumer && deno check --quiet --node-modules-dir=none $$(ls test/*.ts | grep -v unrepresentable.ts)
-	@cd consumer && node --test "test/*.test.ts" > .test.log 2>&1; status=$$?; grep -E "^(ℹ (tests|pass|fail)|✖)" .test.log; rm -f .test.log; exit $$status
+	@cd consumer && node --test "test/*.test.ts" > .test.log 2>&1; status=$$?; grep -E "^(ℹ (tests|pass|fail)|✖)" .test.log; \
+		if [ $$status -eq 0 ]; then rm -f .test.log; else echo "consumer: full output kept at consumer/.test.log"; fi; exit $$status
 
 clean:
 	@find . -name __pycache__ -type d -not -path "./.git/*" -exec rm -rf {} + 2>/dev/null; true
