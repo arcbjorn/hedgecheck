@@ -336,9 +336,12 @@ agree on it:
 - **`bounded`** — it is not. `priceTouch` is path-dependent: whether the price ever
   touched a level is not recoverable from where it ended. §2 gives the bound — the
   inclusive terminal digital at the target, and only when the touch window covers the
-  valuation time — but no such family exists yet, so lowering **refuses**
+  valuation time — but no bound is implemented yet, so lowering **refuses**
   (`UNSUPPORTED_FAMILY`) rather than reaching for the terminal machinery. Evaluating one
   as terminal would over-credit it at prices it may never have touched.
+  **Nine live instances carry it** on the 18 September catalogue (EVIDENCE §1,
+  re-counted 22 Sep). This line said “no such family exists yet”, which was wrong: the
+  refusal is right, the reason given for it was not.
 - **`refused`** — the registry has no reading. A **refusal, not a reduction**: a
   reduction still produces a verdict, and there is no verdict to produce about a payoff
   nobody has read. Worst-casing it to zero would answer a question declared
