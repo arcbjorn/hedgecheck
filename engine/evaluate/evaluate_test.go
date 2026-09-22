@@ -33,10 +33,31 @@ func equalResults(t *testing.T, got, want []byte) (string, string, bool) {
 }
 
 func TestReproducesPinnedResults(t *testing.T) {
+	// EVERY good bundle, read from the directory. This was a hardcoded list of two, so a
+	// bundle added later was evaluated by Python and by the TypeScript checker and not by
+	// this engine -- silently, because a list that names its cases cannot notice a case it
+	// does not name.
 	pairs := []struct{ ir, result string }{
 		{"../../fixtures/golden/1000-contracts.ir.json", "../../fixtures/golden/1000-contracts.result.json"},
-		{"../../fixtures/bundles/good/lowered.json", "../../fixtures/bundles/good/result.json"},
-		{"../../fixtures/bundles/good-horizon/lowered.json", "../../fixtures/bundles/good-horizon/result.json"},
+	}
+	goods, err := filepath.Glob("../../fixtures/bundles/good*/lowered.json")
+	if err != nil || len(goods) == 0 {
+		t.Fatalf("no good bundles: %v", err)
+	}
+	for _, lowered := range goods {
+		// `good-envelope` is excluded, and only it: its order envelope is issued by the
+		// BUNDLE GENERATOR after evaluation, from the walked book, so `Evaluate` cannot
+		// reproduce that document and never claimed to. Named rather than pattern-matched,
+		// so a future exclusion has to be argued for here.
+		if filepath.Base(filepath.Dir(lowered)) == "good-envelope" {
+			continue
+		}
+		pairs = append(pairs, struct{ ir, result string }{
+			lowered, filepath.Join(filepath.Dir(lowered), "result.json"),
+		})
+	}
+	if len(pairs) < 5 {
+		t.Fatalf("only %d pairs; the glob is not finding the bundles", len(pairs))
 	}
 	for _, pair := range pairs {
 		rawIR, err := os.ReadFile(pair.ir)
