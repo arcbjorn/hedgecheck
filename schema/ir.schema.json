@@ -1,207 +1,237 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "ir.schema.json",
-  "title": "Lowered proposal",
-  "$comment": "Frozen as schema v1 at T1's gate (PLAN.md section 7), after the contract met live data on 18 and 19 September. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored. Every change since 062a245 is listed in schema/CHANGES.md with the case that forced it; a change after the freeze needs a new schema_version and a row there.",
-  "description": "What the kernel evaluates: primitives only. Families, snapshots and reductions have already been resolved by lowering; nothing here needs the registry or the network.",
-  "type": "object",
-  "required": [
-    "schema_version",
-    "units",
-    "domain",
-    "baseline",
-    "exposure",
-    "legs",
-    "objective",
-    "objective_valuation_time",
-    "other_costs",
-    "assumptions"
-  ],
-  "properties": {
-    "schema_version": {
-      "const": "1"
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "ir.schema.json",
+ "title": "Lowered proposal",
+ "$comment": "Frozen as schema v1 at T1's gate (PLAN.md section 7), after the contract met live data on 18 and 19 September. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored. Every change since 062a245 is listed in schema/CHANGES.md with the case that forced it; a change after the freeze needs a new schema_version and a row there.",
+ "description": "What the kernel evaluates: primitives only. Families, snapshots and reductions have already been resolved by lowering; nothing here needs the registry or the network.",
+ "type": "object",
+ "required": [
+  "schema_version",
+  "units",
+  "domain",
+  "baseline",
+  "exposure",
+  "legs",
+  "objective",
+  "objective_valuation_time",
+  "other_costs",
+  "assumptions"
+ ],
+ "properties": {
+  "schema_version": {
+   "const": "1"
+  },
+  "units": {
+   "$ref": "defs.schema.json#/$defs/units"
+  },
+  "domain": {
+   "$ref": "defs.schema.json#/$defs/domain"
+  },
+  "baseline": {
+   "$ref": "defs.schema.json#/$defs/baseline"
+  },
+  "exposure": {
+   "description": "What the holder is exposed to. `linear` is spot and cannot be liquidated; `isolated_perp` can.",
+   "oneOf": [
+    {
+     "type": "object",
+     "required": [
+      "kind",
+      "quantity"
+     ],
+     "properties": {
+      "kind": {
+       "const": "linear"
+      },
+      "quantity": {
+       "$ref": "defs.schema.json#/$defs/number"
+      }
+     },
+     "additionalProperties": false
     },
-    "units": {
-      "$ref": "defs.schema.json#/$defs/units"
-    },
-    "domain": {
-      "$ref": "defs.schema.json#/$defs/domain"
-    },
-    "baseline": {
-      "$ref": "defs.schema.json#/$defs/baseline"
-    },
-    "exposure": {
+    {
+     "type": "object",
+     "description": "An isolated perp, carried through lowering so a checker can re-derive the path reduction. `linear` alone could not: an IR that does not say what is exposed cannot say why the exposure was reduced.",
+     "required": [
+      "kind",
+      "quantity",
+      "liquidation_price",
+      "isolated_margin"
+     ],
+     "properties": {
+      "kind": {
+       "const": "isolated_perp"
+      },
+      "quantity": {
+       "$ref": "defs.schema.json#/$defs/number"
+      },
+      "liquidation_price": {
+       "$ref": "defs.schema.json#/$defs/number"
+      },
+      "isolated_margin": {
+       "$ref": "defs.schema.json#/$defs/number"
+      }
+     },
+     "additionalProperties": false
+    }
+   ]
+  },
+  "legs": {
+   "type": "array",
+   "items": {
+    "oneOf": [
+     {
       "type": "object",
       "required": [
-        "kind",
-        "quantity"
+       "id",
+       "kind",
+       "size",
+       "pays_on",
+       "premium",
+       "observation_time",
+       "semantics"
       ],
       "properties": {
-        "kind": {
-          "const": "linear"
-        },
-        "quantity": {
-          "$ref": "defs.schema.json#/$defs/number"
-        }
+       "id": {
+        "$ref": "defs.schema.json#/$defs/leg_id"
+       },
+       "kind": {
+        "const": "indicator"
+       },
+       "size": {
+        "$ref": "defs.schema.json#/$defs/number"
+       },
+       "pays_on": {
+        "$ref": "defs.schema.json#/$defs/pays_on"
+       },
+       "premium": {
+        "$ref": "defs.schema.json#/$defs/cost"
+       },
+       "observation_time": {
+        "$ref": "defs.schema.json#/$defs/time"
+       },
+       "semantics": {
+        "$ref": "defs.schema.json#/$defs/text"
+       }
       },
       "additionalProperties": false
-    },
-    "legs": {
-      "type": "array",
-      "items": {
-        "oneOf": [
-          {
-            "type": "object",
-            "required": [
-              "id",
-              "kind",
-              "size",
-              "pays_on",
-              "premium",
-              "observation_time",
-              "semantics"
-            ],
-            "properties": {
-              "id": {
-                "$ref": "defs.schema.json#/$defs/leg_id"
-              },
-              "kind": {
-                "const": "indicator"
-              },
-              "size": {
-                "$ref": "defs.schema.json#/$defs/number"
-              },
-              "pays_on": {
-                "$ref": "defs.schema.json#/$defs/pays_on"
-              },
-              "premium": {
-                "$ref": "defs.schema.json#/$defs/cost"
-              },
-              "observation_time": {
-                "$ref": "defs.schema.json#/$defs/time"
-              },
-              "semantics": {
-                "$ref": "defs.schema.json#/$defs/text"
-              }
-            },
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "required": [
-              "id",
-              "kind",
-              "size",
-              "direction",
-              "low",
-              "high",
-              "premium",
-              "observation_time",
-              "semantics"
-            ],
-            "properties": {
-              "id": {
-                "$ref": "defs.schema.json#/$defs/leg_id"
-              },
-              "kind": {
-                "const": "ramp"
-              },
-              "size": {
-                "$ref": "defs.schema.json#/$defs/number"
-              },
-              "direction": {
-                "enum": [
-                  "long",
-                  "short"
-                ]
-              },
-              "low": {
-                "$ref": "defs.schema.json#/$defs/number"
-              },
-              "high": {
-                "$ref": "defs.schema.json#/$defs/number"
-              },
-              "premium": {
-                "$ref": "defs.schema.json#/$defs/cost"
-              },
-              "observation_time": {
-                "$ref": "defs.schema.json#/$defs/time"
-              },
-              "semantics": {
-                "$ref": "defs.schema.json#/$defs/text"
-              }
-            },
-            "additionalProperties": false,
-            "description": "Reserved for template.scalarPrice (T4). The oracle's evaluate() does not accept it yet."
-          }
+     },
+     {
+      "type": "object",
+      "required": [
+       "id",
+       "kind",
+       "size",
+       "direction",
+       "low",
+       "high",
+       "premium",
+       "observation_time",
+       "semantics"
+      ],
+      "properties": {
+       "id": {
+        "$ref": "defs.schema.json#/$defs/leg_id"
+       },
+       "kind": {
+        "const": "ramp"
+       },
+       "size": {
+        "$ref": "defs.schema.json#/$defs/number"
+       },
+       "direction": {
+        "enum": [
+         "long",
+         "short"
         ]
-      }
-    },
-    "objective": {
+       },
+       "low": {
+        "$ref": "defs.schema.json#/$defs/number"
+       },
+       "high": {
+        "$ref": "defs.schema.json#/$defs/number"
+       },
+       "premium": {
+        "$ref": "defs.schema.json#/$defs/cost"
+       },
+       "observation_time": {
+        "$ref": "defs.schema.json#/$defs/time"
+       },
+       "semantics": {
+        "$ref": "defs.schema.json#/$defs/text"
+       }
+      },
+      "additionalProperties": false,
+      "description": "Reserved for template.scalarPrice (T4). The oracle's evaluate() does not accept it yet."
+     }
+    ]
+   }
+  },
+  "objective": {
+   "type": "array",
+   "minItems": 1,
+   "items": {
+    "$ref": "defs.schema.json#/$defs/clause"
+   }
+  },
+  "max_premium": {
+   "$ref": "defs.schema.json#/$defs/number"
+  },
+  "objective_valuation_time": {
+   "$ref": "defs.schema.json#/$defs/time"
+  },
+  "other_costs": {
+   "$ref": "defs.schema.json#/$defs/number"
+  },
+  "assumptions": {
+   "type": "array",
+   "items": {
+    "$ref": "defs.schema.json#/$defs/slug"
+   }
+  },
+  "reductions": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "leg",
+     "rule",
+     "tight",
+     "reason_code"
+    ],
+    "properties": {
+     "leg": {
+      "$ref": "defs.schema.json#/$defs/leg_id"
+     },
+     "rule": {
+      "$ref": "defs.schema.json#/$defs/slug"
+     },
+     "tight": {
+      "type": "boolean"
+     },
+     "reason_code": {
+      "$ref": "defs.schema.json#/$defs/code"
+     },
+     "with": {
       "type": "array",
       "minItems": 1,
       "items": {
-        "$ref": "defs.schema.json#/$defs/clause"
-      }
-    },
-    "max_premium": {
-      "$ref": "defs.schema.json#/$defs/number"
-    },
-    "objective_valuation_time": {
-      "$ref": "defs.schema.json#/$defs/time"
-    },
-    "other_costs": {
-      "$ref": "defs.schema.json#/$defs/number"
-    },
-    "assumptions": {
-      "type": "array",
-      "items": {
-        "$ref": "defs.schema.json#/$defs/slug"
-      }
-    },
-    "reductions": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "leg",
-          "rule",
-          "tight",
-          "reason_code"
-        ],
-        "properties": {
-          "leg": {
-            "$ref": "defs.schema.json#/$defs/leg_id"
-          },
-          "rule": {
-            "$ref": "defs.schema.json#/$defs/slug"
-          },
-          "tight": {
-            "type": "boolean"
-          },
-          "reason_code": {
-            "$ref": "defs.schema.json#/$defs/code"
-          },
-          "with": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "defs.schema.json#/$defs/leg_id"
-            },
-            "description": "The OTHER legs reduced together with `leg`, when a rule acts on a group rather than one leg. A band reduction is the infimum of the group's SUMMED payoff, and the infimum of a sum is not the sum of infima: two legs whose payoffs cancel have a flat sum that no basis move can hurt, while each alone is stepped. Reducing them separately invents a loss on a perfectly hedged position. Absent for a per-leg rule."
-          },
-          "bound": {
-            "$ref": "defs.schema.json#/$defs/number",
-            "description": "The declared basis bound this reduction used, when the rule is a band. A checker re-derives the reduction, and a proposal may declare several bounds, so the one that was applied is stated rather than guessed. Absent when no bound was declared -- then the group is worth zero and there is no band."
-          }
-        },
-        "additionalProperties": false
+       "$ref": "defs.schema.json#/$defs/leg_id"
       },
-      "description": "Every lowering rule that lowered a leg's value, so a checker can re-derive and compare. A rule acting on a group states its other members in `with`."
+      "description": "The OTHER legs reduced together with `leg`, when a rule acts on a group rather than one leg. A band reduction is the infimum of the group's SUMMED payoff, and the infimum of a sum is not the sum of infima: two legs whose payoffs cancel have a flat sum that no basis move can hurt, while each alone is stepped. Reducing them separately invents a loss on a perfectly hedged position. Absent for a per-leg rule."
+     },
+     "bound": {
+      "$ref": "defs.schema.json#/$defs/number",
+      "description": "The declared basis bound this reduction used, when the rule is a band. A checker re-derives the reduction, and a proposal may declare several bounds, so the one that was applied is stated rather than guessed. Absent when no bound was declared -- then the group is worth zero and there is no band."
+     }
     },
-    "capture": {
-      "$ref": "defs.schema.json#/$defs/capture"
-    }
+    "additionalProperties": false
+   },
+   "description": "Every lowering rule that lowered a leg's value, so a checker can re-derive and compare. A rule acting on a group states its other members in `with`."
   },
-  "additionalProperties": false
+  "capture": {
+   "$ref": "defs.schema.json#/$defs/capture"
+  }
+ },
+ "additionalProperties": false
 }
