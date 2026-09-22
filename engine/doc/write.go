@@ -41,7 +41,7 @@ func encodeIR(ir IR) map[string]any {
 		},
 		"domain":                   map[string]any{"lower": ir.Domain.Lower.String(), "upper": ir.Domain.Upper.String()},
 		"baseline":                 encodeBaseline(ir.Baseline),
-		"exposure":                 map[string]any{"kind": ir.Exposure.Kind, "quantity": ir.Exposure.Quantity.String()},
+		"exposure":                 encodeExposure(ir.Exposure),
 		"legs":                     encodeLegs(ir.Legs),
 		"objective":                encodeObjective(ir.Objective),
 		"objective_valuation_time": ir.ObjectiveValuationTime,
@@ -164,6 +164,18 @@ func encodeReductions(reductions []Reduction) []any {
 			encoded["bound"] = reduction.Bound.String()
 		}
 		out = append(out, encoded)
+	}
+	return out
+}
+
+// encodeExposure writes the exposure, with an isolated perp's own two numbers. They are
+// omitted for spot rather than written as zero: a spot holding has no liquidation price, and
+// writing one would describe a risk it does not have.
+func encodeExposure(exposure Exposure) map[string]any {
+	out := map[string]any{"kind": exposure.Kind, "quantity": exposure.Quantity.String()}
+	if exposure.Liquidatable() {
+		out["liquidation_price"] = exposure.LiquidationPrice.String()
+		out["isolated_margin"] = exposure.IsolatedMargin.String()
 	}
 	return out
 }
