@@ -33,6 +33,10 @@ REPLAY = PROJECT / "fixtures" / "replay" / "2026-09-18"
 BUNDLES = PROJECT / "fixtures" / "bundles"
 SOURCE = {"catalogue": "outcome-meta", "contexts": "meta-and-asset-ctxs",
           "book": "book-bucket0-3971-yes"}
+# The second leg of the GROUPED basis bundle: outcome 3965 NO, its own retained book.
+# Both legs are real 18 September instances sharing the expiry 2026-09-19T06:00:00Z, so
+# the group is genuine and nothing about it is invented.
+SECOND_BOOK = "book-3965-no"
 
 
 def reviewed(entry):
@@ -86,8 +90,19 @@ FOREIGN_REFERENCE = "pyth:{underlying}/USD:price-twap:90s"
 FOREIGN_RESOLVED = "pyth:BTC/USD:price-twap:90s"
 
 
+def second_leg():
+    """The binary NO leg of the 18 September replay, for the GROUPED basis bundle.
+
+    Real, retained, and it shares the bucket leg's expiry (2026-09-19T06:00:00Z), so the
+    two sit in one group with one valuation time. Nothing here is invented: the leg is
+    lifted from binary.proposal.json and its book is the retained #39651 response.
+    """
+    other = canon.loads((REPLAY / "binary.proposal.json").read_bytes())
+    return copy.deepcopy(other["legs"][0])
+
+
 def build_good(proposal_file="bucket0.proposal.json", envelope=False, settlement=None,
-               reference=None, basis_bound=None):
+               reference=None, basis_bound=None, grouped=False):
     """Lower and evaluate an 18 Sep replay proposal against a reviewed entry.
 
     `settlement` forces the entry's settlement, so a bundle can carry a family whose
@@ -100,6 +115,14 @@ def build_good(proposal_file="bucket0.proposal.json", envelope=False, settlement
     disagree about it, because every other fixture has one reference throughout.
     """
     proposal = canon.loads((REPLAY / proposal_file).read_bytes())
+    if grouped:
+        # TWO legs on the same foreign reference, so the band is applied to their SUMMED
+        # payoff. The infimum of a sum is not the sum of infima, and a bucket YES over
+        # [75908, 79007) plus a binary NO over (-inf, 77457) overlap -- so the group's sum
+        # is a different shape from either leg, which is exactly what per-leg banding gets
+        # wrong. Without this bundle, grouping is exercised only inside the Python guard
+        # and the three implementations are never held to agreeing on it.
+        proposal = dict(proposal, legs=[*proposal["legs"], second_leg()])
     entries, snapshots = {}, {}
     for path in sorted((PROJECT / "registry").glob("*.json")):
         entry = canon.loads(path.read_bytes())
@@ -111,12 +134,14 @@ def build_good(proposal_file="bucket0.proposal.json", envelope=False, settlement
     if basis_bound is not None:
         proposal = dict(proposal, basis_bounds=[
             {"between": [proposal["objective_reference"], FOREIGN_RESOLVED], "bound": basis_bound}])
-    for stem in SOURCE.values():
+    stems = list(SOURCE.values()) + ([SECOND_BOOK] if grouped else [])
+    for stem in stems:
         raw = (REPLAY / f"{stem}.json").read_bytes()
         snapshots[sha256(raw).hexdigest()] = raw
 
-    family = proposal["legs"][0]["family"]
-    proposal["legs"][0]["semantics_version"] = canon.semantics_version(entries[family])
+    legs = [dict(leg, semantics_version=canon.semantics_version(entries[leg["family"]]))
+            for leg in proposal["legs"]]
+    proposal = dict(proposal, legs=legs)
     parsed = {digest: json.loads(raw) for digest, raw in snapshots.items()}
     lowered, versions = lowering.lower(proposal, entries, parsed)
     result = O.evaluate(lowered)
@@ -368,10 +393,27 @@ BASES = {
     # bundle exercises and the three implementations cannot be held to agreeing on it.
     "good-basis-band": "bucket0.proposal.json",
     "good-basis-unbridged": "bucket0.proposal.json",
+    # TWO legs on one foreign reference, banded as a GROUP. The two above are single-leg,
+    # so no bundle carried a `with` list at all and neither Go nor the TypeScript checker
+    # was ever held to agreeing on one -- both implement grouping, and both were untested
+    # against the other two on it.
+    #
+    # WHAT THIS BUNDLE DOES NOT DO: separate grouped banding from per-leg banding. Its two
+    # legs are a bucket YES below 75908 and a binary NO below 77457, both MONOTONE DECREASING,
+    # and for same-direction legs the infimum of the sum IS the sum of infima -- measured
+    # at bands of 100, 500, 1,000, 2,000 and 5,000, the two agree at every price. Separating
+    # them needs legs pointing OPPOSITE ways, whose sum is flat where each alone is stepped,
+    # and no retained book supports such a pair: binary YES would need coin #39650 and
+    # bucket NO #39711, neither of which was captured. That case is therefore synthetic, in
+    # `basis_band`'s cancelling pair in oracle/verify.py, which is where the arithmetic is
+    # pinned. This bundle pins the PLUMBING: that a group is recorded, carried and agreed.
+    "good-basis-grouped": "bucket0.proposal.json",
 }
 ENVELOPE_BASES = {"good-envelope"}
 DEPLOYER_BASES = {"good-deployer"}
-BASIS_BASES = {"good-basis-band": "500", "good-basis-unbridged": None}
+BASIS_BASES = {"good-basis-band": "500", "good-basis-unbridged": None,
+               "good-basis-grouped": "500"}
+GROUPED_BASES = {"good-basis-grouped"}
 
 CORRUPTIONS = [
     ("strike-piece-removed", "good", "PROFILE_COVERAGE", strike_piece_removed),
@@ -398,6 +440,7 @@ def generate():
     goods = {name: build_good(source, envelope=name in ENVELOPE_BASES,
                               settlement="deployer" if name in DEPLOYER_BASES else None,
                               reference=FOREIGN_REFERENCE if name in BASIS_BASES else None,
+                              grouped=name in GROUPED_BASES,
                               basis_bound=BASIS_BASES.get(name))
              for name, source in BASES.items()}
     if BUNDLES.exists():
@@ -413,15 +456,20 @@ def generate():
 
 def main():
     checking = "--check" in sys.argv
-    before = {}
-    if checking and BUNDLES.exists():
-        before = {path.relative_to(BUNDLES): path.read_bytes() for path in sorted(BUNDLES.rglob("*.json"))}
     count = generate()
     if checking:
-        after = {path.relative_to(BUNDLES): path.read_bytes() for path in sorted(BUNDLES.rglob("*.json"))}
-        if before != after:
-            changed = sorted({name for name in set(before) | set(after) if before.get(name) != after.get(name)})
-            print(f"bundles are stale: {', '.join(str(name) for name in changed[:3])}", file=sys.stderr)
+        # REPRODUCIBLE, not merely present. These bundles are derived and are not in git,
+        # so "does the checkout match?" has no answer on a fresh clone -- `before` would be
+        # empty and every file would read as stale. What still has to hold is that the
+        # generator is a function of its source alone. The assertion that carries the real
+        # weight is elsewhere: `bundles()` in oracle/verify.py requires each bundle to be
+        # accepted, or refused with exactly the class its manifest names.
+        first = {path.relative_to(BUNDLES): path.read_bytes() for path in sorted(BUNDLES.rglob("*.json"))}
+        generate()
+        second = {path.relative_to(BUNDLES): path.read_bytes() for path in sorted(BUNDLES.rglob("*.json"))}
+        if first != second:
+            moved = sorted({name for name in set(first) | set(second) if first.get(name) != second.get(name)})
+            print(f"bundles are not reproducible: {', '.join(str(name) for name in moved[:3])}", file=sys.stderr)
             return 1
     print(f"{count} bundles generated: {len(BASES)} good, {len(CORRUPTIONS)} corrupted, each one documented change")
     return 0
