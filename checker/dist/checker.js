@@ -1683,6 +1683,23 @@ function checkCertificate(document, derived, floor) {
 }
 
 // src/verify.ts
+function exposureReduction(proposal) {
+  const exposure = object(proposal["exposure"], "$proposal.exposure");
+  if (text(exposure["kind"], "$proposal.exposure.kind") !== "isolated_perp") return [];
+  const domain = object(proposal["domain"], "$proposal.domain");
+  const baseline = number(object(proposal["baseline"], "$proposal.baseline")["price"], "$proposal.baseline.price");
+  const low = lt(number(domain["lower"], "$proposal.domain.lower"), baseline) ? number(domain["lower"], "$proposal.domain.lower") : baseline;
+  const high = lt(baseline, number(domain["upper"], "$proposal.domain.upper")) ? number(domain["upper"], "$proposal.domain.upper") : baseline;
+  const price = number(exposure["liquidation_price"], "$proposal.exposure.liquidation_price");
+  if (lt(price, low) || lt(high, price)) return [];
+  return [
+    {
+      leg: "exposure",
+      rule: "liquidated_in_path",
+      tight: true
+    }
+  ];
+}
 var Refused = class extends Error {
   refusal;
   constructor(refusal) {
@@ -1958,6 +1975,9 @@ function relower(evidence) {
     bandGroups,
     baseline: claimedBaseline,
     quantity,
+    // The holding, valued as the verdict values it. Derived from the proposal's own exposure
+    // and the path domain, never from what the result says about either.
+    holding: exposureReduction(proposal).length > 0 ? cash(neg(number(exposure["isolated_margin"], "$proposal.exposure.isolated_margin"))) : linear(quantity, claimedBaseline),
     domainLower,
     domainUpper,
     otherCosts: number(proposal["other_costs"], "$proposal.other_costs"),
@@ -2202,7 +2222,7 @@ async function compareLowering(evidence, rebuilt) {
 function evaluateAndCompare(evidence, rebuilt) {
   const result = evidence.result;
   const lowerParts = [
-    linear(rebuilt.quantity, rebuilt.baseline),
+    rebuilt.holding,
     cash(neg(add(rebuilt.premium, rebuilt.otherCosts)))
   ];
   const upperParts = [
@@ -2411,11 +2431,14 @@ function compareReductions(evidence, rebuilt) {
       refuse2("REDUCTION_UNDECLARED", "$result.reductions", `leg ${leg.id} rests on ${leg.family} at version ${leg.version}, which is not in this checker's allowlist, so this checker reduces it under unreviewed_family; the result declares no reduction for that leg`);
     }
   }
-  const expected = mine.flatMap((leg) => leg.reductionRules.map((each) => ({
-    leg: leg.id,
-    rule: each.rule,
-    tight: each.tight
-  })));
+  const expected = [
+    ...exposureReduction(evidence.proposal),
+    ...mine.flatMap((leg) => leg.reductionRules.map((each) => ({
+      leg: leg.id,
+      rule: each.rule,
+      tight: each.tight
+    })))
+  ];
   if (stated.length !== expected.length) {
     refuse2("REDUCTION_UNDECLARED", "$result.reductions", `the result declares ${stated.length} reductions, the evidence requires ${expected.length}`);
   }
@@ -2475,7 +2498,7 @@ function compareSizeWindows(evidence, rebuilt) {
       refuse2("SIZE_WINDOW", `$result.size_windows[${index}]`, `no leg named ${legId}`);
     }
     const baseParts = [
-      linear(rebuilt.quantity, rebuilt.baseline)
+      rebuilt.holding
     ];
     for (const other of rebuilt.legs) {
       if (other.id === legId || other.reduced) continue;
@@ -2511,10 +2534,13 @@ function compareWitnesses(evidence, rebuilt, upperFn) {
     clause
   ]));
   const looseLegs = new Set(rebuilt.legs.filter((leg) => leg.reduced && !leg.tight).map((leg) => leg.id));
-  const reducedLegs = new Map(rebuilt.legs.filter((leg) => leg.reduced).map((leg) => [
+  const reducedRules = new Map(rebuilt.legs.filter((leg) => leg.reduced).map((leg) => [
     leg.id,
-    leg
+    String(leg.reductionRule)
   ]));
+  for (const reduction of exposureReduction(evidence.proposal)) {
+    reducedRules.set(reduction.leg, reduction.rule);
+  }
   for (const [field, className] of [
     [
       "failing_intervals",
@@ -2545,12 +2571,12 @@ function compareWitnesses(evidence, rebuilt, upperFn) {
       for (const rawState of list(found["adverse_states"] ?? [], `$result.${field}[].witness.adverse_states`)) {
         const state = object(rawState, `$result.${field}[].witness.adverse_states[]`);
         const legId = text(state["leg"], `$...adverse_states[].leg`);
-        const reduced = reducedLegs.get(legId);
-        if (reduced === void 0) {
+        const reducedBy = reducedRules.get(legId);
+        if (reducedBy === void 0) {
           refuse2(className, `$result.${field}[].witness.adverse_states`, `${legId} was not reduced, so no rule can produce an adverse state for it`);
         }
-        if (state["rule"] !== reduced.reductionRule) {
-          refuse2(className, `$result.${field}[].witness.adverse_states`, `${legId} was reduced by ${String(reduced.reductionRule)}, not ${String(state["rule"])}`);
+        if (state["rule"] !== reducedBy) {
+          refuse2(className, `$result.${field}[].witness.adverse_states`, `${legId} was reduced by ${reducedBy}, not ${String(state["rule"])}`);
         }
       }
     }
