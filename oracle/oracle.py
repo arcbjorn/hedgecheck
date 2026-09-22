@@ -432,7 +432,12 @@ def _sized_leg_window(lowered, leg, lower, upper, baseline, cap):
     if window["lower_bound"] is not None:
         out["lower_bound"] = fmt(window["lower_bound"])
         out["upper_bound"] = fmt(window["upper_bound"])
-    out["binding"] = [{"price": fmt(price), "side": side} for price, side in window["binding"] if price is not None]
+    # A SITE, not a price, may be absent. `size_window` returns `[low_site, high_site]` and
+    # leaves a site None when no constraint binds there -- a wide cap binds at neither end,
+    # so the whole entry is None, not a pair with a None price. Filtering on `price is not
+    # None` unpacked first and crashed; the filter has to come before the unpacking.
+    out["binding"] = [{"price": fmt(site[0]), "side": site[1]}
+                      for site in window["binding"] if site is not None and site[0] is not None]
     if window["status"] == "nonempty":
         out["smallest"] = fmt(window["smallest"])
         out["largest"] = fmt(window["largest"])
