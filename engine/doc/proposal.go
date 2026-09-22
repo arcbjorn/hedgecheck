@@ -43,9 +43,13 @@ type Proposal struct {
 	ObjectiveValuationTime string
 	ObjectiveReference     string
 	hasObjectiveReference  bool
-	OtherCosts             exact.Q
-	Assumptions            []string
-	Capture                *Capture
+	// BasisBounds are the user's declared bounds between two price series. Never
+	// defaulted: a bound nobody declared is not a bound, and PLAN section 2 worst-cases
+	// an unbridged group to zero rather than guessing one.
+	BasisBounds []BasisBound
+	OtherCosts  exact.Q
+	Assumptions []string
+	Capture     *Capture
 }
 
 // ProposalExposure carries the reference the holding is priced against, which the
@@ -87,6 +91,7 @@ func ReadProposal(raw []byte) (Proposal, error) {
 	out.Objective = readObjective(r)
 	out.ObjectiveValuationTime = r.str("objective_valuation_time", timePattern, "a UTC instant ending in Z")
 	out.ObjectiveReference, out.hasObjectiveReference = r.optionalStr("objective_reference", refPattern, "a reference id")
+	out.BasisBounds = readBasisBounds(r)
 	out.OtherCosts = r.number("other_costs")
 	out.Assumptions = readSlugs(r, "assumptions")
 	out.Capture = readCapture(r)
@@ -183,6 +188,16 @@ func encodeProposal(proposal Proposal) map[string]any {
 		"assumptions":              textList(proposal.Assumptions),
 	}
 	setIf(out, proposal.hasObjectiveReference, "objective_reference", proposal.ObjectiveReference)
+	if len(proposal.BasisBounds) > 0 {
+		bounds := make([]any, 0, len(proposal.BasisBounds))
+		for _, declared := range proposal.BasisBounds {
+			bounds = append(bounds, map[string]any{
+				"between": []any{declared.Between[0], declared.Between[1]},
+				"bound":   declared.Bound.String(),
+			})
+		}
+		out["basis_bounds"] = bounds
+	}
 	if proposal.Capture != nil {
 		out["capture"] = map[string]any{
 			"skew_ms": proposal.Capture.SkewMs, "max_skew_ms": proposal.Capture.MaxSkewMs,
@@ -212,6 +227,47 @@ func encodeProposalLegs(legs []ProposalLeg) []any {
 			},
 			"size": leg.Size.String(), "acquisition": acquisition,
 		})
+	}
+	return out
+}
+
+// BasisBound is one declared bound between two price series.
+type BasisBound struct {
+	Between [2]string
+	Bound   exact.Q
+}
+
+func readBasisBounds(r *reader) []BasisBound {
+	items, present := r.optionalList("basis_bounds", 0)
+	if !present {
+		return nil
+	}
+	out := []BasisBound{}
+	for index, item := range items {
+		child, err := object(at2(r.path, "basis_bounds", index), item)
+		if err != nil {
+			r.note(err)
+			break
+		}
+		pair, _ := child.optionalList("between", 2)
+		bound := BasisBound{Bound: child.number("bound")}
+		if len(pair) != 2 {
+			child.note(fail(child.at("between"), "two reference ids"))
+		} else {
+			for at, side := range pair {
+				text, ok := side.(string)
+				if !ok || !refPattern.MatchString(text) {
+					child.note(fail(at2(child.path, "between", at), "a reference id"))
+					break
+				}
+				bound.Between[at] = text
+			}
+		}
+		if err := child.done(); err != nil {
+			r.note(err)
+			break
+		}
+		out = append(out, bound)
 	}
 	return out
 }
