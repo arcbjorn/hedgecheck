@@ -346,6 +346,7 @@ def main():
     price_touch_bound()
     price_touch_lowering()
     established_failures()
+    synthesis_refusal_classes()
     one_definition()
     synthesis()
     reference_map()
@@ -692,6 +693,54 @@ def O_terms(outcome):
     return dict(part.split(":", 1) for part in outcome.get("description", "").split("|") if ":" in part)
 
 
+def synthesis_refusal_classes():
+    """The synthesis checker's classes are the frozen closed list, not a second list.
+
+    `checker/src/synthesis.ts` declares its own `SynthesisRefusalClass` rather than importing
+    `verify.ts`'s, so the two modules do not depend on each other for a type. That is the
+    right structure and it costs something: nothing stops the two lists drifting apart, and
+    a class outside `schema/refusal.schema.json` would be a refusal a consumer cannot act on,
+    since the schema is the contract the closed list lives in.
+
+    So the claim the comment in that file makes -- that the schema holds it to the list -- is
+    checked here. It was written before this guard existed and was therefore false.
+    """
+    frozen = set()
+    schema = json.loads((PROJECT / "schema" / "refusal.schema.json").read_text())
+
+    def collect(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "enum" and isinstance(value, list):
+                    frozen.update(item for item in value if isinstance(item, str))
+                collect(value)
+        elif isinstance(node, list):
+            for item in node:
+                collect(item)
+    collect(schema)
+    check(len(frozen) >= 18, f"synthesis classes: the frozen list has {len(frozen)} classes")
+
+    source = (PROJECT / "checker" / "src" / "synthesis.ts").read_text()
+    marker = "export type SynthesisRefusalClass ="
+    check(marker in source, "synthesis classes: the checker declares its class list")
+    body = source[source.index(marker):]
+    body = body[:body.index(";")]
+    named = set(re.findall(r'"([A-Z_]+)"', body))
+    check(named, "synthesis classes: the declared list is not empty")
+    check(named <= frozen,
+          f"synthesis classes: {sorted(named - frozen)} are outside schema/refusal.schema.json")
+
+    # And every class the checker can actually RETURN is declared. A `refuse(...)` call with a
+    # class outside the declared list would not type-check, but a class declared and never
+    # used is a claim the fixtures do not exercise -- which is the other direction, and the
+    # synthesis fixtures cover it: `checker/test/synthesis.test.ts` asserts the classes seen.
+    returned = set(re.findall(r'refuse\(\s*"([A-Z_]+)"', source))
+    check(returned <= named,
+          f"synthesis classes: {sorted(returned - named)} are returned but not declared")
+    check(returned == named,
+          f"synthesis classes: {sorted(named - returned)} are declared but never returned")
+
+
 def one_definition():
     """No module defines the same name twice.
 
@@ -759,6 +808,32 @@ def synthesis():
         check(by_rows == by_kernel,
               f"synthesis: the rows give the kernel's infimum for {[O.fmt(n) for n in sizes]}, "
               f"{O.fmt(by_rows)} against {O.fmt(by_kernel)}")
+
+    # ---- THE ROWS ARE DISTINCT CONSTRAINTS, so a site NAME identifies one
+    #
+    # Walking atoms emits a site per atom end, so a price where the function is continuous
+    # yields the same inequality twice or three times: before this rule the PLAN section 3
+    # example had 7 rows carrying 4 distinct constraints. They have to be deduplicated
+    # because the certificate NAMES its sites, and a second implementation deriving rows
+    # from MAXIMAL pieces finds the 4, not the 7. Keeping them would force either porting
+    # this implementation's atom walk or resolving names by a fallback that could silently
+    # accept the wrong row.
+    plan_rows = O.constraints(O.linear(F("0.1"), F(100000)),
+                              [O.digital_below(F(1), F(90000))], F(-1000), L, U)
+    check(len(plan_rows) == 4,
+          f"synthesis: the PLAN section 3 program has 4 distinct rows, got {len(plan_rows)}")
+    shapes = [(alpha, tuple(coefficients)) for _, _, alpha, coefficients in plan_rows]
+    check(len(set(shapes)) == len(shapes),
+          "synthesis: no two rows are the same inequality written twice")
+    names = [(at, side) for at, side, _, _ in plan_rows]
+    check(len(set(names)) == len(names), "synthesis: no two rows share a site name")
+    # DEDUPLICATION IS BY THE WHOLE CONSTRAINT, not by the price. Two rows at one price with
+    # different coefficients are different constraints and both must survive -- 90,000 is
+    # exactly that, `below` where the digital still pays and `at` where it does not.
+    at_ninety = [(side, O.fmt(coefficients[0])) for at, side, _, coefficients in plan_rows
+                 if at == F(90000)]
+    check(sorted(at_ninety) == [("at", "0"), ("below", "1")],
+          f"synthesis: both constraints at the strike survive, got {sorted(at_ninety)}")
 
     # ---- A LEFT-LIMIT SITE IS A CONSTRAINT, and dropping it hides a real failure
     #
