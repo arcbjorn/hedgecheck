@@ -190,6 +190,56 @@ func TestAgreesWithTheOracleOnSynthesis(t *testing.T) {
 				}
 			}
 
+			// AN INFEASIBLE ANSWER'S CERTIFICATE IS CHECKED, on every generated question and
+			// not only on the hand-written one. A Farkas witness is y >= 0 with A^T y <= 0 and
+			// b . y > 0; any valid witness proves infeasibility, so this checks validity
+			// rather than comparing Go's witness to the oracle's.
+			//
+			// It also reaches the flipped-row sign. A row flips when the base alone already
+			// clears the floor there -- 562 of the corpus's 686 rows -- and 2 of the 64 carried
+			// weights sit on one, so the sign correction is exercised here and nowhere else.
+			if answer.Status == "infeasible" {
+				derived := Rows(base, units, lower, upper)
+				byKey := map[string]int{}
+				for index, row := range derived {
+					byKey[row.Price.String()+"|"+string(row.Side)] = index
+				}
+				weights := make([]exact.Q, len(derived))
+				for index := range weights {
+					weights[index] = exact.Zero()
+				}
+				for _, weight := range answer.Certificate {
+					if weight.Weight.Sign() <= 0 {
+						t.Errorf("weight at %s (%s) is %s, not strictly positive",
+							weight.Price.String(), weight.Side, weight.Weight.String())
+					}
+					index, known := byKey[weight.Price.String()+"|"+string(weight.Side)]
+					if !known {
+						t.Fatalf("the certificate names %s (%s), not a row of this program",
+							weight.Price.String(), weight.Side)
+					}
+					weights[index] = weight.Weight
+				}
+				right := exact.Zero()
+				for column := range units {
+					total := exact.Zero()
+					for index, row := range derived {
+						total = total.Add(weights[index].Mul(row.Coefficients[column].Sub(prices[column])))
+					}
+					if total.Sign() > 0 {
+						t.Errorf("column %d of A^T y is %s, positive, so the weights do not cancel",
+							column, total.String())
+					}
+				}
+				for index, row := range derived {
+					right = right.Add(weights[index].Mul(floor.Sub(row.Alpha)))
+				}
+				if right.Sign() <= 0 {
+					t.Errorf("b . y is %s, not positive, so the rows are not contradictory",
+						right.String())
+				}
+				return
+			}
 			if answer.Status != "feasible" {
 				return
 			}
