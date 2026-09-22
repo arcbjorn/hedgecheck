@@ -20,6 +20,7 @@ import sys
 
 PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT / "oracle"))
+sys.path.insert(0, str(PROJECT / "tools"))
 
 import canon  # noqa: E402
 import oracle as O  # noqa: E402
@@ -184,12 +185,68 @@ def cases():
     return good + corrupted
 
 
+def generated_questions(count=120):
+    """Questions nobody chose: the same explicit LCG the kernel cases use.
+
+    The five hand-written cases above are good questions, but they are questions I thought
+    to ask. These are not: random baselines, strikes, prices, floors and lots, so the three
+    implementations are held to agreeing on programs none of their authors saw. The
+    generator is a function of this source alone, so the corpus moves only when this does.
+    """
+    from make_kernel_cases import Rand
+    rng = Rand(20260922)
+    out = []
+    written = 0
+    index = 0
+    while written < count:
+        index += 1
+        baseline = rng.pick([70000, 77631, 85000, 100000])
+        quantity = rng.pick(["0.1", "-0.1", "0.05", "0.2"])
+        strikes = sorted({rng.pick([65000, 70000, 75908, 80000, 85000, 90000, 100000])
+                          for _ in range(1 + rng.below(2))})
+        candidates = []
+        for position, strike in enumerate(strikes):
+            side = rng.below(2)
+            pays_on = ({"upper": str(strike), "upper_inclusive": False} if side == 0
+                       else {"lower": str(strike), "lower_inclusive": True})
+            candidates.append({"id": f"c{position}", "pays_on": pays_on,
+                               "price": rng.pick(["0.1", "0.2", "0.5", "0.05"])})
+        base = [{"id": "spot", "kind": "linear", "quantity": quantity, "baseline": str(baseline)}]
+        if rng.below(3) == 0:
+            base.append({"id": "paid", "kind": "cash", "amount": rng.pick(["-500", "-100", "250"])})
+        if rng.below(3) == 0:
+            base.append({"id": "owned", "kind": "indicator", "size": rng.pick(["200", "500"]),
+                         "pays_on": {"upper": str(rng.pick([75000, 85000])), "upper_inclusive": False}})
+        question = {
+            "schema_version": "1",
+            "objective": {"id": "loss_cap",
+                          "min_pnl": str(-rng.pick([500, 1000, 2000, 3333, 5000]))},
+            "domain": {"lower": "60000", "upper": "110000"},
+            "units": dict(UNITS),
+            "base": base,
+            "candidates": candidates,
+            "lot": rng.pick(["1", "1", "1", "100"]),
+        }
+        try:
+            answer = O.synthesis_document(question)
+        except Exception:
+            # A shape the oracle refuses is not a question; the generator does not get to
+            # invent supported inputs.
+            continue
+        if answer["status"] == "unbounded":
+            continue
+        out.append((f"case-{written:04d}", "accept", answer,
+                    f"a generated question the oracle answered {answer['status']}", None))
+        written += 1
+    return out
+
+
 def generate():
     if OUT.exists():
         shutil.rmtree(OUT)
     OUT.mkdir(parents=True, exist_ok=True)
     written = 0
-    for name, expects, document, why, detail in cases():
+    for name, expects, document, why, detail in cases() + generated_questions():
         (OUT / f"{name}.json").write_bytes(canon.canonical(document) + b"\n")
         lines = [expects, why]
         if detail is not None:
@@ -213,9 +270,11 @@ def main():
         if first != snapshot():
             print("synthesis fixtures are not reproducible", file=sys.stderr)
             return 1
-    accepted = sum(1 for _, expects, _, _, _ in cases() if expects == "accept")
-    print(f"{written} synthesis answers: {accepted} good, {written - accepted} corrupted, "
-          "each one documented change")
+    every = cases() + generated_questions()
+    accepted = sum(1 for _, expects, _, _, _ in every if expects == "accept")
+    written = len(every)
+    print(f"{written} synthesis answers: {accepted} accepted, {written - accepted} corrupted, "
+          f"each one a documented change")
     return 0
 
 
