@@ -63,6 +63,32 @@ def good():
     return proposal, entries, snapshots
 
 
+def templated_leg(proposal, entries, outcome, catalogue_raw):
+    """The bucket proposal's leg, repointed at a deployer-templated instance.
+
+    The terms come from the CATALOGUE rather than being written here, so the fixture cannot
+    drift from the retained bytes: a hand-written threshold would make this a TERMS_MISMATCH
+    fixture by accident instead of the case it is named for.
+    """
+    item = next(o for o in json.loads(catalogue_raw)["outcomes"] if str(o["outcome"]) == outcome)
+    described = dict(part.split(":", 1) for part in item["description"].split("|") if ":" in part)
+    date, clock = described["time"].split("-")
+    out = copy.deepcopy(proposal)
+    leg = out["legs"][0]
+    leg["family"] = "template.binaryPrice"
+    leg["semantics_version"] = canon.semantics_version(entries["template.binaryPrice"])
+    leg["instance"] = dict(leg["instance"], outcome=outcome, coin=f"#{int(outcome) * 10 + 1}")
+    leg["side"] = "no"
+    leg["terms"] = {
+        "underlying": described["perp"],
+        "target_price": described["threshold"],
+        "seconds": described["seconds"],
+        "expiry": f"{date[:4]}-{date[4:6]}-{date[6:]}T{clock[:2]}:{clock[2:]}:00Z",
+    }
+    out["assumptions"] = sorted(set(out["assumptions"]) | {"deployer_settles_as_written"})
+    return out
+
+
 def cases():
     proposal, entries, snapshots = good()
     book = proposal["legs"][0]["acquisition"]["snapshot"]
@@ -123,6 +149,16 @@ def cases():
         ("family-status-refused", "UNSUPPORTED_FAMILY", *repin(
             proposal, status_entries(entries, "refused"), "recurring.priceBucket"), snapshots,
          "a family the registry refuses: its reading is not established"),
+        # ---- a price description no reviewed mapping can resolve
+        #
+        # Outcome 2494 is real: template:binaryPrice on venue txyz, priceDescription
+        # `1-minute candle` -- the single largest group at 18 instances. It names neither a
+        # source nor a series, so references/reference-map.json marks it ambiguous and
+        # lowering refuses rather than falling back to the entry's own reference, which
+        # would treat a leg nobody can map as sharing the objective's series.
+        ("ambiguous-reference", "AMBIGUOUS_RULES",
+         templated_leg(proposal, entries, "2494", snapshots[catalogue]), entries, snapshots,
+         "a leg whose price description no reviewed mapping resolves"),
         ("no-payoff-for-side", "NO_PAYOFF_FOR_SIDE",
          with_leg(["side"], "long"), entries, snapshots,
          "a side the registry entry defines no payoff for"),
