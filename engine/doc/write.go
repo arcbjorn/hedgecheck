@@ -146,10 +146,24 @@ func encodeInterval(interval Interval) map[string]any {
 func encodeReductions(reductions []Reduction) []any {
 	out := make([]any, 0, len(reductions))
 	for _, reduction := range reductions {
-		out = append(out, map[string]any{
+		encoded := map[string]any{
 			"leg": reduction.Leg, "rule": reduction.Rule,
 			"tight": reduction.Tight, "reason_code": reduction.ReasonCode,
-		})
+		}
+		// Both optional, and written only when present: a per-leg rule has neither, and
+		// emitting an empty `with` would make this document differ from the one that was
+		// read for no reason a reader could act on.
+		if len(reduction.With) > 0 {
+			members := make([]any, 0, len(reduction.With))
+			for _, member := range reduction.With {
+				members = append(members, member)
+			}
+			encoded["with"] = members
+		}
+		if reduction.hasBound {
+			encoded["bound"] = reduction.Bound.String()
+		}
+		out = append(out, encoded)
 	}
 	return out
 }
