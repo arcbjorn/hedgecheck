@@ -803,9 +803,23 @@ def synthesis():
     rows = O.constraints(O.linear(F("0.1"), F(100000)), [hedge], F(-1000), L, U)
     net = [[c - F("0.2") for c in coefficients] for _, _, _, coefficients in rows]
     right = [F(-1000) - alpha for _, _, alpha, _ in rows]
-    y = answer["certificate"]["weights"]
-    check(len(y) == len(rows), "synthesis: one weight per constraint row")
-    check(all(value >= 0 for value in y), "synthesis: the certificate's weights are non-negative")
+    # The weights are SPARSE and each NAMES ITS SITE, so the checker resolves them against
+    # its own rows rather than relying on a shared row order. Resolution is part of the
+    # check: a weight naming a site the rows do not have is a certificate about a different
+    # program, which must be refused rather than quietly skipped.
+    index = {(at, side): k for k, (at, side, _, _) in enumerate(rows)}
+    sparse = answer["certificate"]["weights"]
+    check(sparse, "synthesis: the certificate carries at least one weight")
+    check(len(sparse) <= len(rows), "synthesis: the certificate is sparse, never longer than the rows")
+    y = [F(0)] * len(rows)
+    for entry in sparse:
+        site = (entry["price"], entry["side"])
+        check(site in index,
+              f"synthesis: the certificate names site {O.fmt(entry['price'])}/{entry['side']}, "
+              f"which is not a row of this program")
+        y[index[site]] = entry["weight"]
+    check(all(entry["weight"] > 0 for entry in sparse),
+          "synthesis: a carried weight is strictly positive, since a zero weight says nothing")
     columns = [sum(y[j] * net[j][i] for j in range(len(net))) for i in range(1)]
     check(all(value <= 0 for value in columns),
           f"synthesis: A^T y <= 0, got {[O.fmt(v) for v in columns]}")
@@ -843,6 +857,160 @@ def synthesis():
                      O.cash(-F("0.2") * sizes[0])])
     check(O.infimum(built, L, U)[0] >= F(-4000),
           f"synthesis: the reported structure meets the cap, worst {O.fmt(O.infimum(built, L, U)[0])}")
+
+    # ---- THE DOCUMENT CARRIES THE QUESTION, and validates
+    #
+    # A synthesis answer is only checkable if the question travels with it. These three
+    # documents are the three statuses, each validated against schema/synthesis.schema.json
+    # by the project's own validator -- not by a shape assertion written here, which would
+    # pass whatever the schema said.
+    schema_check = _validator()
+
+    def request_for(min_pnl, lot="1"):
+        return {
+            "schema_version": "1",
+            "objective": {"id": "loss_cap", "min_pnl": min_pnl},
+            "domain": {"lower": "60000", "upper": "110000"},
+            "units": {"money": "USDC", "price": "USDC per BTC", "exposure": "BTC", "size": "contracts"},
+            "base": [{"id": "spot", "kind": "linear", "quantity": "0.1", "baseline": "100000"}],
+            "candidates": [{"id": "put-90k", "pays_on": {"upper": "90000", "upper_inclusive": False},
+                            "price": "0.2"}],
+            "lot": lot,
+        }
+
+    for label, request, wanted in (("infeasible", request_for("-1000"), "infeasible"),
+                                   ("feasible", request_for("-3333"), "feasible"),
+                                   ("rounded off", request_for("-3333", lot="15000"), "rounding_failed")):
+        document = O.synthesis_document(request)
+        check(document["status"] == wanted,
+              f"synthesis document: {label} is {wanted}, got {document['status']}")
+        check(not schema_check.valid(document, "synthesis.schema.json"),
+              f"synthesis document: {label} validates, "
+              f"{schema_check.valid(document, 'synthesis.schema.json')}")
+        check(document["request"] == request,
+              "synthesis document: the question travels with the answer, unchanged")
+        # NO SOLVER STATE. A certificate that needed the search replayed would not be one.
+        check(not ({"tableau", "basis", "pivots", "iterations"} & set(document)),
+              "synthesis document: no solver state is carried")
+
+    # The feasible document names its sizes by CANDIDATE, so a reader never has to match
+    # them to the request by position.
+    feasible = O.synthesis_document(request_for("-3333"))
+    check([entry["candidate"] for entry in feasible["sizes"]] == ["put-90k"],
+          "synthesis document: a size names the candidate it is for")
+    check("cost" in feasible, "synthesis document: a feasible answer says what it costs")
+    check(feasible["sizes"][0]["size"] == "834" and feasible["cost"] == "166.8",
+          f"synthesis document: 834 contracts at 0.2 costs 166.8, got {feasible['sizes'][0]['size']} "
+          f"and {feasible.get('cost')}")
+
+    # A REFUSED ROUNDING STILL SAYS WHAT IT WAS ROUNDING. `relaxed` is the program's own
+    # answer, and without it `rounding_failed` is a dead end: a reader cannot see whether the
+    # search was close or hopeless, and cannot pick a smaller lot to try again.
+    rounded_off = O.synthesis_document(request_for("-3333", lot="15000"))
+    check("relaxed" in rounded_off,
+          "synthesis document: a refused rounding carries the relaxed point it was rounding")
+    check(rounded_off["relaxed"] == ["833.75"],
+          f"synthesis document: and it is 833.75, got {rounded_off.get('relaxed')}")
+    check("sizes" not in rounded_off and "cost" not in rounded_off,
+          "synthesis document: and reports no sizes, because none were established")
+
+    # EVERY BASE KIND IS READ. `cash` is the one nothing else exercises: a premium already
+    # paid, or a credit received, which shifts the whole profile. Ignoring it would make the
+    # holder look better off than they are -- checked below, a -500 cash term against the
+    # -3,333 cap moves the answer from 834 contracts to 1,459, and 1,458 misses at -3,333.6.
+    with_cash = request_for("-3333")
+    with_cash["base"] = with_cash["base"] + [{"id": "paid", "kind": "cash", "amount": "-500"}]
+    carried = O.synthesis_document(with_cash)
+    check(not schema_check.valid(carried, "synthesis.schema.json"),
+          f"synthesis document: a cash base validates, {schema_check.valid(carried, 'synthesis.schema.json')}")
+    check(carried["status"] == "feasible" and carried["sizes"][0]["size"] == "1459",
+          f"synthesis: a -500 cash term moves the answer to 1459, got {carried.get('sizes')}")
+
+    def with_cash_worst(size):
+        return O.infimum(O.total([O.linear(F("0.1"), F(100000)), O.cash(-F(500)),
+                                  O.digital_below(size, F(90000)),
+                                  O.cash(-F("0.2") * size)]), L, U)[0]
+    check(with_cash_worst(F(1459)) == F("-3332.8") and with_cash_worst(F(1459)) >= F(-3333),
+          f"synthesis: 1,459 contracts is worth {O.fmt(with_cash_worst(F(1459)))} and meets the cap")
+    check(with_cash_worst(F(1458)) == F("-3333.6") and with_cash_worst(F(1458)) < F(-3333),
+          "synthesis: 1,458 misses it, so 1,459 is the smallest that works")
+
+    # ---- SEVERAL INSTRUMENTS AT ONCE, which is what a synthesis is for
+    #
+    # Two digitals, at 90,000 for 0.20 and at 80,000 for 0.10. The program trades them off:
+    # hand-derived and checked with the kernel below,
+    #   cap -3,000  ->  (0, 1112), buying only the cheaper strike; 1,111 misses at -3,000.1
+    #   cap -2,000  ->  (250, 2000) at a cost of 250, and NO pure 80,000 position meets that
+    #                   cap at any size -- 2,500 is worth -2,250 and 3,334 is worth -2,333.4.
+    # The second line is the point of synthesis: single-instrument sizing cannot find it,
+    # because the answer is a mixture and sizing asks about one leg at a time.
+    two = {"schema_version": "1",
+           "objective": {"id": "loss_cap", "min_pnl": "-2000"},
+           "domain": {"lower": "60000", "upper": "110000"},
+           "units": {"money": "USDC", "price": "USDC per BTC", "exposure": "BTC", "size": "contracts"},
+           "base": [{"id": "spot", "kind": "linear", "quantity": "0.1", "baseline": "100000"}],
+           "candidates": [{"id": "put-90k", "pays_on": {"upper": "90000", "upper_inclusive": False},
+                           "price": "0.2"},
+                          {"id": "put-80k", "pays_on": {"upper": "80000", "upper_inclusive": False},
+                           "price": "0.1"}],
+           "lot": "1"}
+    mixed = O.synthesis_document(two)
+    check(not schema_check.valid(mixed, "synthesis.schema.json"),
+          f"synthesis document: a two-candidate answer validates, {schema_check.valid(mixed, 'synthesis.schema.json')}")
+    check([(entry["candidate"], entry["size"]) for entry in mixed["sizes"]]
+          == [("put-90k", "250"), ("put-80k", "2000")],
+          f"synthesis: the two-candidate answer is (250, 2000), got {mixed['sizes']}")
+    check(mixed["cost"] == "250", f"synthesis: and it costs 250, got {mixed['cost']}")
+
+    def two_candidate_worst(first, second):
+        return O.infimum(O.total([O.linear(F("0.1"), F(100000)),
+                                  O.digital_below(first, F(90000)),
+                                  O.digital_below(second, F(80000)),
+                                  O.cash(-F("0.2") * first - F("0.1") * second)]), L, U)[0]
+    check(two_candidate_worst(F(250), F(2000)) == F(-2000),
+          "synthesis: the mixed structure is worth exactly the cap at worst")
+    # NO PURE POSITION IN THE CHEAPER INSTRUMENT MEETS IT. Without this the mixture could be
+    # an accident of the solver rather than the answer sizing cannot reach.
+    for alone in (F(2500), F(3000), F(3334), F(5000)):
+        check(two_candidate_worst(F(0), alone) < F(-2000),
+              f"synthesis: {O.fmt(alone)} contracts of the 80,000 strike alone still misses the cap")
+
+    # A SIZE NAMES ITS CANDIDATE, checked where it can be checked: with two candidates at
+    # different sizes, a builder that hardcoded one id would report the wrong one.
+    check({entry["candidate"] for entry in mixed["sizes"]} == {"put-90k", "put-80k"},
+          f"synthesis document: both candidates are named, got {mixed['sizes']}")
+
+    # A POSITION ALREADY HELD is read too: the `indicator` base kind. A holder who already
+    # owns protection needs less of it, and ignoring what they hold would size them as if
+    # they held nothing. Checked below: 500 contracts of the 90,000 strike already owned
+    # moves the answer from 834 to 209, and 208 misses at -3,333.6.
+    holding = request_for("-3333")
+    holding["base"] = holding["base"] + [
+        {"id": "owned", "kind": "indicator", "size": "500",
+         "pays_on": {"upper": "90000", "upper_inclusive": False}}]
+    already = O.synthesis_document(holding)
+    check(not schema_check.valid(already, "synthesis.schema.json"),
+          f"synthesis document: an indicator base validates, {schema_check.valid(already, 'synthesis.schema.json')}")
+    check(already["status"] == "feasible" and already["sizes"][0]["size"] == "209",
+          f"synthesis: 500 contracts already held moves the answer to 209, got {already.get('sizes')}")
+
+    def held_worst(extra):
+        return O.infimum(O.total([O.linear(F("0.1"), F(100000)),
+                                  O.digital_below(F(500), F(90000)),
+                                  O.digital_below(extra, F(90000)),
+                                  O.cash(-F("0.2") * extra)]), L, U)[0]
+    check(held_worst(F(209)) >= F(-3333) and held_worst(F(208)) < F(-3333),
+          f"synthesis: 209 more meets the cap at {O.fmt(held_worst(F(209)))} and 208 does not "
+          f"at {O.fmt(held_worst(F(208)))}")
+
+    # The infeasible document's certificate NAMES ITS SITES, so a checker resolves them
+    # against its own rows rather than trusting a shared row order.
+    refused = O.synthesis_document(request_for("-1000"))
+    sites = {(entry["price"], entry["side"]) for entry in refused["certificate"]["weights"]}
+    check(("90000", "at") in sites,
+          f"synthesis document: the certificate names the strike, got {sorted(sites)}")
+    check(all(O.num(entry["weight"]) > 0 for entry in refused["certificate"]["weights"]),
+          "synthesis document: every carried weight is strictly positive")
 
     # ---- THE RELAXATION IS ROUNDED UP, NEVER DOWN
     #
