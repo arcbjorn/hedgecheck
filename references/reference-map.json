@@ -2,8 +2,11 @@
  "schema_version": "1",
  "version": "1",
  "review": {
-  "state": "draft",
-  "drafted_by": "model"
+  "state": "reviewed",
+  "drafted_by": "model",
+  "reviewed_by": "owner",
+  "reviewed_on": "2026-09-22",
+  "digest": "d2b364121e49341d6b9c7c79b8975989ba0acf33a56ee8bd21b2cfa3a41d66cd"
  },
  "mappings": [
   {
