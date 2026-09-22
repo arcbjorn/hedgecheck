@@ -495,7 +495,15 @@ def evaluate(lowered):
     # as much as none. The leg is still REDUCED -- the bound is loose, so it can only make
     # a proposal need review -- but its value is the bound, not zero.
     bounded = {reduction["leg"] for reduction in reductions if reduction["rule"] == "price_touch"}
-    zeroed = {reduction["leg"] for reduction in reductions} - banded - bounded
+    # A ZEROING RULE WINS OVER A BOUND. `price_touch` says the leg is worth at least the
+    # terminal digital; `deployer_settled` says it may be worth nothing at any price,
+    # because the deployer submits the fraction. Both can apply to one leg, and the lower
+    # of the two is the one the verdict may rest on -- crediting the bound over a zeroing
+    # rule would raise the lower profile on a leg that may pay nothing, which is the one
+    # direction that can turn a failing proposal into a passing one.
+    zeroing = {reduction["leg"] for reduction in reductions if reduction["rule"] != "price_touch"}
+    pass
+    zeroed = ({reduction["leg"] for reduction in reductions} - banded - bounded)
     loose_legs = {reduction["leg"] for reduction in reductions if not reduction["tight"]}
 
     # A reduced leg is valued at zero in the lower profile. Its premium still counts:
