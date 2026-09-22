@@ -18,3 +18,13 @@ cover.out
 
 # checker/dist/ and fixtures/ are generated but committed: make check rebuilds
 # both and fails if the tree is stale.
+
+# Derived conformance corpus: 640 files the Python oracle writes and Go and the TypeScript
+# checker read to prove all three agree. `make` regenerates it from `tools/make_ir_cases.py`
+# (the `generated` target), so it is reproducible from source and does not belong in history.
+fixtures/generated/
+
+# Derived the same way, by tools/make_refusals.py: one proposal per refusal code, rewritten
+# from scratch on every run. The `refusalfixtures` target produces them. What is asserted is
+# the CODE each one raises, not its bytes, so the files themselves carry nothing git needs.
+fixtures/refusals/
