@@ -244,6 +244,32 @@ of the rows at the reported sizes, and the infeasible case by one multiplication
 `schema_version` stays `"1"`: a new schema carries its own version from the start, and no
 existing schema changed.
 
+## Forced by isolated perps (T6)
+
+The thing being hedged can be liquidated. The hedge cannot.
+
+| Change | Forcing case |
+|---|---|
+| `proposal.exposure` becomes a `oneOf`: the existing `linear_spot`, and a new `isolated_perp` carrying `liquidation_price` and `isolated_margin`. | Retained evidence at `085ccfb` (`research/2026-09-18-decisions/hip-4-outcome-markets.md`) states that outcomes "do not involve leverage or liquidations" — so the HEDGE is safe and the EXPOSURE is not. A holder hedging an isolated perp faces a risk no terminal payoff can describe: liquidation at any moment closes the position and the margin is gone, permanently, whatever the price does afterwards. `linear_spot` could not express it, because spot has no liquidation price. |
+| `ir.exposure` gains the same branch, so lowering carries the kind instead of discarding it. | Lowering wrote `{"kind": "linear", "quantity": ...}` unconditionally, dropping the proposal's own kind. A checker cannot re-derive the reduction from an IR that does not say what is exposed. |
+
+**`liquidation_price` is DECLARED, never derived.** Computing it needs a
+maintenance-margin formula, and this project has not read one from official text — so
+deriving one would be asserting arithmetic it cannot show. It is declared like a basis
+bound: the holder states it, the reduction fires on it, and the result names the rule so a
+reader sees the verdict rests on a declared number. An undeclared one is not defaulted.
+
+**The path domain is derived, not declared.** PLAN §2 defines it as every price between now
+and the valuation time, so it contains the current price and the terminal domain — which is
+the hull `[min(domain.lower, baseline), max(domain.upper, baseline)]`. A baseline outside the
+terminal domain widens it, correctly: the price starts there, so the path passes through it
+whatever the terminal range says.
+
+`schema_version` stays `"1"`. Both changes are ADDITIVE — a new `oneOf` branch beside the
+existing one — so every document valid before is valid now, which is the test the freeze
+sets. The `const` on `linear_spot` is untouched, and a proposal that does not mention
+`isolated_perp` cannot tell the difference.
+
 ## Not changed, and why
 
 - **`schema_version` stays `"1"`.** Every change above is additive: no field was removed, no field became required, no existing value became invalid. A document valid at `062a245` is valid now.
