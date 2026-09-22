@@ -105,6 +105,57 @@ var assumptions = map[string]string{
 	"common_reference":            "the holder believes every leg is observed on the objective's series",
 }
 
+// loweredExposure carries the exposure's KIND rather than discarding it. Lowering used to
+// write `{"kind": "linear", ...}` whatever the proposal said, so an isolated perp arrived at
+// the evaluator indistinguishable from spot -- and a checker cannot re-derive a reduction from
+// an IR that does not say what is exposed.
+func loweredExposure(exposure doc.ProposalExposure) doc.Exposure {
+	if exposure.Kind != "isolated_perp" {
+		return doc.Exposure{Kind: "linear", Quantity: exposure.Quantity}
+	}
+	out := doc.Exposure{Kind: "isolated_perp", Quantity: exposure.Quantity}
+	out.SetLiquidation(exposure.LiquidationPrice, exposure.IsolatedMargin)
+	return out
+}
+
+// pathDomain is every price the path can take: the hull of the terminal domain and where the
+// price starts. PLAN section 2 -- "every price between now and the valuation time, so it
+// contains the current price and the terminal domain". A baseline OUTSIDE the terminal domain
+// widens it, which is right: the path starts there whatever the terminal range says.
+func pathDomain(domain doc.Domain, baseline exact.Q) (exact.Q, exact.Q) {
+	return exact.Min(domain.Lower, baseline), exact.Max(domain.Upper, baseline)
+}
+
+// liquidationReduction reduces an exposure that can be liquidated inside the path domain.
+//
+// THE HEDGE CANNOT BE LIQUIDATED; THE EXPOSURE CAN. Retained evidence at 085ccfb states that
+// outcomes "do not involve leverage or liquidations", so an outcome leg is safe and an
+// isolated perp is not.
+//
+// PLAN section 2's rule: with the liquidation price inside the path domain, the leg is worth
+// MINUS ITS ISOLATED MARGIN at every terminal price -- not sometimes, because liquidation at
+// any moment closes the position permanently and a later recovery does not bring it back.
+//
+// TIGHT, unlike a loose bound: the adverse state is ADMISSIBLE, not merely unproven, so a
+// verdict may rest on it alone and it CAN fail a proposal. That is the difference from
+// `price_touch`, whose bound understates a payoff and may therefore only ask for review.
+func liquidationReduction(proposal doc.Proposal, baseline exact.Q) (doc.Reduction, bool, error) {
+	if proposal.Exposure.Kind != "isolated_perp" {
+		return doc.Reduction{}, false, nil
+	}
+	low, high := pathDomain(proposal.Domain, baseline)
+	price := proposal.Exposure.LiquidationPrice
+	if price.Less(low) || high.Less(price) {
+		// The path cannot reach it within the declared domain, so there is nothing to reduce.
+		return doc.Reduction{}, false, nil
+	}
+	if proposal.Exposure.IsolatedMargin.Sign() < 0 {
+		return doc.Reduction{}, false, refuse("EXPOSURE_UNSOUND", "an isolated margin cannot be negative")
+	}
+	return doc.Reduction{Leg: "exposure", Rule: "liquidated_in_path", Tight: true,
+		ReasonCode: "LIQUIDATED_IN_PATH"}, true, nil
+}
+
 // References maps a venue's exact price description to what it denotes. The key is
 // (venue, price_description, seconds), spacing included.
 type References map[[3]string]doc.ReferenceMapping
@@ -158,6 +209,14 @@ func Lower(proposal doc.Proposal, registry map[string]doc.Entry, snapshots Snaps
 	legReferences := map[string]string{}
 	versions := []string{}
 	reductions := []doc.Reduction{}
+	// THE EXPOSURE'S OWN REDUCTION, before any leg's. An isolated perp liquidated inside the
+	// path domain is worth minus its margin at every terminal price, and no hedge can undo
+	// that -- so a reader should see it first among the rules the verdict rests on.
+	if liquidation, reduced, err := liquidationReduction(proposal, baseline); err != nil {
+		return doc.IR{}, nil, err
+	} else if reduced {
+		reductions = append(reductions, liquidation)
+	}
 	for _, leg := range proposal.Legs {
 		entry, version, err := resolve(leg, registry)
 		if err != nil {
@@ -300,7 +359,7 @@ func Lower(proposal doc.Proposal, registry map[string]doc.Entry, snapshots Snaps
 		Units:                  proposal.Units,
 		Domain:                 proposal.Domain,
 		Baseline:               dict(proposal.Baseline, baseline),
-		Exposure:               doc.Exposure{Kind: "linear", Quantity: proposal.Exposure.Quantity},
+		Exposure:               loweredExposure(proposal.Exposure),
 		Legs:                   legs,
 		Objective:              proposal.Objective,
 		ObjectiveValuationTime: proposal.ObjectiveValuationTime,
