@@ -464,14 +464,15 @@ fixtures/   golden/   lowered proposal and its generated expected result
             bundles/        7 good and 17 corrupted bundles    ── DERIVED, gitignored
             rejected/       one document per thing a schema
                             must refuse, across 7 schemas      ── DERIVED, gitignored
-            synthesis/      5 answers and 15 corruptions the
-                            TypeScript checker judges          ── DERIVED, gitignored
+            synthesis/      125 answers (5 chosen, 120 drawn)
+                            and 15 corruptions                 ── DERIVED, gitignored
 registry/   semantics entries as data: recurring.priceBinary, recurring.priceBucket,
             template.binaryPrice and template.priceTouch as model drafts
 references/ what a venue's free-text price description denotes, versioned separately
 oracle/     exact.py  canon.py  oracle.py (kernel, evaluate)  lower.py  verify.py
 engine/     exact/  canon/  arch_test.go          ── built
-            pwa/  doc/  lower/  evaluate/  discover/  run/  screen/  ── pure
+            pwa/  doc/  lower/  evaluate/  synthesise/  discover/  run/  screen/
+                                                            ── pure
             adapter/hyperliquid/  store/  service/  cmd/hedgecheck/
                                                             ── the only impure packages
 checker/    src/exact.ts  src/canon.ts            ── built
