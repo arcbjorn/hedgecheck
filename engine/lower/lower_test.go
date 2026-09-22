@@ -320,3 +320,78 @@ func TestADeployerLegIsReduced(t *testing.T) {
 		}
 	}
 }
+
+// EVERY GOOD BUNDLE'S PROPOSAL, LOWERED BY THIS ENGINE.
+//
+// The replay test above lowers proposals whose every reference agrees, so it cannot see a
+// band reduction. A bundle carries its own proposal, its own registry copies and the IR
+// Python lowered them to, so this holds Go to that IR byte for byte -- including the two
+// bundles with a leg on a foreign price series, which is where the two lowerings had
+// nothing in common before.
+func TestLowersEveryBundleProposalIdentically(t *testing.T) {
+	bundles, err := filepath.Glob("../../fixtures/bundles/good*")
+	if err != nil || len(bundles) == 0 {
+		t.Fatalf("no good bundles: %v", err)
+	}
+	checked := 0
+	for _, directory := range bundles {
+		name := filepath.Base(directory)
+		raw, err := os.ReadFile(filepath.Join(directory, "proposal.json"))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		proposal, err := doc.ReadProposal(raw)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+
+		// The bundle's OWN registry copies, not the repository's: a bundle records the
+		// reading it was built against, and that is the whole point of carrying them.
+		entries := map[string]doc.Entry{}
+		copies, _ := filepath.Glob(filepath.Join(directory, "registry-*.json"))
+		for _, path := range copies {
+			entryRaw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry, err := doc.ReadEntry(entryRaw)
+			if err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+			entries[entry.Family] = entry
+		}
+		snapshots := Snapshots{}
+		shots, _ := filepath.Glob(filepath.Join(directory, "snapshot-*.json"))
+		for _, path := range shots {
+			shot, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := snapshots.Add(shot); err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+		}
+
+		ir, _, err := Lower(proposal, entries, snapshots)
+		if err != nil {
+			t.Errorf("%s: refused a valid proposal: %v", name, err)
+			continue
+		}
+		got, err := doc.WriteIR(ir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile(filepath.Join(directory, "lowered.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != strings.TrimRight(string(want), "\n") {
+			t.Errorf("%s: lowered differs from the oracle's\n  go     %.180s\n  oracle %.180s",
+				name, got, want)
+		}
+		checked++
+	}
+	if checked < 5 {
+		t.Fatalf("only %d bundles lowered", checked)
+	}
+}
