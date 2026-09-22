@@ -11,6 +11,10 @@
    {
     "family": "recurring.priceBucket",
     "path": "registry-recurring.priceBucket.json"
+   },
+   {
+    "family": "template.binaryPrice",
+    "path": "registry-template.binaryPrice.json"
    }
   ],
   "result": "result.json",
