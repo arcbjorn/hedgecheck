@@ -761,7 +761,15 @@ def _sized_leg_window(lowered, leg, lower, upper, baseline, cap):
     # size which then fails is worse than no size window (EVIDENCE section 9).
     zeroed = {reduction["leg"] for reduction in lowered.get("reductions", [])}
     others = [other for other in lowered["legs"] if other["id"] != leg["id"]]
-    base = total([linear(num(lowered["exposure"]["quantity"]), baseline)]
+    # THE EXPOSURE IS VALUED AS THE VERDICT VALUES IT, liquidation included. A liquidated
+    # holding is worth minus its margin at every price, so sizing against the linear payoff
+    # would answer a question the verdict does not ask -- the same defect as sizing against
+    # full-value reduced legs, which reported a size that then failed (EVIDENCE section 9).
+    holding = (cash(-num(lowered["exposure"]["isolated_margin"]))
+               if any(reduction["rule"] == "liquidated_in_path"
+                      for reduction in lowered.get("reductions", []))
+               else linear(num(lowered["exposure"]["quantity"]), baseline))
+    base = total([holding]
                  + [_leg(other) for other in others if other["id"] not in zeroed]
                  + [cash(-sum((leg_cost(other) for other in others), F(0)) - num(lowered["other_costs"]))])
     unit = _leg(dict(leg, size="1"))
@@ -806,6 +814,20 @@ def evaluate(lowered):
     premium = sum((leg_cost(leg) for leg in lowered["legs"]), F(0))
     other = num(lowered["other_costs"])
     reductions = lowered.get("reductions", [])
+
+    # A LIQUIDATED EXPOSURE IS WORTH MINUS ITS MARGIN, AT EVERY TERMINAL PRICE.
+    #
+    # Not the linear payoff, and not zero. With the liquidation price inside the path domain
+    # the path may reach it, and reaching it closes the position permanently -- so the margin
+    # is gone whatever the price does afterwards, including a full recovery. The exposure
+    # therefore stops being a function of the terminal price and becomes a constant loss.
+    #
+    # TIGHT, so this CAN fail a proposal: the adverse state is admissible, not merely
+    # unproven. That is the difference from `price_touch`, whose bound understates a payoff
+    # and may therefore only ask for review. Here the worst case is real.
+    liquidated = any(reduction["rule"] == "liquidated_in_path" for reduction in reductions)
+    if liquidated:
+        exposure = cash(-num(lowered["exposure"]["isolated_margin"]))
 
     # A BAND REDUCTION IS BANDED, NOT ZEROED.
     #
