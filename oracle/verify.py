@@ -134,6 +134,53 @@ def main():
         check(L <= where <= U, f"infimum: {label} reports a price inside the domain")
         if attained:
             check(probe(where) == value, f"infimum: {label} reports a price the function attains")
+            # THE SMALLEST ATTAINING PRICE, when the attaining set has one. Checking only
+            # that the price attains the value leaves the choice among attaining prices
+            # free, and the two implementations then drift: Go windows maximal pieces while
+            # `atoms` splits at every carried breakpoint, so a flat run with a phantom mark
+            # inside it gave the midpoint of a fragment on one side and of the whole run on
+            # the other. Both attain; only one is the documented answer.
+            smallest = min(p for p in (L, where) if probe(p) == value)
+            check(where == smallest or probe(L) != value,
+                  f"infimum: {label} reports the smallest attaining price when one exists")
+    # An OWNED lower end IS the minimum of the attaining set, so the rule prefers it to the
+    # midpoint. Hand-derived: the indicator pays 100 on [90, inf) less a premium of 100, so
+    # it is flat at zero across the whole of [90, 110] with 90 owned -- the answer is 90.
+    owned = O.indicator(F(100), lower=F(90), lower_inclusive=True) + O.cash(-F(100))
+    value, attained, where = O.infimum(owned, F(90), F(110))
+    check((value, attained, where) == (F(0), True, F(90)),
+          "infimum: an owned lower end is the smallest attaining price, not the midpoint")
+    # A CARRIED BREAKPOINT IS NOT A KINK, and `infimum` must read MAXIMAL pieces, not the
+    # atoms `atoms` yields. Two legs whose payoffs cancel leave 90 carried with the same
+    # slope either side: `profile` merges to the single piece [70, 110], while `atoms` splits
+    # at 90. Off maximal pieces the owned minimum is 70; off atoms it is the first fragment's
+    # midpoint, 80. Both attain the same value, so no arithmetic check separates them -- this
+    # is the only guard that does, and it is why the Go engine disagreed on case-0266.
+    # The domain's own start must NOT attain the infimum, or `offer` locks onto it first and
+    # the two readings agree by accident. So the value is lifted at 70 exactly, leaving the
+    # attaining run (70, 110] open on the left and the midpoint standing for it.
+    lifted = O.indicator(F(50), lower=F(70), lower_inclusive=True, upper=F(70), upper_inclusive=True)
+    cancelling = (O.indicator(F(700), lower=F(90), lower_inclusive=True)
+                  - O.indicator(F(700), lower=F(90), lower_inclusive=True))
+    phantom = lifted + cancelling
+    check(F(90) in phantom.breakpoints, "infimum: the cancelling sum really carries the phantom breakpoint")
+    check([(O.fmt(p["lower"]), O.fmt(p["upper"])) for p in O.profile(phantom, F(70), F(110))]
+          == [("70", "70"), ("70", "110")], "infimum: profile merges across the phantom, leaving one open run")
+    check(O.infimum(phantom, F(70), F(110)) == (F(0), True, F(90)),
+          "infimum: the midpoint is of the MAXIMAL run (70,110], which is 90, not of the first atom, which is 80")
+
+    # THE MIDPOINT FALLBACK, on the shape that actually produces it: a flat run whose ends
+    # are both excluded. A clipped window always OWNS its ends, so the fallback cannot be
+    # reached by narrowing the domain -- it needs the run to sit strictly between two prices
+    # where the value is lower. Here the two unowned strikes at 90 and 100 are points of
+    # their own paying nothing, so the run (90, 100) is flat at 700 with neither end in it,
+    # and the infimum over that run alone is the midpoint 95.
+    fenced = O.indicator(F(700), lower=F(90), lower_inclusive=False, upper=F(100), upper_inclusive=False)
+    run = [piece for piece in O.profile(fenced, F(90), F(100)) if piece["slope"] == 0 and piece["intercept"] == F(700)]
+    check(len(run) == 1 and not run[0]["lower_inclusive"] and not run[0]["upper_inclusive"],
+          "infimum: the fenced run really is open at both ends")
+    check(O.infimum(-fenced, F(90), F(100)) == (-F(700), True, F(95)),
+          "infimum: a run open at both ends has no minimum, so the midpoint stands for it")
     # The probe is a tripwire for a constructor that hides a kink. It fires only between its probe points.
     hidden_mid = O.Fn([], lambda s: F(1) if s < 90000 else F(0))
     hidden_edge = O.Fn([], lambda s: F(1) if s < 65000 else F(0))
@@ -298,6 +345,7 @@ def main():
     payoff_is_data()
     price_touch_bound()
     price_touch_lowering()
+    established_failures()
     reference_map()
     basis_band()
     replay()
@@ -503,6 +551,59 @@ def O_terms(outcome):
     return dict(part.split(":", 1) for part in outcome.get("description", "").split("|") if ":" in part)
 
 
+def established_failures():
+    """A `fails` verdict names only prices where the BEST case also violates the clause.
+
+    A loose bound may lower a proposal's value but proves nothing about its real payoff, so a
+    violation only the lower profile sees is `needs_review`. The verdict already obeyed that
+    per INTERVAL; it did not obey it per PRICE. The lower profile can violate across a wider
+    span than the upper one, and a witness drawn from the whole lower interval can land in
+    the surplus, naming a counterexample whose best case MEETS the clause.
+
+    This is the invariant, checked directly on the evaluator rather than on a fixture: for
+    every failing interval of every generated case, the upper profile must violate that
+    clause at the reported witness price. Regenerating the corpus cannot satisfy it, because
+    it is not a comparison against stored output.
+    """
+    cases = sorted((FIXTURES / "generated" / "ir").glob("*.ir.json"))
+    check(len(cases) >= 300, "established: the generated corpus is meant to be broad")
+    thresholds, checked = {}, 0
+    for path in cases:
+        lowered = json.loads(path.read_text())
+        result = O.evaluate(lowered)
+        if result["model_result"] != "fails":
+            continue
+        # With no reduction the two profiles coincide and the invariant is trivial; the
+        # result publishes no upper profile precisely because there is nothing to compare.
+        if "upper_profile" not in result:
+            continue
+        # ONLY A LOOSE BOUND has to be established on the upper profile. A tight reduction
+        # says the adverse state is ADMISSIBLE, not merely unproven -- `horizon_mismatch` is
+        # the case: the leg really is worth zero when the objective is valued. A verdict may
+        # rest on that alone, so the best case is allowed to meet the clause there.
+        if all(reduction["tight"] for reduction in result["reductions"]):
+            continue
+        thresholds = {clause["id"]: O.num(clause["min_pnl"]) for clause in lowered["objective"]}
+        # The upper profile the RESULT publishes, read as the piece list it is. Rebuilding it
+        # here would test this function's copy of the rule rather than the evaluator's.
+        def best_at(price):
+            for piece in result["upper_profile"]:
+                low, high = O.num(piece["lower"]), O.num(piece["upper"])
+                if (low < price < high or (price == low and piece["lower_inclusive"])
+                        or (price == high and piece["upper_inclusive"])):
+                    return O.num(piece["intercept"]) + O.num(piece["slope"]) * price
+            raise AssertionError(f"{path.name}: no upper piece covers {O.fmt(price)}")
+
+        for interval in result.get("failing_intervals", []):
+            price = O.num(interval["witness"]["price"])
+            threshold = thresholds[interval["clause"]]
+            check(best_at(price) < threshold,
+                  f"established: {path.name} clause {interval['clause']} witness {interval['witness']['price']}: "
+                  f"the upper profile gives {O.fmt(best_at(price))}, which meets {O.fmt(threshold)}")
+            checked += 1
+    check(checked > 0, "established: no failing interval was checked, so this proves nothing")
+
+
 def price_touch_lowering():
     """A touch leg is lowered under its bound: right direction, kept, and loose.
 
@@ -528,15 +629,22 @@ def price_touch_lowering():
 
     target, size = F(100), F(924)
 
-    def lowered_for(baseline_price, keep=True):
+    def lowered_for(baseline_price, quantity="0", drop_term=None):
         p = json.loads(json.dumps(base))
         p["baseline"] = {"kind": "explicit", "price": str(baseline_price), "label": "fixture"}
         p["assumptions"] = sorted(set(p["assumptions"]) | {"deployer_settles_as_written"})
         # The objective is stated on the same series the leg is observed on, so no basis
         # band is in play and the touch reduction is the only one under test.
-        p["objective_reference"] = "hl:perp:HYPE:mark-interp"
-        p["exposure"] = {"kind": "linear_spot", "quantity": "0", "underlying": "HYPE",
-                         "reference": "hl:perp:HYPE:mark-interp"}
+        # The objective is stated on the series the leg's description MAPS to, so no basis
+        # band is in play and the touch reduction is the only one under test.
+        p["objective_reference"] = "hl:perp:HYPE:mark-twap:1s"
+        # SHORT, so the loss grows as the price RISES and the worst case lands ABOVE the
+        # target -- which is the only place the touch bound pays, and therefore the only
+        # place where applying it rather than zeroing the leg is visible in the verdict.
+        # With a long or flat exposure the worst case sits at the domain floor, the bound
+        # pays nothing there, and zeroing the leg changes no reported number at all.
+        p["exposure"] = {"kind": "linear_spot", "quantity": quantity, "underlying": "HYPE",
+                         "reference": "hl:perp:HYPE:mark-twap:1s"}
         p["domain"] = {"lower": "50", "upper": "150"}
         leg = p["legs"][0]
         leg["family"] = "template.priceTouch"
@@ -550,16 +658,11 @@ def price_touch_lowering():
         # honest about the cost of the bound.
         leg["terms"] = {"underlying": "HYPE", "target_price": "100", "seconds": "1",
                         "expiry": "2026-10-01T00:00:00Z"}
+        if drop_term is not None:
+            del leg["terms"][drop_term]
         p["objective_valuation_time"] = "2026-10-01T00:00:00Z"
         index = lower.reference_index(canon.loads((PROJECT / "references" / "reference-map.json").read_bytes()))
         ir, _ = lower.lower(p, {entry["family"]: entry}, snapshots, references=index)
-        if not keep:
-            # The leg as it would be valued if the bound were DISCARDED -- the leg zeroed
-            # like every other reduction. This is the comparison that makes "the bound is
-            # applied" a measurable claim rather than an assertion about the lowered data.
-            ir = json.loads(json.dumps(ir))
-            for leg in ir["legs"]:
-                leg["pays_on"] = {"lower": "1000000", "lower_inclusive": True}
         return ir, O.evaluate(ir)
 
     # ---- the direction comes from the baseline, and nothing else
@@ -600,7 +703,7 @@ def price_touch_lowering():
     # built, correct and DOMINATED. These checks pin that, so the day a protocol-settled
     # bounded family appears the bound is already right, and until then nobody reads the
     # touch machinery as doing work it is not doing.
-    ir, _ = lowered_for(F(80))
+    ir, _ = lowered_for(F(80), quantity="-10")
     rules = {r["rule"] for r in ir["reductions"]}
     check("deployer_settled" in rules and "price_touch" in rules,
           "touch: a live touch leg carries both the bound and the deployer rule")
@@ -609,16 +712,6 @@ def price_touch_lowering():
           == ["PRICE_TOUCH_BOUNDED"],
           "touch: the result names the reason code, so a reader sees which bound was used")
 
-    # DOMINATED: the leg is valued at zero, so the worst case is the premium alone. This
-    # is read off the VERDICT, not off `ir["legs"]`, which carry the bound either way.
-    paid = O.num(ir["legs"][0]["premium"]["total"])
-    check(O.num(profile["worst_case"]["pnl"]) == -paid,
-          "touch: a deployer-settled touch leg is valued at zero, so the worst case is the premium alone")
-
-    # And the dominance is a PROPERTY OF THE EVALUATOR, not of this fixture: a leg whose
-    # only reduction is the bound is kept and worth its size, while adding any zeroing rule
-    # takes it back to zero. Both halves are evaluated, so removing either the `bounded`
-    # set or the `bounded -= zeroing` line is caught.
     def evaluate_with(rules_for_leg):
         copy_of = json.loads(json.dumps(ir))
         copy_of["reductions"] = [{"leg": "touch-yes", "rule": rule, "tight": False,
@@ -626,26 +719,67 @@ def price_touch_lowering():
                                   else "DEPLOYER_SETTLED"} for rule in rules_for_leg]
         return O.evaluate(copy_of)
 
+    # HAND-DERIVED, not read off the code. Short 10 units from a baseline of 80, a premium
+    # of 160.76676 for 924 contracts, a domain top of 150 and a target of 100:
+    #   zeroed   the leg pays nothing anywhere, so the worst is at 150:
+    #            -10*(150-80) - 160.76676  =  -860.76676
+    #   bounded  the leg pays 924 on [100, 150], so above the target the short loss is more
+    #            than repaid and the worst is the open approach to 100 from below:
+    #            -10*(100-80) - 160.76676  =  -360.76676, NOT attained.
     only_bound = evaluate_with(["price_touch"])
     with_zeroing = evaluate_with(["price_touch", "deployer_settled"])
-    # THE UPPER PROFILE IS THE SAME EITHER WAY, and that is the point of the touch gap.
-    # A zeroed leg is credited its full size; a kept leg is credited the bound plus the gap
-    # to its full size. Both come to the whole size, so the two agree -- and dropping the
-    # gap correction breaks the agreement, which is what makes it checkable.
-    def at_top(result):
+    check(with_zeroing["worst_case"] == {"pnl": "-860.76676", "attained": True, "price": "150"},
+          "touch: a zeroed touch leg is worst at the domain top, at the hand-derived loss")
+    check(only_bound["worst_case"] == {"pnl": "-360.76676", "attained": False, "price": "100"},
+          "touch: an applied bound is worst approaching the target, at the hand-derived loss")
+    # THE BOUND IS WORTH SOMETHING. Without this the whole touch path could be deleted and
+    # every other check here would still pass.
+    check(O.num(only_bound["worst_case"]["pnl"]) > O.num(with_zeroing["worst_case"]["pnl"]),
+          "touch: applying the bound is strictly better than zeroing the leg")
+
+    # A ZEROING RULE WINS. `deployer_settled` says the leg may pay nothing at any price, so
+    # it must dominate the bound: crediting the bound over it would raise the lower profile
+    # on a leg that may pay nothing, the one direction that can turn a fail into a pass.
+    check(profile["worst_case"] == with_zeroing["worst_case"],
+          "touch: a deployer-settled touch leg is valued at zero, bound or no bound")
+
+    # THE UPPER PROFILE CREDITS THE FULL SIZE EVERYWHERE, INCLUDING BELOW THE TARGET.
+    #
+    # At a terminal price under the target the true payoff may still be the whole size: the
+    # reference may have touched and retraced. So the best case cannot step at the target --
+    # an upper profile that agreed with the bound there would claim to know the path.
+    # Sampling only the domain top misses this entirely, because above the target the bound
+    # and the full size coincide; without the gap correction the profile splits into two
+    # pieces at 100 and understates everything below it by exactly the leg's size.
+    def upper_at(result, price):
         for piece in result["upper_profile"]:
-            if O.num(piece["upper"]) == F(150):
-                return O.num(piece["intercept"]) + O.num(piece["slope"]) * F(150)
-        raise AssertionError("no upper piece reaches the domain top")
-    check(at_top(only_bound) == at_top(with_zeroing),
-          "touch: the upper profile credits the full size either way, bounded or zeroed")
-    check(O.num(only_bound["worst_case"]["pnl"]) == -paid,
-          "touch: even kept, the bound pays nothing at the floor, so the floor is the premium")
-    check(at_top(only_bound) - O.num(with_zeroing["worst_case"]["pnl"]) > 0,
-          "touch: the upper profile is strictly above the zeroed floor")
-    kept_fn = O.total([O._leg(leg) for leg in ir["legs"]])
-    check(kept_fn(F(150)) == size and kept_fn(F(100)) == size and kept_fn(F(99)) == 0,
-          "touch: the lowered leg pays its size exactly where the terminal price proves a touch")
+            if O.num(piece["lower"]) <= price <= O.num(piece["upper"]):
+                return O.num(piece["intercept"]) + O.num(piece["slope"]) * price
+        raise AssertionError(f"no upper piece covers {price}")
+    for price in (F(50), F(99), F(100), F(150)):
+        check(upper_at(only_bound, price) == upper_at(with_zeroing, price),
+              f"touch: the upper profile credits the full size at {price}, bounded or zeroed")
+    check(len(only_bound["upper_profile"]) == 1,
+          "touch: the upper profile does not step at the target, because any path may have touched")
+
+    # ---- A TERM THE LEG DOES NOT CARRY IS REFUSED, NOT A CRASH
+    #
+    # A proposal may name any family with any terms. The `unsupported-family` refusal fixture
+    # relabels a bucket leg as a templated one, keeping the bucket's `index` and `thresholds`,
+    # so `check_terms` is reached with no `seconds` at all. Indexing the terms directly raised
+    # KeyError out of a function whose whole contract is to refuse -- and `make_refusals.py`
+    # catches only `Refused`, so the generator crashed rather than recording a code.
+    # `expiry` is read before check_terms, by the horizon comparison, and every family's
+    # schema requires it -- so it cannot be absent here and is not in this list. The other
+    # three are template-only terms a relabelled leg simply does not have.
+    for missing in ("underlying", "target_price", "seconds"):
+        try:
+            ir, _ = lowered_for(F(80), quantity="-10", drop_term=missing)
+        except lower.Refused as refusal:
+            check(refusal.code == "TERMS_MISMATCH",
+                  f"touch: a leg missing the {missing!r} term is refused as TERMS_MISMATCH, not {refusal.code}")
+        else:
+            raise AssertionError(f"touch: a leg missing the {missing!r} term was lowered")
 
     # ---- a baseline EXACTLY at the target is refused, not bounded
     #
