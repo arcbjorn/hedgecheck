@@ -348,6 +348,7 @@ def main():
     established_failures()
     reference_map()
     review_seals()
+    testnet_shape()
     basis_band()
     replay()
 
@@ -479,6 +480,51 @@ def price_touch_bound():
     # bound rather than the payoff. Without any, the check above would prove nothing.
     check(touched_and_returned > 0,
           "priceTouch: no path touched and returned, so the corpus cannot show the bound is strict")
+
+
+def testnet_shape():
+    """What blocks the live testnet order is LIQUIDITY, not listing.
+
+    PLAN's gate section said testnet carries "no expiry carrying both a binary and a bucket",
+    which is true and was the wrong blocker: a bucket is not required. A strike LADDER of
+    binaries at one expiry is a hedge this project verifies -- long the underlying, YES at
+    one strike, NO at another -- and testnet carries those routinely. The real blocker is
+    that the books are empty, which `INSUFFICIENT_DEPTH` refuses correctly.
+
+    Checked against the retained 21 September testnet catalogue so the claim in PLAN is
+    re-derived rather than remembered.
+    """
+    catalogue = json.loads((FIXTURES / "testnet" / "2026-09-21" / "catalogue.json").read_text())
+    outcomes = catalogue["outcomes"]
+
+    # No PRICE bucket of any kind. The only buckets are policy-rate ones, which are not a
+    # price market at all, so "list a bucket" was never a thing testnet was going to do.
+    price_buckets = [o for o in outcomes
+                     if "ucket" in o.get("name", "") and "policyRate" not in o.get("name", "")]
+    check(price_buckets == [], f"testnet: expected no price bucket, found {len(price_buckets)}")
+
+    # But binaries DO cluster at one expiry, on one underlying, with distinct strikes.
+    ladders = {}
+    for outcome in outcomes:
+        if not outcome.get("name", "").startswith("template:binaryPrice"):
+            continue
+        terms = O_terms(outcome)
+        if "perp" not in terms or "threshold" not in terms:
+            continue
+        ladders.setdefault((terms["perp"], terms.get("time")), set()).add(terms["threshold"])
+    widest = max(ladders.items(), key=lambda kv: len(kv[1]))
+    check(len(widest[1]) >= 3,
+          f"testnet: the widest strike ladder has {len(widest[1])} strikes, so no hedge shape exists")
+    btc = ladders.get(("BTC", "20260921-1200"), set())
+    check(btc == {"81100", "81500", "81900"},
+          f"testnet: the BTC 20260921-1200 ladder is not the three strikes PLAN names, it is {sorted(btc)}")
+
+    # And the books are empty, which is what actually blocks the run.
+    for stem in ("binary-no", "bucket0-yes"):
+        book = json.loads((FIXTURES / "testnet" / "2026-09-21" / f"{stem}.json").read_text())
+        bids, asks = book["levels"]
+        check(bids == [] and asks == [],
+              f"testnet: {stem} is no longer empty, so the liquidity blocker may have lifted")
 
 
 def review_seals():
