@@ -464,6 +464,8 @@ fixtures/   golden/   lowered proposal and its generated expected result
             bundles/        7 good and 17 corrupted bundles    ── DERIVED, gitignored
             rejected/       one document per thing a schema
                             must refuse, across 7 schemas      ── DERIVED, gitignored
+            synthesis/      5 answers and 15 corruptions the
+                            TypeScript checker judges          ── DERIVED, gitignored
 registry/   semantics entries as data: recurring.priceBinary, recurring.priceBucket,
             template.binaryPrice and template.priceTouch as model drafts
 references/ what a venue's free-text price description denotes, versioned separately
