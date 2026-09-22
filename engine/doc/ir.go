@@ -111,6 +111,21 @@ type Leg struct {
 type Exposure struct {
 	Kind     string
 	Quantity exact.Q
+	// An isolated perp's own numbers, carried so a checker can re-derive the path reduction.
+	// Lowering used to write `{"kind": "linear", ...}` whatever the proposal said, which left
+	// a liquidatable holding indistinguishable from spot by the time the evaluator saw it.
+	LiquidationPrice exact.Q
+	IsolatedMargin   exact.Q
+	hasLiquidation   bool
+}
+
+// Liquidatable reports whether this exposure carries a liquidation price at all.
+func (e Exposure) Liquidatable() bool { return e.hasLiquidation }
+
+// SetLiquidation records an isolated perp's numbers. `isolated_perp` is the only kind that
+// carries them: spot with a liquidation price would describe a risk spot does not have.
+func (e *Exposure) SetLiquidation(price, margin exact.Q) {
+	e.LiquidationPrice, e.IsolatedMargin, e.hasLiquidation = price, margin, true
 }
 
 // IR is a lowered proposal: primitives the kernel can evaluate, with nothing left to
@@ -229,9 +244,15 @@ func readExposure(r *reader) Exposure {
 	if !ok {
 		return Exposure{}
 	}
-	out := Exposure{Kind: child.str("kind", nil, ""), Quantity: child.number("quantity")}
+	out := Exposure{Kind: child.enum("kind", "linear", "isolated_perp"), Quantity: child.number("quantity")}
 	if out.Quantity.Sign() < 0 {
 		child.note(fail(child.at("quantity"), "a quantity is not negative"))
+	}
+	if out.Kind == "isolated_perp" {
+		out.SetLiquidation(child.number("liquidation_price"), child.number("isolated_margin"))
+		if out.IsolatedMargin.Sign() < 0 {
+			child.note(fail(child.at("isolated_margin"), "an isolated margin is not negative"))
+		}
 	}
 	r.finish(child)
 	return out
