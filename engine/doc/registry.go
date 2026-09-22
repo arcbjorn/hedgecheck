@@ -62,6 +62,18 @@ type PayoffLeg struct {
 // Evidence labels one claim in an entry as verified, third-party or unverified.
 type Evidence struct{ Claim, Label, Where string }
 
+// ReferenceMapping is one row of the reference map: what a venue's exact price
+// description denotes. Separate from an Entry and separately versioned -- an entry reads a
+// family's PAYOFF, which does not mention a reference at all.
+type ReferenceMapping struct {
+	Venue            string
+	PriceDescription string
+	Seconds          string
+	State            string // "interpreted", "confirmed" or "ambiguous"
+	Reference        string
+	Why              string
+}
+
 // Entry is one reviewed reading of one contract family, as data.
 type Entry struct {
 	SchemaVersion       string
