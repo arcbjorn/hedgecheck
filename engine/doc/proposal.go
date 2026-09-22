@@ -54,12 +54,25 @@ type Proposal struct {
 
 // ProposalExposure carries the reference the holding is priced against, which the
 // lowered form has already resolved away.
+//
+// `isolated_perp` carries two more numbers. The exposure is the thing being HEDGED, and
+// unlike an outcome token it can be liquidated: retained evidence at 085ccfb states that
+// outcomes "do not involve leverage or liquidations", so the hedge is safe and the holding is
+// not. `LiquidationPrice` is DECLARED rather than derived, because no maintenance-margin
+// formula has been read from official text here and computing one would be asserting
+// arithmetic this project cannot show.
 type ProposalExposure struct {
-	Kind       string
-	Underlying string
-	Quantity   exact.Q
-	Reference  string
+	Kind             string
+	Underlying       string
+	Quantity         exact.Q
+	Reference        string
+	LiquidationPrice exact.Q
+	IsolatedMargin   exact.Q
+	hasLiquidation   bool
 }
+
+// Liquidatable reports whether this exposure carries a liquidation price at all.
+func (e ProposalExposure) Liquidatable() bool { return e.hasLiquidation }
 
 // ReadProposal decodes a proposal from canonical bytes.
 func ReadProposal(raw []byte) (Proposal, error) {
@@ -104,13 +117,23 @@ func readProposalExposure(r *reader) ProposalExposure {
 		return ProposalExposure{}
 	}
 	out := ProposalExposure{
-		Kind:       child.str("kind", nil, ""),
+		Kind:       child.enum("kind", "linear_spot", "isolated_perp"),
 		Underlying: child.str("underlying", nil, ""),
 		Quantity:   child.number("quantity"),
 		Reference:  child.str("reference", refPattern, "a reference id"),
 	}
 	if out.Quantity.Sign() < 0 {
 		child.note(fail(child.at("quantity"), "a quantity is not negative"))
+	}
+	// The two numbers a liquidatable exposure carries, and only that kind carries them: a
+	// spot holding with a liquidation price would be describing a risk spot does not have.
+	if out.Kind == "isolated_perp" {
+		out.LiquidationPrice = child.number("liquidation_price")
+		out.IsolatedMargin = child.number("isolated_margin")
+		out.hasLiquidation = true
+		if out.IsolatedMargin.Sign() < 0 {
+			child.note(fail(child.at("isolated_margin"), "an isolated margin is not negative"))
+		}
 	}
 	r.finish(child)
 	return out
@@ -175,12 +198,9 @@ func encodeProposal(proposal Proposal) map[string]any {
 			"money": proposal.Units.Money, "price": proposal.Units.Price,
 			"exposure": proposal.Units.Exposure, "size": proposal.Units.Size,
 		},
-		"domain":   map[string]any{"lower": proposal.Domain.Lower.String(), "upper": proposal.Domain.Upper.String()},
-		"baseline": encodeBaseline(proposal.Baseline),
-		"exposure": map[string]any{
-			"kind": proposal.Exposure.Kind, "underlying": proposal.Exposure.Underlying,
-			"quantity": proposal.Exposure.Quantity.String(), "reference": proposal.Exposure.Reference,
-		},
+		"domain":                   map[string]any{"lower": proposal.Domain.Lower.String(), "upper": proposal.Domain.Upper.String()},
+		"baseline":                 encodeBaseline(proposal.Baseline),
+		"exposure":                 encodeProposalExposure(proposal.Exposure),
 		"legs":                     encodeProposalLegs(proposal.Legs),
 		"objective":                encodeObjective(proposal.Objective),
 		"objective_valuation_time": proposal.ObjectiveValuationTime,
@@ -268,6 +288,21 @@ func readBasisBounds(r *reader) []BasisBound {
 			break
 		}
 		out = append(out, bound)
+	}
+	return out
+}
+
+// encodeProposalExposure writes the exposure, with an isolated perp's own two numbers. They
+// are omitted for spot rather than written as zero: a spot holding has no liquidation price,
+// and writing one would describe a risk it does not have.
+func encodeProposalExposure(exposure ProposalExposure) map[string]any {
+	out := map[string]any{
+		"kind": exposure.Kind, "underlying": exposure.Underlying,
+		"quantity": exposure.Quantity.String(), "reference": exposure.Reference,
+	}
+	if exposure.Liquidatable() {
+		out["liquidation_price"] = exposure.LiquidationPrice.String()
+		out["isolated_margin"] = exposure.IsolatedMargin.String()
 	}
 	return out
 }
