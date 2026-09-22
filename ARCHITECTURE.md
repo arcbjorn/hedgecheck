@@ -59,7 +59,8 @@ the canonical JSON profile (§5): no numbers, no nulls, no user-chosen keys.
 | Proposal | `proposal.schema.json` | Exposure, legs **by family and instance**, sizes, objective, baseline, assumptions, basis bounds; snapshots cited by SHA-256 | `proposal_digest` |
 | Lowered proposal | `ir.schema.json` | Primitives with fixed costs, clauses, domain, baseline price, and the list of reductions applied | `ir_digest` |
 | Result | `result.schema.json` | Verdict, witnesses, profile, cost, comparisons, reason codes, assumptions, digests | — |
-| Registry entry | `registry-entry.schema.json` | One reviewed reading of one family, as data | `semantics_version` |
+| Registry entry | `registry-entry.schema.json` | One reviewed reading of one family's **payoff**, as data | `semantics_version` |
+| Reference map | `reference-map.schema.json` | What a venue's free-text `priceDescription` denotes, keyed by `(venue, price_description, seconds)` | its own `version` |
 | Comparison | `comparison.schema.json` | N results ranked against each other, cited by `ir_digest` | — |
 
 `semantics_version` is the canonical digest of a registry entry **without its
@@ -68,6 +69,30 @@ marking an entry reviewed does not move the pin. `review.digest` records which
 `semantics_version` was reviewed, and an entry counts as reviewed only when its
 state is `reviewed` **and** that digest still matches. Editing the semantics
 therefore silently un-reviews the entry rather than carrying an approval forward.
+
+**A reference map is separate from a registry entry, and separately versioned.** An entry
+is one reviewed reading of a family's PAYOFF: `recurring.priceBinary` pays
+`indicator(S >= target_price)` and does not name a reference at all. A map says which `S`.
+Bundling them would put a mapping inside `semantics_version`, so every new market's
+description would invalidate every payoff review that shared its family — a review
+treadmill for a claim no payoff depends on. Separated, a mapping changes without touching
+a single payoff review.
+
+A mapping has three states because a mapping is not always possible. `interpreted` is the
+owner's reading and surfaces in every result resting on it; `confirmed` means the deployer
+confirmed it in writing, and `sources` then carries that writing; **`ambiguous` is a
+description that cannot be mapped at all**, which lowering refuses rather than guessing. On
+the 18 September catalogue 6 of 11 descriptions are ambiguous, covering **61 of 78
+instances** — the ambiguous state is the common case, not the exotic one. The largest single
+group, `1-minute candle` at 18 instances, names neither a source nor a series; 42 instances
+name a Pyth series under a template that says "This market must refer to the price of a
+Hyperliquid perp."
+
+A mapping is keyed by the venue's text **exactly as the catalogue carries it, spacing
+included**. The catalogue holds both `HYPE-USDC perp mark` and `HYPE-USDC perp mark ` —
+same venue, same template, differing by one trailing space and a different TWAP window — so
+a lookup that trimmed whitespace would merge two descriptions the venue sent separately and
+answer for a string nobody wrote.
 
 A **comparison** never restates a result's numbers. It cites each by `ir_digest`
 and repeats only the terms its candidates must share — objective, domain,
@@ -426,7 +451,7 @@ rests on the harness.
 
 ```text
 ARCHITECTURE.md  PLAN.md  EVIDENCE.md  Makefile
-schema/     nine draft schemas. The only thing implementations share
+schema/     ten draft schemas. The only thing implementations share
 fixtures/   golden/   lowered proposal and its generated expected result
             vectors/  numbers and canonical JSON, generated from hand-written cases
             replay/   retained responses, their request records, and the real
