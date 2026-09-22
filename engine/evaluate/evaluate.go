@@ -26,6 +26,21 @@ func Evaluate(ir doc.IR) (doc.Result, error) {
 	quantity := ir.Exposure.Quantity
 
 	exposure := pwa.Linear(quantity, baseline)
+	// A LIQUIDATED EXPOSURE IS WORTH MINUS ITS MARGIN, AT EVERY TERMINAL PRICE.
+	//
+	// Not the linear payoff, and not zero. With the liquidation price inside the path domain
+	// the path may reach it, and reaching it closes the position permanently -- so the margin
+	// is gone whatever the price does afterwards, including a full recovery. The exposure
+	// stops being a function of the terminal price and becomes a constant loss.
+	//
+	// TIGHT, so this CAN fail a proposal: the adverse state is admissible, not merely
+	// unproven, unlike `price_touch` whose bound understates a payoff.
+	for _, reduction := range ir.Reductions {
+		if reduction.Rule == "liquidated_in_path" {
+			exposure = pwa.Cash(ir.Exposure.IsolatedMargin.Neg())
+			break
+		}
+	}
 	premium := exact.Zero()
 	for _, leg := range ir.Legs {
 		premium = premium.Add(legCost(leg))
@@ -378,7 +393,19 @@ func sizeWindows(ir doc.IR, zeroed map[string]bool, baseline, cap, lower, upper 
 			continue
 		}
 		// This leg is the one being sized, so everything else is the base.
-		parts := []pwa.Fn{pwa.Linear(ir.Exposure.Quantity, baseline)}
+		//
+		// THE EXPOSURE IS VALUED AS THE VERDICT VALUES IT, liquidation included. A liquidated
+		// holding is worth minus its margin at every price, so sizing against the linear payoff
+		// would answer a question the verdict does not ask -- the same defect as sizing against
+		// full-value reduced legs, which reported a size that then failed (EVIDENCE section 9).
+		holding := pwa.Linear(ir.Exposure.Quantity, baseline)
+		for _, reduction := range ir.Reductions {
+			if reduction.Rule == "liquidated_in_path" {
+				holding = pwa.Cash(ir.Exposure.IsolatedMargin.Neg())
+				break
+			}
+		}
+		parts := []pwa.Fn{holding}
 		otherCost := exact.Zero()
 		for _, sibling := range ir.Legs {
 			if sibling.ID == leg.ID {
