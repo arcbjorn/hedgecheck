@@ -82,12 +82,22 @@ def issue_envelope(proposal, lowered, result, versions):
     return out
 
 
-def build_good(proposal_file="bucket0.proposal.json", envelope=False, settlement=None):
+FOREIGN_REFERENCE = "pyth:{underlying}/USD:price-twap:90s"
+FOREIGN_RESOLVED = "pyth:BTC/USD:price-twap:90s"
+
+
+def build_good(proposal_file="bucket0.proposal.json", envelope=False, settlement=None,
+               reference=None, basis_bound=None):
     """Lower and evaluate an 18 Sep replay proposal against a reviewed entry.
 
     `settlement` forces the entry's settlement, so a bundle can carry a family whose
     payout the DEPLOYER submits. That leg is reduced under `deployer_settled`, loosely,
     so the verdict becomes `needs_review` -- which is the whole point of the fixture.
+
+    `reference` forces the entry's reference TEMPLATE, and `basis_bound` declares a bound
+    between it and the objective's. Together they make a leg observed on another price
+    series: the band reduction. Without such a bundle the three implementations cannot
+    disagree about it, because every other fixture has one reference throughout.
     """
     proposal = canon.loads((REPLAY / proposal_file).read_bytes())
     entries, snapshots = {}, {}
@@ -95,7 +105,12 @@ def build_good(proposal_file="bucket0.proposal.json", envelope=False, settlement
         entry = canon.loads(path.read_bytes())
         if settlement is not None:
             entry = dict(entry, settlement=settlement)
+        if reference is not None:
+            entry = dict(entry, reference=reference)
         entries[entry["family"]] = reviewed(entry)
+    if basis_bound is not None:
+        proposal = dict(proposal, basis_bounds=[
+            {"between": [proposal["objective_reference"], FOREIGN_RESOLVED], "bound": basis_bound}])
     for stem in SOURCE.values():
         raw = (REPLAY / f"{stem}.json").read_bytes()
         snapshots[sha256(raw).hexdigest()] = raw
@@ -339,9 +354,16 @@ BASES = {
     # A family whose payout the deployer SUBMITS. Accepted, and `needs_review`: the leg
     # is worst-cased under a loose rule, so it can never make a proposal fail.
     "good-deployer": "bucket0.proposal.json",
+    # A leg observed on ANOTHER price series. With a declared bound its payoff is the
+    # infimum over the band; without one the group is worth zero. Every other fixture
+    # has one reference throughout, so without these two the band reduction is code no
+    # bundle exercises and the three implementations cannot be held to agreeing on it.
+    "good-basis-band": "bucket0.proposal.json",
+    "good-basis-unbridged": "bucket0.proposal.json",
 }
 ENVELOPE_BASES = {"good-envelope"}
 DEPLOYER_BASES = {"good-deployer"}
+BASIS_BASES = {"good-basis-band": "500", "good-basis-unbridged": None}
 
 CORRUPTIONS = [
     ("strike-piece-removed", "good", "PROFILE_COVERAGE", strike_piece_removed),
@@ -366,7 +388,9 @@ CORRUPTIONS = [
 
 def generate():
     goods = {name: build_good(source, envelope=name in ENVELOPE_BASES,
-                              settlement="deployer" if name in DEPLOYER_BASES else None)
+                              settlement="deployer" if name in DEPLOYER_BASES else None,
+                              reference=FOREIGN_REFERENCE if name in BASIS_BASES else None,
+                              basis_bound=BASIS_BASES.get(name))
              for name, source in BASES.items()}
     if BUNDLES.exists():
         shutil.rmtree(BUNDLES)
