@@ -4,8 +4,11 @@
   "status": "bounded",
   "settlement": "deployer",
   "review": {
-    "state": "draft",
-    "drafted_by": "model"
+    "state": "reviewed",
+    "drafted_by": "model",
+    "reviewed_by": "owner",
+    "reviewed_on": "2026-09-22",
+    "digest": "c09b0058ca30c3f4b7979e8cdcb96cf508819d5a0176b861b97e0106e2e06180"
   },
   "reference": "synthetic",
   "observation": "An n-second TWAP of a free-text price description, observed CONTINUOUSLY from deployment until the expiry rather than at one instant. What the description denotes is a separate reviewed mapping in references/reference-map.json.",
