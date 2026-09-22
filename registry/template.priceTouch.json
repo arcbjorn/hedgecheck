@@ -1,0 +1,109 @@
+{
+  "schema_version": "1",
+  "version": "1",
+  "status": "bounded",
+  "settlement": "deployer",
+  "review": {
+    "state": "draft",
+    "drafted_by": "model"
+  },
+  "reference": "synthetic",
+  "observation": "An n-second TWAP of a free-text price description, observed CONTINUOUSLY from deployment until the expiry rather than at one instant. What the description denotes is a separate reviewed mapping in references/reference-map.json.",
+  "assumptions_required": [
+    "deployer_settles_as_written"
+  ],
+  "family": "template.priceTouch",
+  "sources": [
+    {
+      "title": "Hyperliquid deployer templates: outcomeTemplates, priceTouch",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/hip-4-deployer-actions",
+      "retrieved": "2026-09-18",
+      "sha256": "087859f228fc6d64d8cec8d43d3e544d054c144f4343cf4cf1cba58e44f64fa6",
+      "retained_at": "research/2026-09-18-decisions/hip-4-outcome-markets.md at commit 085ccfb",
+      "quotes": [
+        "equals or crosses {target} at any time after this market is deployed"
+      ]
+    }
+  ],
+  "terms": [
+    {
+      "name": "underlying",
+      "type": "text"
+    },
+    {
+      "name": "target_price",
+      "type": "number"
+    },
+    {
+      "name": "expiry",
+      "type": "time"
+    },
+    {
+      "name": "seconds",
+      "type": "number"
+    }
+  ],
+  "payoffs": [
+    {
+      "select": {
+        "side": "yes"
+      },
+      "pays": [
+        {
+          "primitive": "indicator",
+          "pays_on": {
+            "lower": {
+              "term": "target_price"
+            },
+            "lower_inclusive": true
+          }
+        }
+      ]
+    },
+    {
+      "select": {
+        "side": "no"
+      },
+      "pays": [
+        {
+          "primitive": "indicator",
+          "pays_on": {
+            "upper": {
+              "term": "target_price"
+            },
+            "upper_inclusive": false
+          }
+        }
+      ]
+    }
+  ],
+  "ambiguities": [
+    "THE PAYOFF IS PATH-DEPENDENT AND THE PAYOFFS ABOVE ARE NOT IT. Whether the TWAP ever equalled or crossed the target is not recoverable from where it ended, so `status` is `bounded` and the rows above are a LOWER BOUND, not the payoff: the inclusive terminal digital at the target (PLAN section 2). A terminal observation at or through the target implies a touch, so the bound can only understate. Checked by brute force over 4,000 random paths: the bound never exceeded the true payoff.",
+    "THE DIRECTION IS NOT IN THE TERMS. The bound is the inclusive digital on the side the reference must travel to reach the target, which depends on where the reference sits while the market is unsettled -- above the target or below it. The terms carry the target and not the current price, so lowering reads the direction from the proposal's baseline. A market already touched is settled and is not a hedge.",
+    "The YES row above assumes the reference sits BELOW the target, so a touch means rising to it. Where the baseline is above the target the bound is the mirror image, `[-inf, target]` inclusive, which this entry cannot express as data: one payoff row cannot carry both directions. Until it can, lowering derives the direction rather than reading it here.",
+    "The touch window runs from DEPLOYMENT to the expiry, so it always covers a valuation time at or before the expiry -- the condition PLAN section 2 attaches to this bound is satisfied by every instance on the 18 September catalogue. A window ending before the valuation time would fall under the horizon rule instead, and no such instance exists.",
+    "Nine instances are live on 18 September: seven on BTC-USDC mark at one second, two on HYPE-USDC perp mark at one and three seconds. All nine map cleanly through the reference map."
+  ],
+  "evidence": [
+    {
+      "claim": "Touched once the TWAP equals or crosses the target at any time after deployment",
+      "label": "V",
+      "where": "EVIDENCE.md section 1: exact template text, byte-identical 15 and 18 Sep"
+    },
+    {
+      "claim": "The payoff is path-dependent, so a terminal kernel can only bound it",
+      "label": "V",
+      "where": "PLAN.md section 2: the bound is the inclusive terminal digital at the target"
+    },
+    {
+      "claim": "The bound never exceeds the true payoff",
+      "label": "V",
+      "where": "oracle/verify.py: brute force over 4,000 random paths, both directions"
+    },
+    {
+      "claim": "A deployer settles as the template is written",
+      "label": "U",
+      "where": "EVIDENCE.md section 1: settleFraction is submitted, not computed"
+    }
+  ]
+}
