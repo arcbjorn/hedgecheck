@@ -346,6 +346,8 @@ def main():
     price_touch_bound()
     price_touch_lowering()
     established_failures()
+    one_definition()
+    synthesis()
     reference_map()
     review_seals()
     testnet_shape()
@@ -688,6 +690,224 @@ def reference_map():
 def O_terms(outcome):
     """The catalogue's `key:value|...` description, as a dict."""
     return dict(part.split(":", 1) for part in outcome.get("description", "").split("|") if ":" in part)
+
+
+def one_definition():
+    """No module defines the same name twice.
+
+    Python binds the LATER definition, so a duplicate silently replaces the earlier one --
+    and every edit to the earlier, including every mutation, becomes a no-op that passes.
+    That defeated mutation testing twice on 22 Sep: `_simplex` returned (0, 0) for a program
+    whose only constraint was `n1 + n2 >= 10`, and deleting the left-limit constraint rows
+    showed no effect at all. Both looked like logic errors; neither was.
+
+    A guard is trusted only after it has been seen failing, and a mutation that cannot
+    reach the running code cannot fail. This makes the shadowing visible instead.
+    """
+    import ast
+    for path in sorted((PROJECT / "oracle").glob("*.py")) + sorted((PROJECT / "tools").glob("*.py")):
+        tree = ast.parse(path.read_text())
+        seen = {}
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                check(node.name not in seen,
+                      f"one definition: {path.name} defines {node.name} at lines "
+                      f"{seen.get(node.name)} and {node.lineno}")
+                seen[node.name] = node.lineno
+
+
+def synthesis():
+    """The synthesis LP: exact, finite, certified, and re-checked after rounding.
+
+    PLAN section 3: "breakpoints come from strikes, not sizes, so cheapest sizes meeting the
+    envelope is a linear program with finitely many constraints, solved in exact arithmetic.
+    Its dual gives an infeasibility certificate the checker verifies by one multiplication.
+    Sizes are whole contracts, so the program is a relaxation: round, re-check the rounded
+    structure with the evaluator, and claim infeasibility only when the relaxation itself
+    is infeasible."
+    """
+    L, U = F(60000), F(110000)
+
+    # ---- THE BREAKPOINTS DO NOT DEPEND ON THE SIZES
+    #
+    # This is what makes the program finite: one atom walk with unit sizes gives the
+    # constraint sites for every member of the family. If the sites moved with the sizes
+    # there would be no fixed row set and no linear program at all.
+    def family(n1, n2):
+        return O.total([O.linear(F("0.1"), F(77631)),
+                        O.indicator(n1, upper=F(75908), upper_inclusive=False),
+                        O.indicator(n2, upper=F(79007), upper_inclusive=False)])
+    marks = [sorted(family(F(a), F(b)).breakpoints) for a, b in ((0, 0), (1, 1), (924, 500))]
+    check(marks[0] == marks[1] == marks[2] == [F(75908), F(79007)],
+          "synthesis: the breakpoint set is the strikes, whatever the sizes")
+
+    # ---- THE ROWS ARE THE OBJECTIVE, exactly
+    #
+    # Feasibility over the whole domain is feasibility at these rows and at no other price.
+    # Checked against a brute-force sweep rather than asserted: a row set that missed a site
+    # would call a structure feasible at a price where it is not.
+    base = O.linear(F("0.1"), F(77631))
+    units = [O.indicator(F(1), upper=F(75908), upper_inclusive=False),
+             O.indicator(F(1), upper=F(79007), upper_inclusive=False)]
+    rows = O.constraints(base, units, F(-1000), L, U)
+    for sizes in ([F(0), F(0)], [F(924), F(500)], [F(2000), F(0)], [F(0), F(3000)]):
+        priced = O.total([base] + [O.indicator(n, upper=u, upper_inclusive=False)
+                                   for n, u in zip(sizes, (F(75908), F(79007)))])
+        by_rows = min(alpha + sum(c * n for c, n in zip(coefficients, sizes))
+                      for _, _, alpha, coefficients in rows)
+        by_kernel = O.infimum(priced, L, U)[0]
+        check(by_rows == by_kernel,
+              f"synthesis: the rows give the kernel's infimum for {[O.fmt(n) for n in sizes]}, "
+              f"{O.fmt(by_rows)} against {O.fmt(by_kernel)}")
+
+    # ---- A LEFT-LIMIT SITE IS A CONSTRAINT, and dropping it hides a real failure
+    #
+    # Each open atom contributes TWO rows, its `above` and `below` ends, because a sloped
+    # piece never attains its infimum at an excluded end and a jump makes the two ends
+    # different numbers. The `below` rows look redundant on a long exposure -- the worst
+    # site is the domain floor and the left-limits sit above it -- so a row set missing
+    # them passes every ordinary case.
+    #
+    # It fails here. SHORT exposure, so the loss grows with the price, and a base that
+    # jumps UP at 79,007, so the worst point is the left-limit just below it. Hand-derived
+    # at 1,000 contracts: the full row set gives -137.6, the `above`-only set gives +763.1
+    # -- a structure called feasible at a price where it is not.
+    short = O.total([O.linear(F("-0.1"), F(77631)), O.digital_at_or_above(F(3000), F(79007))])
+    step = [O.indicator(F(1), lower=F(90000), lower_inclusive=True)]
+    step_rows = O.constraints(short, step, F(-1000), L, U)
+    # Read through `constraints` itself, never a list rebuilt here: the claim is about what
+    # that function yields, and a check that filters its own copy passes whatever the
+    # function does. The rows must reproduce the KERNEL's infimum, which is the independent
+    # answer, and they must do it because the left-limit row is present.
+    check(any(side == "below" for _, side, _, _ in step_rows),
+          "synthesis: constraints yields left-limit rows at all")
+    for size, want in ((F(1000), F("-137.6")), (F(3000), F("-137.6"))):
+        priced = O.total([short, O.indicator(size, lower=F(90000), lower_inclusive=True)])
+        by_rows = min(alpha + coefficients[0] * size for _, _, alpha, coefficients in step_rows)
+        check(by_rows == want,
+              f"synthesis: the left-limit site binds at {O.fmt(size)}, expected {O.fmt(want)}, got {O.fmt(by_rows)}")
+        check(by_rows == O.infimum(priced, L, U)[0],
+              f"synthesis: and the rows agree with the kernel at {O.fmt(size)}")
+
+    # ---- THE PLAN SECTION 3 EXAMPLE IS INFEASIBLE, and the certificate proves it
+    #
+    # Hand-derived there: 0.1 BTC from 100,000, one digital below 90,000 at 0.20, cap -1000.
+    # The best worst case any size can buy is -(D + p*A) = -1,600, against a -1,000 cap.
+    hedge = O.digital_below(F(1), F(90000))
+    answer = O.synthesise(O.linear(F("0.1"), F(100000)), [hedge], [F("0.2")], F(-1000), L, U)
+    check(answer["status"] == "infeasible",
+          f"synthesis: the PLAN section 3 example is infeasible, got {answer['status']}")
+
+    # THE CERTIFICATE IS CHECKED, not trusted: y >= 0, A^T y <= 0, b . y > 0 is exactly the
+    # statement that no non-negative sizes satisfy the rows. One multiplication, as PLAN says.
+    rows = O.constraints(O.linear(F("0.1"), F(100000)), [hedge], F(-1000), L, U)
+    net = [[c - F("0.2") for c in coefficients] for _, _, _, coefficients in rows]
+    right = [F(-1000) - alpha for _, _, alpha, _ in rows]
+    y = answer["certificate"]["weights"]
+    check(len(y) == len(rows), "synthesis: one weight per constraint row")
+    check(all(value >= 0 for value in y), "synthesis: the certificate's weights are non-negative")
+    columns = [sum(y[j] * net[j][i] for j in range(len(net))) for i in range(1)]
+    check(all(value <= 0 for value in columns),
+          f"synthesis: A^T y <= 0, got {[O.fmt(v) for v in columns]}")
+    check(sum(y[j] * right[j] for j in range(len(right))) > 0,
+          "synthesis: b . y > 0, so the rows are contradictory")
+
+    # PLAN'S OWN two-row certificate is valid on these rows too. It weights the STRIKE row,
+    # whose net coefficient is -p, by (1 - p), and the FLOOR row, whose net coefficient is
+    # 1 - p, by p: (1-p)(-p) + p(1-p) = 0. Pairing them the other way round does not cancel,
+    # which is the arithmetic that made this check worth writing down.
+    at = {(a, s): k for k, (a, s, _, _) in enumerate(rows)}
+    # Named, so a row set that stops yielding point sites fails with the reason rather than
+    # a KeyError. The `at` rows are where a digital's own value lives; without them the
+    # strike -- the site the whole certificate turns on -- has no constraint at all.
+    for site in ((F(90000), "at"), (F(60000), "at")):
+        check(site in at, f"synthesis: the row set has a point site at {O.fmt(site[0])}")
+    plan = [F(0)] * len(rows)
+    plan[at[(F(90000), "at")]] = F(1) - F("0.2")
+    plan[at[(F(60000), "at")]] = F("0.2")
+    check(sum(plan[j] * net[j][0] for j in range(len(net))) == 0,
+          "synthesis: PLAN's weights cancel the size, paired strike-then-floor")
+    check(sum(plan[j] * right[j] for j in range(len(right))) > 0,
+          "synthesis: and PLAN's weights leave a contradiction")
+
+    # ---- A FEASIBLE CASE, with the answer checked against the evaluator
+    #
+    # The same shape with a cap the hedge can meet. The sizes come back as whole contracts,
+    # and the structure they describe really does meet the objective -- established with the
+    # kernel's own infimum, not with the solver that proposed it.
+    easy = O.synthesise(O.linear(F("0.1"), F(100000)), [hedge], [F("0.2")], F(-4000), L, U)
+    check(easy["status"] == "feasible", f"synthesis: a reachable cap is feasible, got {easy['status']}")
+    sizes = easy["sizes"]
+    check(all(n == int(n) for n in sizes), f"synthesis: sizes are whole contracts, got {sizes}")
+    built = O.total([O.linear(F("0.1"), F(100000)), O.digital_below(sizes[0], F(90000)),
+                     O.cash(-F("0.2") * sizes[0])])
+    check(O.infimum(built, L, U)[0] >= F(-4000),
+          f"synthesis: the reported structure meets the cap, worst {O.fmt(O.infimum(built, L, U)[0])}")
+
+    # ---- THE RELAXATION IS ROUNDED UP, NEVER DOWN
+    #
+    # Rounding down can drop below the floor the program solved for. The reported sizes are
+    # therefore at least the relaxed ones, and the re-check above is what licenses reporting
+    # them at all.
+    check(all(n >= r for n, r in zip(easy["sizes"], easy["relaxed"])),
+          "synthesis: every reported size is at least its relaxed value")
+
+    # A FRACTIONAL relaxation, where the direction of the rounding decides the answer.
+    # Hand-derived: a -3,333 cap needs 833.75 contracts; 834 gives a worst case of -3,332.8
+    # and meets it, 833 gives -3,333.6 and does not. Rounding down would publish a size that
+    # fails the objective it was chosen for -- the defect EVIDENCE section 9 records for
+    # size windows, in a second place. Without a fractional case the whole rounding rule
+    # could be deleted and every other check here would still pass.
+    for cap, relaxed, rounded, worst_up, worst_down in (
+        (F(-3333), F("833.75"), F(834), F("-3332.8"), F("-3333.6")),
+        (F(-1999), F("2501.25"), F(2502), F("-1998.4"), F("-1999.2")),
+    ):
+        answer = O.synthesise(O.linear(F("0.1"), F(100000)), [hedge], [F("0.2")], cap, L, U)
+        check(answer["status"] == "feasible", f"synthesis: cap {O.fmt(cap)} is feasible")
+        check(answer["relaxed"][0] == relaxed,
+              f"synthesis: cap {O.fmt(cap)} relaxes to {O.fmt(relaxed)}, got {O.fmt(answer['relaxed'][0])}")
+        check(answer["sizes"][0] == rounded,
+              f"synthesis: cap {O.fmt(cap)} rounds UP to {O.fmt(rounded)}, got {O.fmt(answer['sizes'][0])}")
+
+        def built_at(size):
+            return O.total([O.linear(F("0.1"), F(100000)), O.digital_below(size, F(90000)),
+                            O.cash(-F("0.2") * size)])
+        check(O.infimum(built_at(rounded), L, U)[0] == worst_up,
+              f"synthesis: {O.fmt(rounded)} contracts is worth {O.fmt(worst_up)} at worst")
+        check(O.infimum(built_at(rounded), L, U)[0] >= cap,
+              "synthesis: and that meets the cap")
+        # THE DIRECTION MATTERS, and this is the check that says so: one contract fewer
+        # misses the cap, so rounding down would report a structure that fails.
+        check(O.infimum(built_at(rounded - 1), L, U)[0] == worst_down,
+              f"synthesis: one contract fewer is worth {O.fmt(worst_down)}")
+        check(O.infimum(built_at(rounded - 1), L, U)[0] < cap,
+              "synthesis: one contract fewer misses the cap, so rounding down would publish a failure")
+
+    # ---- THE RE-CHECK IS REAL, on a rounding that does not meet the objective
+    #
+    # `synthesise` re-evaluates the rounded structure against the same rows and refuses to
+    # report one that misses. Forced here with a lot size: rounding to the nearest 1,000
+    # contracts overshoots so far that the premium alone breaks the cap, and the answer
+    # must be `rounding_failed` -- which says the search found nothing, never that nothing
+    # exists. Deleting the re-check turns this into a published structure that fails.
+    # MORE PROTECTION IS NOT ALWAYS BETTER: the premium is paid at every price, so a large
+    # enough position breaks the cap from above. Hand-derived: 834 contracts is worth
+    # -3,332.8 at worst, but 15,000 is worth -3,000 at 90,000 and 20,000 is worth -5,000.
+    # A lot size of 15,000 forces the relaxed 833.75 up past that, the re-check refuses it,
+    # and the answer is `rounding_failed` -- the search found nothing, never "nothing exists".
+    lumpy = O.synthesise(O.linear(F("0.1"), F(100000)), [hedge], [F("0.2")], F(-3333), L, U, lot=15000)
+    check(lumpy["status"] == "rounding_failed",
+          f"synthesis: a rounding that misses the cap is refused, got {lumpy['status']}")
+    check("sizes" not in lumpy, "synthesis: and a refused rounding reports no sizes")
+    overshoot = O.total([O.linear(F("0.1"), F(100000)), O.digital_below(F(15000), F(90000)),
+                         O.cash(-F("0.2") * F(15000))])
+    check(O.infimum(overshoot, L, U)[0] < F(-3333),
+          "synthesis: 15,000 contracts really does miss the cap, so the refusal is right")
+    # A lot that fits is still reported, so the rule refuses the wrong answer and not every
+    # answer -- without this the re-check could reject everything and look correct.
+    fits = O.synthesise(O.linear(F("0.1"), F(100000)), [hedge], [F("0.2")], F(-3333), L, U, lot=100)
+    check(fits["status"] == "feasible" and fits["sizes"][0] == F(900),
+          f"synthesis: a lot of 100 rounds to 900 and is reported, got {fits}")
 
 
 def established_failures():
