@@ -51,6 +51,39 @@ export {
   verifySynthesis,
 } from "./synthesis.ts";
 
+/**
+ * The exposure's own reduction, derived from the proposal.
+ *
+ * THE HEDGE CANNOT BE LIQUIDATED; THE EXPOSURE CAN. Retained evidence states that outcomes
+ * "do not involve leverage or liquidations", so an outcome leg is safe and an isolated perp is
+ * not. With the liquidation price inside the PATH domain -- the hull of the terminal domain and
+ * where the price starts, since the path passes through the one and reaches the other -- the
+ * holding is worth minus its margin at EVERY terminal price: liquidation at any moment closes
+ * the position permanently, and a later recovery does not bring it back.
+ *
+ * TIGHT, so it may condemn a proposal. The adverse state is admissible, not merely unproven.
+ */
+function exposureReduction(
+  proposal: Record<string, Value>,
+): { leg: string; rule: string; tight: boolean }[] {
+  const exposure = object(proposal["exposure"], "$proposal.exposure");
+  if (text(exposure["kind"], "$proposal.exposure.kind") !== "isolated_perp") return [];
+  const domain = object(proposal["domain"], "$proposal.domain");
+  const baseline = number(
+    object(proposal["baseline"], "$proposal.baseline")["price"],
+    "$proposal.baseline.price",
+  );
+  const low = lt(number(domain["lower"], "$proposal.domain.lower"), baseline)
+    ? number(domain["lower"], "$proposal.domain.lower")
+    : baseline;
+  const high = lt(baseline, number(domain["upper"], "$proposal.domain.upper"))
+    ? number(domain["upper"], "$proposal.domain.upper")
+    : baseline;
+  const price = number(exposure["liquidation_price"], "$proposal.exposure.liquidation_price");
+  if (lt(price, low) || lt(high, price)) return [];
+  return [{ leg: "exposure", rule: "liquidated_in_path", tight: true }];
+}
+
 /** The closed list. A fault that fits none of these is ENGINE_DISAGREES. */
 export type RefusalClass =
   | "SNAPSHOT_BYTES"
@@ -317,6 +350,14 @@ interface Rebuilt {
   readonly bandGroups: { leg: string; members: string[]; bound: Rational | undefined }[];
   readonly baseline: Rational;
   readonly quantity: Rational;
+  /**
+   * What the HOLDING is worth as a function of the terminal price, derived here rather than
+   * read from the result. Spot is linear. A liquidated isolated perp is a CONSTANT loss of its
+   * margin: with the liquidation price inside the path domain the path may reach it, and
+   * reaching it closes the position permanently, so the holding stops being a function of the
+   * terminal price at all.
+   */
+  readonly holding: Fn;
   readonly domainLower: Rational;
   readonly domainUpper: Rational;
   readonly otherCosts: Rational;
@@ -454,6 +495,11 @@ function relower(evidence: Evidence): Rebuilt {
     bandGroups,
     baseline: claimedBaseline,
     quantity,
+    // The holding, valued as the verdict values it. Derived from the proposal's own exposure
+    // and the path domain, never from what the result says about either.
+    holding: exposureReduction(proposal).length > 0
+      ? cash(neg(number(exposure["isolated_margin"], "$proposal.exposure.isolated_margin")))
+      : linear(quantity, claimedBaseline),
     domainLower,
     domainUpper,
     otherCosts: number(proposal["other_costs"], "$proposal.other_costs"),
@@ -797,7 +843,7 @@ function evaluateAndCompare(evidence: Evidence, rebuilt: Rebuilt): void {
 
   // THE LOWER PROFILE, rebuilt: a reduced leg is worth nothing, and its premium
   // still counts. This is what the verdict rests on.
-  const lowerParts: Fn[] = [linear(rebuilt.quantity, rebuilt.baseline), cash(neg(add(rebuilt.premium, rebuilt.otherCosts)))];
+  const lowerParts: Fn[] = [rebuilt.holding, cash(neg(add(rebuilt.premium, rebuilt.otherCosts)))];
   const upperParts: Fn[] = [...lowerParts];
   let upperCeiling = ZERO;
   // A BANDED group is banded, not zeroed: the bound says more than "worth nothing".
@@ -1171,9 +1217,17 @@ function compareReductions(evidence: Evidence, rebuilt: Rebuilt): void {
 
   // FLATTENED, one entry per RULE rather than per leg. A leg that is both unreviewed
   // and deployer-settled earns two, and the engine emits two.
-  const expected = mine.flatMap((leg) =>
-    leg.reductionRules.map((each) => ({ leg: leg.id, rule: each.rule, tight: each.tight }))
-  );
+  //
+  // THE EXPOSURE EARNS ONE TOO, and it is derived here from the PROPOSAL rather than read
+  // from the result: an isolated perp whose liquidation price sits inside the path domain is
+  // worth minus its margin at every terminal price, and a checker that took the engine's word
+  // for that would be confirming a claim rather than checking it.
+  const expected = [
+    ...exposureReduction(evidence.proposal),
+    ...mine.flatMap((leg) =>
+      leg.reductionRules.map((each) => ({ leg: leg.id, rule: each.rule, tight: each.tight }))
+    ),
+  ];
   if (stated.length !== expected.length) {
     refuse(
       "REDUCTION_UNDECLARED",
@@ -1254,7 +1308,9 @@ function compareSizeWindows(evidence: Evidence, rebuilt: Rebuilt): void {
       refuse("SIZE_WINDOW", `$result.size_windows[${index}]`, `no leg named ${legId}`);
     }
     // The base is the holding and the OTHER legs; the unit is one contract of this.
-    const baseParts: Fn[] = [linear(rebuilt.quantity, rebuilt.baseline)];
+    // Sized against the holding the verdict uses, liquidation included: sizing against a
+    // linear payoff the verdict does not use would answer a different question.
+    const baseParts: Fn[] = [rebuilt.holding];
     for (const other of rebuilt.legs) {
       if (other.id === legId || other.reduced) continue;
       for (const part of other.parts) baseParts.push(part);
@@ -1305,7 +1361,15 @@ function compareWitnesses(evidence: Evidence, rebuilt: Rebuilt, upperFn: Fn): vo
   const clauses = clausesOf(evidence);
   const byId = new Map(clauses.map((clause) => [clause.id, clause]));
   const looseLegs = new Set(rebuilt.legs.filter((leg) => leg.reduced && !leg.tight).map((leg) => leg.id));
-  const reducedLegs = new Map(rebuilt.legs.filter((leg) => leg.reduced).map((leg) => [leg.id, leg]));
+  const reducedRules = new Map<string, string>(
+    rebuilt.legs.filter((leg) => leg.reduced).map((leg) => [leg.id, String(leg.reductionRule)]),
+  );
+  // THE EXPOSURE CAN BE REDUCED TOO, and then it earns an adverse state like any leg: "the
+  // position was liquidated". Derived from the proposal, not read from the result -- a checker
+  // that took the engine's word for which rules applied would be confirming a claim.
+  for (const reduction of exposureReduction(evidence.proposal)) {
+    reducedRules.set(reduction.leg, reduction.rule);
+  }
 
   for (const [field, className] of [
     ["failing_intervals", "WITNESS_INADMISSIBLE"],
@@ -1341,19 +1405,19 @@ function compareWitnesses(evidence: Evidence, rebuilt: Rebuilt, upperFn: Fn): vo
       for (const rawState of list(found["adverse_states"] ?? [], `$result.${field}[].witness.adverse_states`)) {
         const state = object(rawState, `$result.${field}[].witness.adverse_states[]`);
         const legId = text(state["leg"], `$...adverse_states[].leg`);
-        const reduced = reducedLegs.get(legId);
-        if (reduced === undefined) {
+        const reducedBy = reducedRules.get(legId);
+        if (reducedBy === undefined) {
           refuse(
             className,
             `$result.${field}[].witness.adverse_states`,
             `${legId} was not reduced, so no rule can produce an adverse state for it`,
           );
         }
-        if (state["rule"] !== reduced.reductionRule) {
+        if (state["rule"] !== reducedBy) {
           refuse(
             className,
             `$result.${field}[].witness.adverse_states`,
-            `${legId} was reduced by ${String(reduced.reductionRule)}, not ${String(state["rule"])}`,
+            `${legId} was reduced by ${reducedBy}, not ${String(state["rule"])}`,
           );
         }
       }
