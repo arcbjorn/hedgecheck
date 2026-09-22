@@ -415,6 +415,31 @@ question the basis rule already answers correctly. What stays ambiguous is what 
 names no series: `1-minute candle` (18 instances, no source, no instrument, and a 300-second
 window contradicting its own stated period) and `xyz:CL` (1, a bare ticker). 19 of 78.
 
+**THE ASSUMPTION VOCABULARY IS CLOSED**, from 22 Sep. An assumption is the one part of a
+result whose entire content is what it MEANS to a reader, so a name nobody can interpret is
+worse than a missing one. Until this rule, `proposal.assumptions` was typed as any slug and
+nothing checked the name: a proposal declaring `nothing_can_go_wrong` validated, lowered, and
+was carried into the result's own list beside `zero_base_fee` with equal standing. Three names
+are defined, each with what declaring it asserts, and lowering refuses anything else with
+**`ASSUMPTION_UNKNOWN`**:
+
+| Assumption | What declaring it asserts | Enforced by |
+|---|---|---|
+| `zero_base_fee` | the venue charges no base fee on an outcome trade | lowering requires it: a cost bound read off a book is wrong by the fee if there is one |
+| `deployer_settles_as_written` | the deployer settles as the template is written | `template.*` registry entries require it; `settleFraction` is submitted, not computed (EVIDENCE §1) |
+| `common_reference` | the holder BELIEVES every leg is observed on the objective's series | nothing — it is a note, deliberately |
+
+**`common_reference` is a note and not a gate.** The basis reduction rests on the RESOLVED
+references, not on an assertion about them, so letting a declaration switch it off would let a
+proposal assert its way out of the reduction that exists to catch exactly that error. It stays
+in the vocabulary because proposals carry it and a reader should be able to look it up.
+
+Enforced in lowering rather than the schema: narrowing `slug` to an enum would make
+previously-valid documents invalid, needing a new `schema_version` and every pinned document
+regenerated, and the vocabulary is a semantic rule like the family whitelist rather than a fact
+about JSON shape. Both the oracle and the engine carry the list, and `oracle/verify.py` checks
+they are the same list and that every name in it is actually used by something.
+
 Family identifiers are whitelisted. Familiar tickers do not bypass validation. A
 model may draft an entry for review; it is never in the evaluation path.
 
