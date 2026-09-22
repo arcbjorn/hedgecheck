@@ -388,9 +388,9 @@ def price_touch_bound():
     understate" is the whole claim, and a path that touched and came back is exactly where a
     wrong bound would over-credit. Checked by brute force over both directions.
 
-    The bound is NOT implemented in lowering, and `template.priceTouch` carries
-    `status: bounded` so a leg on it is refused. This pins the arithmetic the bound will use
-    when it is, so the claim in that entry's evidence is verified rather than asserted.
+    This pins the ARITHMETIC alone. That lowering chooses the right direction, records the
+    reduction, and that the evaluator applies the bound instead of zeroing the leg, is
+    `price_touch_lowering` below.
     """
     target, size = F(100), F(1000)
     rise = O.indicator(size, lower=target, lower_inclusive=True)
