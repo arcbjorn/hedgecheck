@@ -295,6 +295,7 @@ def main():
                 checked_sizes += 1
         print(f"size windows: {checked_sizes} reported sizes verified against the lower profile")
 
+    reference_map()
     basis_band()
     replay()
 
@@ -346,6 +347,62 @@ BETTER = {
 # worth nothing then, its premium still counts, so P&L(S) = 0.1*(S - 77631.4) - 160.76676.
 HORIZON = {"pieces": [("0.1", "-7923.90676")], "fails_on": ("60000", True, "69239.0676", False),
            "worst": {"pnl": "-1923.90676", "attained": True, "price": "60000"}}
+
+
+def reference_map():
+    """A venue's free text resolves to a canonical id, or to nothing it can name."""
+    import lower
+
+    document = canon.loads((PROJECT / "references" / "reference-map.json").read_bytes())
+    index = lower.reference_index(document)
+    mappings = document["mappings"]
+    catalogue = json.loads((PROJECT / "fixtures" / "replay" / "2026-09-18" / "outcome-meta.json").read_text())
+    outcomes = catalogue["outcomes"]
+
+    # EVERY price-described instance is covered. A map with a hole would silently fall back
+    # to the entry's template, which is a reference the instance does not name.
+    described = [o for o in outcomes if "priceDescription" in o.get("description", "")]
+    check(len(described) == 78, f"reference map: 78 price-described outcomes, found {len(described)}")
+    uncovered = [o for o in described
+                 if (o["venue"], O_terms(o)["priceDescription"], O_terms(o).get("seconds", "")) not in index]
+    check(not uncovered, f"reference map: {len(uncovered)} described instances have no mapping")
+
+    # The three states, on real instances rather than constructed ones.
+    leg = {"id": "probe"}
+    by_id = {str(o["outcome"]): o for o in outcomes}
+    check(lower.catalogue_reference(leg, by_id["2494"], index) is None,
+          "reference map: `1-minute candle` names no series, so it resolves to nothing")
+    check(lower.catalogue_reference(leg, by_id["3971"], index) is None,
+          "reference map: a canonical instance describes no series, so the entry's template governs")
+    check(lower.catalogue_reference(leg, by_id["1209"], index) == "hl:perp:HYPE:mark-twap:1s",
+          "reference map: an interpreted description resolves to its canonical id")
+
+    # THE TRAILING SPACE IS PART OF THE KEY. The catalogue holds `HYPE-USDC perp mark` and
+    # `HYPE-USDC perp mark ` from one venue under one template, with different windows, so a
+    # lookup that trimmed would answer for a string nobody wrote.
+    spaced = [m for m in mappings if m["price_description"] != m["price_description"].strip()]
+    check(spaced, "reference map: the trailing-space description is gone from the map")
+    trimmed = {m["price_description"].strip() for m in mappings}
+    check(len(trimmed) < len(mappings), "reference map: no two descriptions differ only by spacing any more")
+
+    # Ambiguity is the COMMON case, and each ambiguous row says why.
+    counts = {}
+    for o in described:
+        terms = O_terms(o)
+        counts[(o["venue"], terms["priceDescription"], terms.get("seconds", ""))] = \
+            counts.get((o["venue"], terms["priceDescription"], terms.get("seconds", "")), 0) + 1
+    ambiguous = [m for m in mappings if m["state"] == "ambiguous"]
+    instances = sum(counts[(m["venue"], m["price_description"], m["seconds"])] for m in ambiguous)
+    check((len(ambiguous), instances) == (6, 61),
+          f"reference map: 6 ambiguous descriptions over 61 instances, found {len(ambiguous)} over {instances}")
+    check(all(m.get("why") for m in mappings), "reference map: every mapping says why")
+    check(all(m.get("reference") for m in mappings if m["state"] != "ambiguous"),
+          "reference map: a non-ambiguous mapping names a reference")
+
+
+def O_terms(outcome):
+    """The catalogue's `key:value|...` description, as a dict."""
+    return dict(part.split(":", 1) for part in outcome.get("description", "").split("|") if ":" in part)
 
 
 def basis_band():
