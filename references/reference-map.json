@@ -1,92 +1,96 @@
 {
-  "schema_version": "1",
-  "version": "1",
-  "review": {
-    "state": "draft",
-    "drafted_by": "model"
+ "schema_version": "1",
+ "version": "1",
+ "review": {
+  "state": "draft",
+  "drafted_by": "model"
+ },
+ "mappings": [
+  {
+   "venue": "txyz",
+   "price_description": "1-minute candle",
+   "seconds": "300",
+   "state": "ambiguous",
+   "why": "Names neither a source nor a series: not a venue, not an instrument, not a statistic. The single largest group on the 18 September catalogue at 18 instances, so this is the common case and not an edge one. A 300-second window on a '1-minute candle' does not resolve it either -- the two disagree about the period. Nothing here can be mapped without inventing the deployer's intent."
   },
-  "mappings": [
-    {
-      "venue": "txyz",
-      "price_description": "1-minute candle",
-      "seconds": "300",
-      "state": "ambiguous",
-      "why": "Names neither a source nor a series: not a venue, not an instrument, not a statistic. The single largest group on the 18 September catalogue at 18 instances, so this is the common case and not an edge one. A 300-second window on a '1-minute candle' does not resolve it either -- the two disagree about the period. Nothing here can be mapped without inventing the deployer's intent."
-    },
-    {
-      "venue": "out",
-      "price_description": "xyz:CL",
-      "seconds": "1",
-      "state": "ambiguous",
-      "why": "A bare identifier, retained as written. Whatever 'xyz:CL' denotes to its deployer, it is not a price series this project can name, and guessing at a crude-oil ticker would be exactly the silent resolution PLAN section 6 forbids."
-    },
-    {
-      "venue": "skew",
-      "price_description": "the Pyth BTC/USD price",
-      "seconds": "90",
-      "state": "ambiguous",
-      "why": "Names Pyth plainly, and the template metadata says 'This market must refer to the price of a Hyperliquid perp.' The description and the restriction contradict each other, and the deployer-actions page makes a contradiction slashable by validators -- so which one governs is not this project's to decide. 15 instances. Mapping it to pyth:BTC/USD:price-twap:90s would be a reading the venue's own template denies; mapping it to hl:perp:BTC:mark-twap:90s would be a reading the description denies."
-    },
-    {
-      "venue": "skew",
-      "price_description": "the Pyth HYPE/USD price",
-      "seconds": "90",
-      "state": "ambiguous",
-      "why": "The same contradiction as the BTC/USD row, on 9 instances. Listed separately because a mapping is keyed by the exact description and nothing here is inferred from a family resemblance."
-    },
-    {
-      "venue": "skew",
-      "price_description": "the Pyth US100 index price",
-      "seconds": "90",
-      "state": "ambiguous",
-      "why": "The same contradiction, on 9 instances, and additionally an index rather than a crypto pair: there is no Hyperliquid perp for US100 at all, so the template restriction cannot be satisfied even in principle."
-    },
-    {
-      "venue": "skew",
-      "price_description": "the Pyth US500 index price",
-      "seconds": "90",
-      "state": "ambiguous",
-      "why": "As the US100 row: 9 instances, an index with no corresponding Hyperliquid perp."
-    },
-    {
-      "venue": "skew",
-      "price_description": "the Hyperliquid BTC perp trade",
-      "seconds": "90",
-      "state": "interpreted",
-      "reference": "hl:perp:BTC:trade-twap:90s",
-      "why": "Names the venue (Hyperliquid), the instrument (BTC perp) and the statistic (trade price) explicitly, and the 90-second window matches the template's own TWAP field. The trade series, not the mark: the description says 'trade'. Interpreted and not confirmed -- no deployer has confirmed it in writing -- so it surfaces in every result that rests on it."
-    },
-    {
-      "venue": "out",
-      "price_description": "BTC-USDC mark",
-      "seconds": "1",
-      "state": "interpreted",
-      "reference": "hl:perp:BTC:mark-twap:1s",
-      "why": "Names the instrument as Hyperliquid spells it in its own catalogue (BTC-USDC) and the statistic as the mark. 8 instances. A one-second TWAP is a single observation in practice, and it is recorded as declared rather than collapsed to the instantaneous mark, because the template says seconds:1 and a mapping states what the venue said."
-    },
-    {
-      "venue": "out",
-      "price_description": "BTC-USDC perp mark",
-      "seconds": "60",
-      "state": "interpreted",
-      "reference": "hl:perp:BTC:mark-twap:60s",
-      "why": "As the row above, with 'perp' said explicitly and a 60-second window. Kept as its own mapping rather than folded into 'BTC-USDC mark': the descriptions differ, and a mapping is keyed by what the venue wrote."
-    },
-    {
-      "venue": "out",
-      "price_description": "HYPE-USDC perp mark",
-      "seconds": "3",
-      "state": "interpreted",
-      "reference": "hl:perp:HYPE:mark-twap:3s",
-      "why": "The HYPE perp mark on a 3-second window."
-    },
-    {
-      "venue": "out",
-      "price_description": "HYPE-USDC perp mark ",
-      "seconds": "1",
-      "state": "interpreted",
-      "reference": "hl:perp:HYPE:mark-twap:1s",
-      "why": "THE SAME TEXT AS THE ROW ABOVE WITH A TRAILING SPACE, and a different window. Both are live on the 18 September catalogue from one venue under one template. Kept as two mappings deliberately: a lookup that trimmed whitespace would merge two descriptions the venue sent separately, and would then answer for a string nobody wrote. If these are meant to be one market, that is the deployer's to say."
-    }
-  ]
+  {
+   "venue": "out",
+   "price_description": "xyz:CL",
+   "seconds": "1",
+   "state": "ambiguous",
+   "why": "A bare identifier, retained as written. Whatever 'xyz:CL' denotes to its deployer, it is not a price series this project can name, and guessing at a crude-oil ticker would be exactly the silent resolution PLAN section 6 forbids."
+  },
+  {
+   "venue": "skew",
+   "price_description": "the Pyth BTC/USD price",
+   "seconds": "90",
+   "state": "interpreted",
+   "why": "15 instances, every one with perp=BTC: a market about the Hyperliquid BTC perp that settles on Pyth's BTC/USD feed. Mapped on the template's OWN words. The full binaryPrice text reads 'Settlement is according to the {seconds}-second TWAP of {priceDescription} price ending at {time}', so priceDescription IS the settlement source, whatever it names. The metadata restriction 'This market must refer to the price of a Hyperliquid perp' constrains {perp} -- the market's SUBJECT -- and not {priceDescription}, its settlement source; the two are different template fields. So there is no contradiction to refuse over: this row said there was one, and the retained template text at research/2026-09-18/outcome-templates.json (commit 085ccfb) falsifies that. Interpreted, not confirmed: no deployer has confirmed it in writing, so it surfaces in every result that rests on it. Mapping it does NOT make it comparable to a Hyperliquid series -- a leg observed here against an objective stated on hl:* earns basis_unbridged and is worth zero unless the owner declares a bound.",
+   "reference": "pyth:BTC/USD:price-twap:90s"
+  },
+  {
+   "venue": "skew",
+   "price_description": "the Pyth HYPE/USD price",
+   "seconds": "90",
+   "state": "interpreted",
+   "why": "9 instances, every one with perp=HYPE. Mapped on the template's OWN words. The full binaryPrice text reads 'Settlement is according to the {seconds}-second TWAP of {priceDescription} price ending at {time}', so priceDescription IS the settlement source, whatever it names. The metadata restriction 'This market must refer to the price of a Hyperliquid perp' constrains {perp} -- the market's SUBJECT -- and not {priceDescription}, its settlement source; the two are different template fields. So there is no contradiction to refuse over: this row said there was one, and the retained template text at research/2026-09-18/outcome-templates.json (commit 085ccfb) falsifies that. Interpreted, not confirmed: no deployer has confirmed it in writing, so it surfaces in every result that rests on it. Mapping it does NOT make it comparable to a Hyperliquid series -- a leg observed here against an objective stated on hl:* earns basis_unbridged and is worth zero unless the owner declares a bound.",
+   "reference": "pyth:HYPE/USD:price-twap:90s"
+  },
+  {
+   "venue": "skew",
+   "price_description": "the Pyth US100 index price",
+   "seconds": "90",
+   "state": "interpreted",
+   "why": "9 instances, every one with perp=xyz:XYZ100 -- so the perp DOES exist and this row's claim that 'there is no Hyperliquid perp for US100 at all' was wrong on the data as well as on the reading. Mapped on the template's OWN words. The full binaryPrice text reads 'Settlement is according to the {seconds}-second TWAP of {priceDescription} price ending at {time}', so priceDescription IS the settlement source, whatever it names. The metadata restriction 'This market must refer to the price of a Hyperliquid perp' constrains {perp} -- the market's SUBJECT -- and not {priceDescription}, its settlement source; the two are different template fields. So there is no contradiction to refuse over: this row said there was one, and the retained template text at research/2026-09-18/outcome-templates.json (commit 085ccfb) falsifies that. Interpreted, not confirmed: no deployer has confirmed it in writing, so it surfaces in every result that rests on it. Mapping it does NOT make it comparable to a Hyperliquid series -- a leg observed here against an objective stated on hl:* earns basis_unbridged and is worth zero unless the owner declares a bound.",
+   "reference": "pyth:US100/USD:price-twap:90s"
+  },
+  {
+   "venue": "skew",
+   "price_description": "the Pyth US500 index price",
+   "seconds": "90",
+   "state": "interpreted",
+   "why": "9 instances, every one with perp=xyz:SP500, which exists as a perp. Mapped on the template's OWN words. The full binaryPrice text reads 'Settlement is according to the {seconds}-second TWAP of {priceDescription} price ending at {time}', so priceDescription IS the settlement source, whatever it names. The metadata restriction 'This market must refer to the price of a Hyperliquid perp' constrains {perp} -- the market's SUBJECT -- and not {priceDescription}, its settlement source; the two are different template fields. So there is no contradiction to refuse over: this row said there was one, and the retained template text at research/2026-09-18/outcome-templates.json (commit 085ccfb) falsifies that. Interpreted, not confirmed: no deployer has confirmed it in writing, so it surfaces in every result that rests on it. Mapping it does NOT make it comparable to a Hyperliquid series -- a leg observed here against an objective stated on hl:* earns basis_unbridged and is worth zero unless the owner declares a bound.",
+   "reference": "pyth:US500/USD:price-twap:90s"
+  },
+  {
+   "venue": "skew",
+   "price_description": "the Hyperliquid BTC perp trade",
+   "seconds": "90",
+   "state": "interpreted",
+   "reference": "hl:perp:BTC:trade-twap:90s",
+   "why": "Names the venue (Hyperliquid), the instrument (BTC perp) and the statistic (trade price) explicitly, and the 90-second window matches the template's own TWAP field. The trade series, not the mark: the description says 'trade'. Interpreted and not confirmed -- no deployer has confirmed it in writing -- so it surfaces in every result that rests on it."
+  },
+  {
+   "venue": "out",
+   "price_description": "BTC-USDC mark",
+   "seconds": "1",
+   "state": "interpreted",
+   "reference": "hl:perp:BTC:mark-twap:1s",
+   "why": "Names the instrument as Hyperliquid spells it in its own catalogue (BTC-USDC) and the statistic as the mark. 8 instances. A one-second TWAP is a single observation in practice, and it is recorded as declared rather than collapsed to the instantaneous mark, because the template says seconds:1 and a mapping states what the venue said."
+  },
+  {
+   "venue": "out",
+   "price_description": "BTC-USDC perp mark",
+   "seconds": "60",
+   "state": "interpreted",
+   "reference": "hl:perp:BTC:mark-twap:60s",
+   "why": "As the row above, with 'perp' said explicitly and a 60-second window. Kept as its own mapping rather than folded into 'BTC-USDC mark': the descriptions differ, and a mapping is keyed by what the venue wrote."
+  },
+  {
+   "venue": "out",
+   "price_description": "HYPE-USDC perp mark",
+   "seconds": "3",
+   "state": "interpreted",
+   "reference": "hl:perp:HYPE:mark-twap:3s",
+   "why": "The HYPE perp mark on a 3-second window."
+  },
+  {
+   "venue": "out",
+   "price_description": "HYPE-USDC perp mark ",
+   "seconds": "1",
+   "state": "interpreted",
+   "reference": "hl:perp:HYPE:mark-twap:1s",
+   "why": "THE SAME TEXT AS THE ROW ABOVE WITH A TRAILING SPACE, and a different window. Both are live on the 18 September catalogue from one venue under one template. Kept as two mappings deliberately: a lookup that trimmed whitespace would merge two descriptions the venue sent separately, and would then answer for a string nobody wrote. If these are meant to be one market, that is the deployer's to say."
+  }
+ ]
 }
