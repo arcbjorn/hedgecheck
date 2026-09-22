@@ -139,6 +139,18 @@ def check_terms(leg, catalogue):
             _refuse("TERMS_MISMATCH", f"{leg['id']}: outcome is not at index {terms['index']} of its question")
         return [num(t) for t in terms["thresholds"]], item
 
+    if family == "template.binaryPrice":
+        # A DEPLOYER-TEMPLATED binary. Every field the catalogue carries is checked, the
+        # price description included: the reference map keys on that exact text, so a leg
+        # that disagreed about it would be mapped to a series its instance does not name.
+        described = _terms_of(item["description"])
+        want = {"perp": terms["underlying"], "priceDescription": described.get("priceDescription", ""),
+                "seconds": terms["seconds"], "threshold": terms["target_price"],
+                "time": _expiry_compact(terms["expiry"])}
+        if described != want:
+            _refuse("TERMS_MISMATCH", f"{leg['id']}: catalogue says {item['description']!r}, leg says {want}")
+        return num(terms["target_price"]), item
+
     _refuse("UNSUPPORTED_FAMILY", f"{leg['id']}: lowering has no rule for {family}")
 
 
@@ -167,6 +179,42 @@ def leg_reference(leg, entry):
                     f"{leg['id']}: the entry's reference names {{{name}}}, which is not a single value")
         return value
     return re.sub(r"\{([a-z_]+)\}", one, entry["reference"])
+
+
+def reference_index(document):
+    """A reference map, keyed for lookup. The caller reads the file; this module does no I/O."""
+    return {(m["venue"], m["price_description"], m["seconds"]): m
+            for m in (document or {}).get("mappings", [])}
+
+
+def catalogue_reference(leg, item, references):
+    """The reference a DEPLOYER-TEMPLATED instance is observed on, or None.
+
+    A canonical family's reference is fixed by its registry entry: no `recurring` outcome on
+    the 18 September catalogue carries a `priceDescription` (0 of 32), and all 78 that do are
+    `template:*`. So this governs the templated families only, and returns None where the
+    catalogue describes no series.
+
+    The key is the venue's text EXACTLY as the catalogue carries it, spacing included. The
+    catalogue holds both `HYPE-USDC perp mark` and `HYPE-USDC perp mark ` -- one venue, one
+    template, one trailing space, different windows -- so trimming would answer for a string
+    nobody wrote.
+
+    NOT YET A REFUSAL. An unmapped or `ambiguous` description must become `AMBIGUOUS_RULES`,
+    which EVIDENCE section 1 names. It is unreachable today: a templated leg is refused by
+    `check_terms` with UNSUPPORTED_FAMILY before this runs, because no templated family has a
+    terms rule or a reviewed payoff. Raising a code no input can produce would be a refusal
+    class that looks tested and is not -- so the resolver is here, the refusal waits for the
+    family, and `fixtures/refusals/` stays one fixture per reachable code.
+    """
+    described = _terms_of(item.get("description", ""))
+    if "priceDescription" not in described:
+        return None
+    key = (item.get("venue", ""), described["priceDescription"], described.get("seconds", ""))
+    mapping = references.get(key)
+    if mapping is None or mapping["state"] == "ambiguous":
+        return None
+    return mapping["reference"]
 
 
 def resolve(leg, registry):
@@ -345,7 +393,7 @@ def _snapshots_cited(proposal):
 # --------------------------------------------------------------------------- lowering
 
 
-def lower(proposal, registry, snapshots):
+def lower(proposal, registry, snapshots, references=None):
     """(proposal, registry entries by family, snapshot bytes by SHA-256) -> lowered proposal.
 
     Pure. Raises `Refused` rather than returning a verdict.
@@ -394,7 +442,10 @@ def lower(proposal, registry, snapshots):
         for name in entry["assumptions_required"]:
             if name not in proposal["assumptions"]:
                 _refuse("ASSUMPTION_REQUIRED", f"{leg['id']}: {entry['family']} requires the {name!r} assumption")
-        leg_references[leg["id"]] = leg_reference(leg, entry)
+        # A DEPLOYER-TEMPLATED instance names its own series, so the catalogue governs and
+        # the entry's template is only for families whose reference is fixed.
+        described = catalogue_reference(leg, _item, references or {})
+        leg_references[leg["id"]] = described if described else leg_reference(leg, entry)
         legs.append({
             "id": leg["id"],
             "kind": "indicator",
