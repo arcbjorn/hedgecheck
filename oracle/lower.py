@@ -111,6 +111,31 @@ def _expiry_compact(iso):
     return f"{iso[0:4]}{iso[5:7]}{iso[8:10]}-{iso[11:13]}{iso[14:16]}"
 
 
+def _templated_terms(leg, item, level_name):
+    """The catalogue's description against the leg's terms, for a deployer-templated family.
+
+    `level_name` is what the template calls the price level: `threshold` for binaryPrice,
+    `target` for priceTouch. Everything else is the same shape.
+
+    A term the leg does NOT CARRY is a refusal, not a crash. A proposal can name any family
+    with any terms -- the `unsupported-family` refusal fixture relabels a bucket leg as a
+    touch, keeping the bucket's `index` and `thresholds` -- so indexing the terms directly
+    raised KeyError out of a function whose whole contract is to refuse.
+    """
+    terms = leg["terms"]
+    described = _terms_of(item["description"])
+    for name in ("underlying", "target_price", "seconds", "expiry"):
+        if name not in terms:
+            _refuse("TERMS_MISMATCH",
+                    f"{leg['id']}: {leg['family']} needs the {name!r} term, which the leg does not carry")
+    want = {"perp": terms["underlying"], "priceDescription": described.get("priceDescription", ""),
+            "seconds": terms["seconds"], level_name: terms["target_price"],
+            "time": _expiry_compact(terms["expiry"])}
+    if described != want:
+        _refuse("TERMS_MISMATCH", f"{leg['id']}: catalogue says {item['description']!r}, leg says {want}")
+    return num(terms["target_price"]), item
+
+
 def check_terms(leg, catalogue):
     """The leg's terms must be the instance the catalogue describes, field by field.
 
@@ -148,28 +173,14 @@ def check_terms(leg, catalogue):
         # A DEPLOYER-TEMPLATED binary. Every field the catalogue carries is checked, the
         # price description included: the reference map keys on that exact text, so a leg
         # that disagreed about it would be mapped to a series its instance does not name.
-        described = _terms_of(item["description"])
-        want = {"perp": terms["underlying"], "priceDescription": described.get("priceDescription", ""),
-                "seconds": terms["seconds"], "threshold": terms["target_price"],
-                "time": _expiry_compact(terms["expiry"])}
-        if described != want:
-            _refuse("TERMS_MISMATCH", f"{leg['id']}: catalogue says {item['description']!r}, leg says {want}")
-        return num(terms["target_price"]), item
+        return _templated_terms(leg, item, "threshold")
 
     if family == "template.priceTouch":
-        # A DEPLOYER-TEMPLATED touch. Same shape as binaryPrice except the level is named
-        # `target`, not `threshold` -- checked against outcome 1209 on the 18 September
-        # catalogue, which reads
+        # A DEPLOYER-TEMPLATED touch. Same shape, except the template names the level
+        # `target` rather than `threshold` -- checked against outcome 1209 on the
+        # 18 September catalogue, which reads
         #   perp:HYPE|priceDescription:HYPE-USDC perp mark |seconds:1|target:100|time:...
-        # The price description keeps its exact spacing, trailing space included, because
-        # the reference map keys on that text byte for byte.
-        described = _terms_of(item["description"])
-        want = {"perp": terms["underlying"], "priceDescription": described.get("priceDescription", ""),
-                "seconds": terms["seconds"], "target": terms["target_price"],
-                "time": _expiry_compact(terms["expiry"])}
-        if described != want:
-            _refuse("TERMS_MISMATCH", f"{leg['id']}: catalogue says {item['description']!r}, leg says {want}")
-        return num(terms["target_price"]), item
+        return _templated_terms(leg, item, "target")
 
     _refuse("UNSUPPORTED_FAMILY", f"{leg['id']}: lowering has no rule for {family}")
 
