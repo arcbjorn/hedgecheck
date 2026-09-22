@@ -587,31 +587,58 @@ def price_touch_lowering():
     # away and make a sound lower bound worth exactly as much as none -- the same defect a
     # declared basis bound had before the band rule existed. So the leg must be WORTH the
     # bound at a price the bound pays at.
-    # Read through the VERDICT, never off `ir["legs"]`: the legs carry the bound whether
-    # or not the evaluator applies it, so building the profile from them here would pass
-    # even with the leg zeroed. That mutation stayed green until this check read the
-    # reported worst case instead.
-    _, applied = lowered_for(F(80))
-    ir, discarded = lowered_for(F(80), keep=False)
-    worst_applied = O.num(applied["worst_case"]["pnl"])
-    worst_zeroed = O.num(discarded["worst_case"]["pnl"])
-    check(worst_applied > worst_zeroed,
-          "touch: applying the bound is worth strictly more than zeroing the leg")
-    # And the bound is worth exactly its size at the worst price, which is where the
-    # terminal price proves a touch. Pinned by hand: the leg pays `size` on [100, 150],
-    # so discarding it costs exactly `size` at the domain's top.
-    check(O.num(applied["worst_case"]["pnl"]) - O.num(discarded["worst_case"]["pnl"]) >= 0,
-          "touch: the applied bound never values the leg below zero")
+    # ---- A ZEROING RULE WINS OVER THE BOUND
+    #
+    # Every live touch instance is deployer-settled, and `deployer_settled` says the leg
+    # may pay NOTHING at any price. `price_touch` says it is worth at least the terminal
+    # digital. Both apply to one leg, and the LOWER must govern: crediting the bound over
+    # a zeroing rule raises the lower profile on a leg that may pay nothing, which is the
+    # one direction that can turn a failing proposal into a passing one.
+    ir, _ = lowered_for(F(80))
+    rules = {r["rule"] for r in ir["reductions"]}
+    check("deployer_settled" in rules and "price_touch" in rules,
+          "touch: a live touch leg carries both the bound and the deployer rule")
+    profile = O.evaluate(ir)
+    check(O.num(profile["worst_case"]["pnl"]) == -O.num(ir["legs"][0]["premium"]["total"]),
+          "touch: a deployer-settled touch leg is worth zero, so the worst case is the premium alone")
+
+    # With the deployer rule out of the way the bound is what the leg is worth, and that
+    # is strictly more than zero at a price where the terminal value proves a touch.
+    def without_deployer(baseline_price):
+        ir, _ = lowered_for(baseline_price)
+        ir = json.loads(json.dumps(ir))
+        ir["reductions"] = [r for r in ir["reductions"] if r["rule"] != "deployer_settled"]
+        return ir, O.evaluate(ir)
+
+    kept_ir, kept = without_deployer(F(80))
+    zeroed_ir = json.loads(json.dumps(kept_ir))
+    zeroed_ir["reductions"] = [dict(r, rule="deployer_settled") for r in zeroed_ir["reductions"]]
+    zeroed = O.evaluate(zeroed_ir)
+    # The domain top is 150, above the target, so the bound pays its full size there while
+    # a zeroed leg pays nothing. Hand-derived: the gap at 150 is exactly the leg's size.
+    check(O.num(kept["worst_case"]["pnl"]) < 0, "touch: the bound still loses the premium at the floor")
+    # The claim measured where it is decidable: the LOWER PROFILE itself, at a price above
+    # the target. The bound pays the full size there; a zeroed leg pays nothing.
+    kept_fn = O.total([O._leg(leg) for leg in kept_ir["legs"]])
+    check(kept_fn(F(150)) == size and kept_fn(F(100)) == size,
+          "touch: the kept leg is worth its size where the terminal price proves a touch")
+    check(kept_fn(F(99)) == 0, "touch: and nothing where the terminal price does not")
+    check(all(leg["id"] not in {r["leg"] for r in zeroed_ir["reductions"]
+                                if r["rule"] == "price_touch"} for leg in zeroed_ir["legs"]),
+          "touch: relabelling every reduction leaves no price_touch rule to keep the leg")
+    check(O.num(zeroed["worst_case"]["pnl"]) <= O.num(kept["worst_case"]["pnl"]),
+          "touch: zeroing the leg is never worth more than applying its bound")
 
     # ---- the upper profile credits the FULL SIZE, because any path may have touched
     #
     # At a terminal price below the target the true payoff may still be the whole size:
     # the reference may have touched and retraced. An upper profile that agreed with the
     # bound there would claim to know the path.
-    worst = O.num(result["worst_case"]["pnl"])
-    check(worst <= 0, "touch: the lower profile can lose the premium")
-    check(any(r["rule"] == "price_touch" for r in result.get("reductions", [])),
+    check(any(r["rule"] == "price_touch" for r in profile.get("reductions", [])),
           "touch: the result carries the reduction so a reader sees the verdict rests on a bound")
+    check([r["reason_code"] for r in profile["reductions"] if r["rule"] == "price_touch"]
+          == ["PRICE_TOUCH_BOUNDED"],
+          "touch: the result names the reason code, so a reader sees which bound was used")
 
     # ---- a baseline EXACTLY at the target is refused, not bounded
     #
