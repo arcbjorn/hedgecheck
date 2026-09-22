@@ -360,6 +360,221 @@ def size_window(base, unit, levels, floor_pnl, lower, upper, lot=1):
             "binding": [low_site, high_site]}
 
 
+# ---------------------------------------------------------------- synthesis
+
+def _simplex(rows, cost, columns):
+    """Exact simplex on   minimise cost . n   s.t.   A n >= b,  n >= 0.
+
+    Returns `(status, point, certificate)`. `status` is "optimal" with a point, or
+    "infeasible" with a Farkas certificate `y >= 0` satisfying `A^T y <= 0` and `b . y > 0`,
+    which is exactly the statement that no non-negative `n` can satisfy `A n >= b`.
+
+    Rationals throughout: no float ever touches this. The objective row is carried INSIDE
+    the tableau and pivoted with it, so reduced costs are read rather than recomputed --
+    recomputing them against a mutating basis is where the first attempt at this went
+    wrong, silently returning a point that violated its own constraints.
+
+    BLAND'S RULE, not the steepest edge: the lowest-index eligible column, and the lowest
+    basis index among tied ratios. Cycling is then impossible, so termination is a fact
+    rather than a hope. These programs have single-digit rows and columns, so trading speed
+    for a termination proof is the right trade.
+    """
+    # Every right-hand side is made non-negative, so the artificial basis starts feasible.
+    prepared = []
+    for coeffs, rhs in rows:
+        if rhs < 0:
+            prepared.append(([-c for c in coeffs], -rhs, True))
+        else:
+            prepared.append(([F(c) for c in coeffs], F(rhs), False))
+
+    m, n = len(prepared), columns
+    surplus, artificial = n, n + m
+    width = n + 2 * m
+
+    # Rows: A n - s + a = b, with `s` the surplus and `a` the artificial. A row flipped for
+    # a negative rhs was multiplied through by -1, surplus included, so its sign flips too.
+    table = []
+    for j, (coeffs, rhs, flipped) in enumerate(prepared):
+        row = [F(0)] * (width + 1)
+        for i, value in enumerate(coeffs):
+            row[i] = value
+        row[surplus + j] = F(1) if flipped else F(-1)
+        row[artificial + j] = F(1)
+        row[width] = rhs
+        table.append(row)
+    basis = [artificial + j for j in range(m)]
+
+    def pivot(objective, pr, pc):
+        factor = table[pr][pc]
+        table[pr] = [value / factor for value in table[pr]]
+        for r in range(m):
+            if r != pr and table[r][pc] != 0:
+                scale = table[r][pc]
+                table[r] = [a - scale * b for a, b in zip(table[r], table[pr])]
+        if objective[pc] != 0:
+            scale = objective[pc]
+            for k in range(width + 1):
+                objective[k] -= scale * table[pr][k]
+        basis[pr] = pc
+
+    def run(objective, allowed):
+        """Pivot to optimality over `allowed` columns. Returns False if unbounded."""
+        while True:
+            entering = next((j for j in allowed if objective[j] < 0), None)
+            if entering is None:
+                return True
+            ratios = [(table[r][width] / table[r][entering], basis[r], r)
+                      for r in range(m) if table[r][entering] > 0]
+            if not ratios:
+                return False
+            pivot(objective, min(ratios)[2], entering)
+
+    # ---- phase one: minimise the sum of the artificials
+    phase = [F(0)] * (width + 1)
+    for j in range(m):
+        phase[artificial + j] = F(1)
+    # Price out the artificial basis so the objective row is consistent with it.
+    for r in range(m):
+        for k in range(width + 1):
+            phase[k] -= table[r][k]
+    run(phase, range(artificial))
+
+    # The phase-one optimum is -phase[width] because the objective row was reduced.
+    if -phase[width] > 0:
+        # INFEASIBLE. y_j is the phase-one reduced cost of artificial column j, taken back
+        # to the caller's sign convention: a row flipped for a negative rhs had its whole
+        # inequality multiplied by -1, so its multiplier flips with it.
+        # y_j is the simplex multiplier on row j. After phase one the objective row holds
+        # each artificial's REDUCED cost, which is `1 - y_j` because the artificial's own
+        # cost is 1. A row flipped for a negative right-hand side had its whole inequality
+        # multiplied by -1, so its multiplier carries that sign back.
+        y = []
+        for j, (_, _, flipped) in enumerate(prepared):
+            value = F(1) - phase[artificial + j]
+            y.append(-value if flipped else value)
+        return "infeasible", None, y
+
+    # ---- phase two: the real cost, with the artificials pinned out of play
+    objective = [F(0)] * (width + 1)
+    for i, value in enumerate(cost):
+        objective[i] = F(value)
+    for r in range(m):
+        if objective[basis[r]] != 0:
+            scale = objective[basis[r]]
+            for k in range(width + 1):
+                objective[k] -= scale * table[r][k]
+    if not run(objective, range(artificial)):
+        return "unbounded", None, None
+
+    point = [F(0)] * n
+    for r in range(m):
+        if basis[r] < n:
+            point[basis[r]] = table[r][width]
+    return "optimal", point, None
+
+
+# ---------------------------------------------------------------- synthesis
+
+def constraints(base, units, floor_pnl, lower, upper):
+    """The objective as finitely many exact linear constraints on the sizes.
+
+    Returns rows `(price, side, alpha, coefficients)` meaning
+
+        alpha + sum(coefficients[i] * n[i]) >= floor_pnl
+
+    where `alpha` is the base P&L at that site and `coefficients[i]` is what one unit of
+    instrument `i` pays there. Feasibility over the WHOLE domain is exactly feasibility at
+    these rows.
+
+    WHY FINITELY MANY. For fixed sizes the P&L is affine on every open atom, so the
+    condition holds on an atom exactly when it holds at the atom's endpoint limits -- the
+    same argument `size_window` uses for one instrument. And the breakpoint SET does not
+    depend on the sizes: it is the strikes, which come from the instruments' own terms. So
+    one atom walk with unit sizes gives the sites that serve every member of the family,
+    and "cheapest sizes meeting the objective" is a linear program with fixed rows.
+
+    A SLOPED open piece never attains its infimum at an excluded end; the constraint there
+    is a limit. Imposing it is still sound, because `>=` is closed: if the limit meets the
+    floor then every interior price does, and if it does not, prices arbitrarily close to
+    the end violate the objective. So the row is imposed as written, and no size is called
+    feasible on the strength of a price the domain excludes.
+    """
+    cuts = base.breakpoints
+    for unit in units:
+        cuts = cuts | unit.breakpoints
+    rows = []
+    streams = [atoms(base, lower, upper, cuts)] + [atoms(unit, lower, upper, cuts) for unit in units]
+    for pieces in zip(*streams):
+        head = pieces[0]
+        if head[0] == "point":
+            rows.append((head[1], "at", head[2], [piece[2] for piece in pieces[1:]]))
+            continue
+        _, lo, hi, slope, intercept = head
+        for at, side in ((lo, "above"), (hi, "below")):
+            rows.append((at, side, slope * at + intercept,
+                         [piece[3] * at + piece[4] for piece in pieces[1:]]))
+    return rows
+
+
+def synthesise(base, units, prices, floor_pnl, lower, upper, lot=1):
+    """Cheapest whole-contract sizes meeting the objective, or a certificate that none do.
+
+    `base` is the P&L of what the holder already has; `units` are the candidate
+    instruments, one unit each; `prices[i]` is what one contract of instrument `i` costs.
+    Returns a dict: `{"status": "feasible", "sizes": [...], "cost": ...}` or
+    `{"status": "infeasible", "certificate": {...}}`.
+
+    THE PROGRAM IS A RELAXATION. Sizes are whole contracts, but the linear program solves
+    over the rationals; its answer is rounded UP, because rounding down could drop below
+    the floor the program was solving for. The rounded structure is then RE-CHECKED with
+    the evaluator -- `constraints` again, arithmetic only, no solver -- and reported only
+    if it really meets the objective. PLAN section 3 states the rule and this obeys it: a
+    structure is claimed because it was checked, never because a solver proposed it.
+
+    INFEASIBILITY IS CLAIMED ONLY FOR THE RELAXATION. If the relaxed program is infeasible
+    then no whole-contract answer exists either, since the integers are a subset of the
+    rationals -- so the certificate transfers. The converse does not hold and is not
+    claimed: a feasible relaxation whose rounding fails the re-check is reported as
+    `rounding_failed`, which says the search did not find one, not that none exists.
+    """
+    rows = constraints(base, units, floor_pnl, lower, upper)
+    # THE PREMIUM IS PART OF THE CONSTRAINT, not only of the objective. Buying `n` contracts
+    # costs `n * price` whatever the price does, so the P&L at a site is
+    #   alpha + sum(n_i * (payoff_i - price_i)),
+    # and the coefficient is the payoff NET of its price. Leaving it out lets the program
+    # buy protection for free: on the PLAN section 3 example that turned a case PLAN proves
+    # infeasible -- minimax loss 1,600 against a 1,000 cap -- into "feasible".
+    #
+    # It is also what makes the certificate the one PLAN names: at the floor the net
+    # coefficient is 1 - p and at the strike it is -p, so weighting those two rows by
+    # (1 - p, p) cancels n and leaves -(D + p*A) >= cap, false whatever the size.
+    net = [(at, side, alpha, [c - F(price) for c, price in zip(coefficients, prices)])
+           for at, side, alpha, coefficients in rows]
+    program = [(coefficients, floor_pnl - alpha) for _, _, alpha, coefficients in net]
+    status, point, certificate = _simplex(program, [F(p) for p in prices], len(units))
+
+    if status == "infeasible":
+        return {"status": "infeasible",
+                "certificate": {"kind": "farkas", "weights": list(certificate),
+                                "sites": [(at, side) for at, side, _, _ in net]}}
+    if status != "optimal":
+        return {"status": status}
+
+    lot = F(lot)
+    sizes = [(-((-value) // lot)) * lot for value in point]  # ceiling to the lot
+    # THE RE-CHECK. Exactly the constraint rows, evaluated at the rounded sizes. This is
+    # the evaluator's own arithmetic, not the solver's: a rounding that satisfies the
+    # relaxation can still miss a row, and reporting it unchecked is how a "smallest size"
+    # that then fails gets published (EVIDENCE section 9).
+    met = all(alpha + sum(c * n for c, n in zip(coefficients, sizes)) >= floor_pnl
+              for _, _, alpha, coefficients in net)
+    if not met:
+        return {"status": "rounding_failed", "relaxed": list(point)}
+    return {"status": "feasible", "sizes": sizes,
+            "cost": sum((F(p) * n for p, n in zip(prices, sizes)), F(0)),
+            "relaxed": list(point)}
+
+
 # ---------------------------------------------------------------- results
 
 def text_interval(interval):
