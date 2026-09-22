@@ -78,6 +78,11 @@ func TestAnEntryReferenceIsNotFreeText(t *testing.T) {
 		"hl:perp:{underlying}:mark-interp",
 		"hl:perp:BTC:mark-interp",
 		"pyth:BTC/USD:price-twap:90s",
+		// A placeholder INSIDE a segment, not a whole one. `{underlying}/USD` resolves to
+		// `BTC/USD`, and the first version of this pattern only allowed a placeholder to be
+		// an entire segment -- so it refused every Pyth template. Found by the first bundle
+		// that carried one.
+		"pyth:{underlying}/USD:price-twap:90s",
 		"synthetic",
 	} {
 		entry["reference"] = good
