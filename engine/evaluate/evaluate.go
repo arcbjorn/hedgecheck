@@ -524,10 +524,14 @@ func observationTimes(legs []doc.Leg) []string {
 // adverseStates says why a witness is admissible once a leg has been bounded. The
 // wording is part of the contract: two implementations must produce the same string.
 var adverseWording = map[string]string{
-	"price_touch":       "the leg pays only where the terminal price proves a touch",
-	"horizon_mismatch":  "the leg's own observation pays zero",
-	"unreviewed_family": "nothing is established about what the leg pays",
-	"deployer_settled":  "the deployer chooses what the leg pays",
+	// NOT "valued at zero", which is the fallback and would be wrong here: a liquidated
+	// position is worth MINUS its margin, and a reader told "zero" would think the holding
+	// merely stopped paying rather than that the margin was lost.
+	"liquidated_in_path": "the position is liquidated and the isolated margin is lost",
+	"price_touch":        "the leg pays only where the terminal price proves a touch",
+	"horizon_mismatch":   "the leg's own observation pays zero",
+	"unreviewed_family":  "nothing is established about what the leg pays",
+	"deployer_settled":   "the deployer chooses what the leg pays",
 }
 
 func adverseStates(reductions []doc.Reduction) []doc.AdverseState {
