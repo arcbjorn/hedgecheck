@@ -28,3 +28,8 @@ fixtures/generated/
 # from scratch on every run. The `refusalfixtures` target produces them. What is asserted is
 # the CODE each one raises, not its bytes, so the files themselves carry nothing git needs.
 fixtures/refusals/
+
+# Derived the same way, by tools/make_corruptions.py: one good bundle per shape and one
+# corruption per refusal class, rewritten from scratch on every run. What is asserted is
+# the CLASS each one is refused with, not its bytes.
+fixtures/bundles/
