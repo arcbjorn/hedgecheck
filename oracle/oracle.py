@@ -185,19 +185,29 @@ def infimum(fn, lower, upper):
         if best is None or value < best or (value == best and is_attained and not attained):
             best, attained, where = value, is_attained, location
 
-    for atom in atoms(fn, lower, upper):
-        if atom[0] == "point":
-            offer(atom[2], True, atom[1])
+    # MAXIMAL pieces, not raw atoms. `atoms` splits at every breakpoint the function
+    # CARRIES, and a carried breakpoint need not be a kink: a leg whose payoff cancels
+    # leaves one behind with the same slope either side. Splitting a flat run there makes
+    # "the midpoint of the first attaining open piece" the midpoint of an arbitrary
+    # fragment of it -- on case-0266 the flat run (65000, 110000) carries a phantom mark at
+    # 77457, and reading atoms reported 71228.5 where the maximal piece gives 87500. Both
+    # prices attain the same value, so no arithmetic check catches it; only the Go engine,
+    # which windows maximal pieces, disagreed.
+    for piece in profile(fn, lower, upper):
+        lo, hi, slope, intercept = piece["lower"], piece["upper"], piece["slope"], piece["intercept"]
+        if lo == hi:
+            offer(intercept + slope * lo, True, lo)
             continue
-        _, lo, hi, slope, intercept = atom
         if slope == 0:
-            # Flat and open: every interior price attains the value, no endpoint does.
-            # The attaining set has no minimum, so the midpoint stands for it.
-            offer(intercept + slope * lo, True, (lo + hi) / 2)
+            # Flat: every price in the piece attains the value. The endpoints attain it too
+            # when they are owned, and then the attaining set HAS a minimum -- the smallest
+            # owned price -- which the documented rule prefers to the midpoint.
+            owned_min = lo if piece["lower_inclusive"] else None
+            offer(intercept, True, owned_min if owned_min is not None else (lo + hi) / 2)
             continue
-        # Sloped: the value is approached at an excluded end and never attained there.
-        offer(slope * lo + intercept, False, lo)
-        offer(slope * hi + intercept, False, hi)
+        # Sloped: the extremes sit at the ends, attained only where the end is owned.
+        offer(slope * lo + intercept, piece["lower_inclusive"], lo)
+        offer(slope * hi + intercept, piece["upper_inclusive"], hi)
     return best, attained, where
 
 
@@ -547,19 +557,33 @@ def evaluate(lowered):
         if clause_upper < clause_lower:
             continue
         for interval in below(pnl, threshold, clause_lower, clause_upper):
-            shown = text_interval(interval)
-            shown["clause"] = clause["id"]
-            point = witness(pnl, interval)
-            shown["witness"] = {"price": fmt(point["price"]), "pnl": fmt(point["pnl"])}
             # The upper profile is the best the proposal could be. Where it also violates
             # the clause, the failure is real whatever the loose legs are worth. Where it
             # does not, the violation rests only on a loose bound, which proves nothing
             # about the real payoff: that is `needs_review`, never `fails`.
-            survives = bool(below(upper_pnl, threshold, *_clip(interval, lower, upper))) if loose_legs else True
-            if not survives:
+            established = below(upper_pnl, threshold, *_clip(interval, lower, upper)) if loose_legs else None
+            if loose_legs and not established:
+                shown = text_interval(interval)
+                shown["clause"] = clause["id"]
+                point = witness(pnl, interval)
+                shown["witness"] = {"price": fmt(point["price"]), "pnl": fmt(point["pnl"])}
                 shown["responsible_legs"] = sorted(loose_legs)
                 undecided.append(shown)
-            else:
+                continue
+            # A FAILURE IS REPORTED ONLY WHERE IT IS ESTABLISHED, witness included.
+            #
+            # The lower profile can violate across a wider span than the upper one does, and
+            # the part where only the lower violates rests on the loose bound alone. Taking
+            # the witness from the whole lower-profile interval could land it there -- on
+            # case-0166 the lower profile fails across [60000, 95151.35] while the upper
+            # fails only on [60000, 65000), and the witness came back at 77575.675, a price
+            # where the best case MEETS the clause. So the established sub-intervals are the
+            # ones reported, each with its own witness.
+            for part in (established if established is not None else [interval]):
+                shown = text_interval(part)
+                shown["clause"] = clause["id"]
+                point = witness(pnl, part)
+                shown["witness"] = {"price": fmt(point["price"]), "pnl": fmt(point["pnl"])}
                 # Once any leg has been bounded, a price alone is not a counterexample:
                 # the witness has to carry the adverse state of each reduced leg.
                 if zeroed:
