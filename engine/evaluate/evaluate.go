@@ -34,12 +34,37 @@ func Evaluate(ir doc.IR) (doc.Result, error) {
 
 	// A reduced leg is valued at zero in the lower profile. Its premium still counts:
 	// it was paid whatever the leg turns out to be worth.
+	//
+	// A TOUCH-BOUNDED LEG IS KEPT, NOT ZEROED, for the same reason a banded group is: its
+	// `pays_on` already IS the bound, the inclusive terminal digital at the target on the
+	// side the reference must travel. Zeroing it would discard the bound and make a sound
+	// lower bound worth exactly as much as none.
+	//
+	// A ZEROING RULE WINS over the bound, though. `deployer_settled` says the leg may pay
+	// nothing at any price, and every live touch instance is deployer-settled. The lower of
+	// the two is the one a verdict may rest on: crediting the bound over a zeroing rule
+	// would raise the lower profile on a leg that may pay nothing, which is the one
+	// direction that can turn a failing proposal into a passing one.
 	zeroed := map[string]bool{}
 	loose := map[string]bool{}
+	bounded := map[string]bool{}
+	zeroing := map[string]bool{}
 	for _, reduction := range ir.Reductions {
-		zeroed[reduction.Leg] = true
+		if reduction.Rule == "price_touch" {
+			bounded[reduction.Leg] = true
+		} else {
+			zeroing[reduction.Leg] = true
+		}
 		if !reduction.Tight {
 			loose[reduction.Leg] = true
+		}
+	}
+	for leg := range zeroing {
+		delete(bounded, leg)
+	}
+	for _, reduction := range ir.Reductions {
+		if !bounded[reduction.Leg] {
+			zeroed[reduction.Leg] = true
 		}
 	}
 
@@ -118,6 +143,21 @@ func Evaluate(ir doc.IR) (doc.Result, error) {
 		}
 		upperPnl = pwa.Sum(upperParts...)
 	}
+	// A TOUCH-BOUNDED leg's upper bound is its FULL SIZE, not the bound. The bound pays
+	// only where the terminal price proves a touch; the leg pays on every path that ever
+	// reached the target, retraces included. So below the target the true payoff may still
+	// be the whole size, and an upper profile agreeing with the bound there would claim to
+	// know the path. The correction is size less the bound, non-negative everywhere.
+	for _, leg := range ir.Legs {
+		if !bounded[leg.ID] {
+			continue
+		}
+		fn, err := legFn(leg)
+		if err != nil {
+			return doc.Result{}, err
+		}
+		upperPnl = pwa.Sum(upperPnl, pwa.Cash(leg.Size), fn.Neg())
+	}
 
 	failing, undecided, codes := []doc.FailingInterval{}, []doc.FailingInterval{}, []string{}
 	for _, clause := range ir.Objective {
@@ -126,32 +166,44 @@ func Evaluate(ir doc.IR) (doc.Result, error) {
 			clauseLower, clauseUpper = clause.On.Lower, clause.On.Upper
 		}
 		for _, interval := range pnl.Below(clause.MinPnl, clauseLower, clauseUpper) {
-			price, value := pnl.Witness(interval)
-			entry := doc.FailingInterval{
-				Interval: doc.Interval{
-					Lower: interval.Lo, LowerIncl: interval.LoInclusive,
-					Upper: interval.Hi, UpperIncl: interval.HiInclusive,
-				},
-				Clause:  clause.ID,
-				Witness: doc.NewWitness(price, value),
+			entryFor := func(part pwa.Interval) doc.FailingInterval {
+				price, value := pnl.Witness(part)
+				return doc.FailingInterval{
+					Interval: doc.Interval{
+						Lower: part.Lo, LowerIncl: part.LoInclusive,
+						Upper: part.Hi, UpperIncl: part.HiInclusive,
+					},
+					Clause:  clause.ID,
+					Witness: doc.NewWitness(price, value),
+				}
 			}
 			// The upper profile is the best the proposal could be. Where it also violates
 			// the clause, the failure is real whatever the loose legs are worth. Where it
 			// does not, the violation rests only on a loose bound, which proves nothing:
 			// that is needs_review, never fails.
-			survives := true
+			var established []pwa.Interval
 			if len(loose) > 0 {
-				survives = len(upperPnl.Below(clause.MinPnl, interval.Lo, interval.Hi)) > 0
+				established = upperPnl.Below(clause.MinPnl, interval.Lo, interval.Hi)
+				if len(established) == 0 {
+					entry := entryFor(interval)
+					entry.SetResponsible(sortedKeys(loose))
+					undecided = append(undecided, entry)
+					continue
+				}
+			} else {
+				established = []pwa.Interval{interval}
 			}
-			if !survives {
-				entry.SetResponsible(sortedKeys(loose))
-				undecided = append(undecided, entry)
-				continue
+			// A FAILURE IS REPORTED ONLY WHERE IT IS ESTABLISHED, witness included. The
+			// lower profile can violate across a wider span than the upper one, and that
+			// surplus rests on the loose bound alone; a witness drawn from the whole lower
+			// interval can land there, naming a price whose best case MEETS the clause.
+			for _, part := range established {
+				entry := entryFor(part)
+				if len(zeroed) > 0 {
+					entry.Witness.SetAdverseStates(adverseStates(ir.Reductions))
+				}
+				failing = append(failing, entry)
 			}
-			if len(zeroed) > 0 {
-				entry.Witness.SetAdverseStates(adverseStates(ir.Reductions))
-			}
-			failing = append(failing, entry)
 		}
 	}
 	if len(failing) > 0 {
@@ -426,6 +478,7 @@ func observationTimes(legs []doc.Leg) []string {
 // adverseStates says why a witness is admissible once a leg has been bounded. The
 // wording is part of the contract: two implementations must produce the same string.
 var adverseWording = map[string]string{
+	"price_touch":       "the leg pays only where the terminal price proves a touch",
 	"horizon_mismatch":  "the leg's own observation pays zero",
 	"unreviewed_family": "nothing is established about what the leg pays",
 	"deployer_settled":  "the deployer chooses what the leg pays",
