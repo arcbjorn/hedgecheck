@@ -297,6 +297,11 @@ test("nothing in consumer/ reads a key from outside the environment", () => {
   // inventory in gate.test.ts already does.
   assert.deepEqual(scanned.sort(), [
     "banned-usage.test.ts",
+    // The on-chain encoder and its test. Both are scanned for the same banned patterns as
+    // everything else here: `corewriter.ts` describes what an order would be and can do
+    // nothing with it, and the scan is what establishes that rather than its docstring.
+    "corewriter.test.ts",
+    "corewriter.ts",
     "fake-exchange.ts",
     "gate.test.ts",
     "gate.ts",
