@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reference-map.schema.json",
+  "title": "Reference map",
+  "$comment": "Added after the v1 freeze; see schema/CHANGES.md for the case that forced it. Uses the keyword subset implemented by tools/validate.py; an unknown keyword is an error there, never ignored.",
+  "description": "What a venue's free-text price description denotes, as a canonical reference id. SEPARATE from a registry entry, and separately versioned: an entry is one reviewed reading of a family's PAYOFF, which says what pays given a price S; a mapping says which S. The payoff of `recurring.priceBinary` is `indicator(S >= target_price)` and does not mention the reference at all, so bundling the two would make every new market's description invalidate every payoff review that shared its family.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "version",
+    "review",
+    "mappings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "version": {
+      "$ref": "defs.schema.json#/$defs/text"
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "state",
+        "drafted_by"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "draft",
+            "reviewed"
+          ]
+        },
+        "drafted_by": {
+          "enum": [
+            "model",
+            "owner"
+          ]
+        },
+        "reviewed_by": {
+          "$ref": "defs.schema.json#/$defs/text"
+        },
+        "reviewed_on": {
+          "$ref": "defs.schema.json#/$defs/date"
+        },
+        "digest": {
+          "$ref": "defs.schema.json#/$defs/sha256"
+        }
+      },
+      "additionalProperties": false,
+      "dependentRequired": {
+        "digest": [
+          "reviewed_by",
+          "reviewed_on"
+        ]
+      }
+    },
+    "mappings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "venue",
+          "price_description",
+          "seconds",
+          "state"
+        ],
+        "properties": {
+          "venue": {
+            "$ref": "defs.schema.json#/$defs/slug"
+          },
+          "price_description": {
+            "description": "The venue's text, EXACTLY as the catalogue carries it, including its spacing. A mapping keyed by anything normalised would be a mapping of a string the venue never sent.",
+            "type": "string",
+            "maxLength": 200
+          },
+          "seconds": {
+            "$ref": "defs.schema.json#/$defs/digits"
+          },
+          "state": {
+            "description": "`interpreted` is the owner's reading and surfaces in every result that rests on it. `confirmed` means the deployer confirmed it in writing, and `sources` then carries that writing. `ambiguous` is a description that cannot be mapped at all -- `1-minute candle` names neither a source nor a series -- and lowering refuses it rather than guessing.",
+            "enum": [
+              "interpreted",
+              "confirmed",
+              "ambiguous"
+            ]
+          },
+          "reference": {
+            "$ref": "defs.schema.json#/$defs/reference"
+          },
+          "why": {
+            "$ref": "defs.schema.json#/$defs/text"
+          },
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "title",
+                "url",
+                "retrieved",
+                "sha256",
+                "retained_at",
+                "quotes"
+              ],
+              "properties": {
+                "title": {
+                  "$ref": "defs.schema.json#/$defs/text"
+                },
+                "url": {
+                  "$ref": "defs.schema.json#/$defs/text"
+                },
+                "retrieved": {
+                  "$ref": "defs.schema.json#/$defs/date"
+                },
+                "sha256": {
+                  "$ref": "defs.schema.json#/$defs/sha256"
+                },
+                "retained_at": {
+                  "$ref": "defs.schema.json#/$defs/text"
+                },
+                "quotes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "$ref": "defs.schema.json#/$defs/text"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false,
+        "dependentRequired": {
+          "reference": [
+            "why"
+          ],
+          "sources": [
+            "reference"
+          ]
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}
