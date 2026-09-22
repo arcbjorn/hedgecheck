@@ -653,8 +653,29 @@ def evaluate(lowered):
     if reductions:
         result["reductions"] = reductions
         result["upper_profile"] = [text_interval(piece) for piece in profile(upper_pnl, lower, upper)]
+    # A LEG IN A MULTI-LEG BAND GROUP HAS NO SIZE WINDOW.
+    #
+    # "The smallest size of this leg that still meets the objective" presumes the rest of
+    # the answer holds still while this leg moves. For a banded GROUP it does not: the
+    # verdict values the group at the infimum of its SUMMED payoff over the band, so
+    # resizing one member changes the sum and therefore the infimum. Measured on
+    # good-basis-grouped, sizing binary-no at 0 / 500 / 1409 / 3000 moves the group's value
+    # at 76,000 to 0 / 500 / 1409 / 3000 -- the other member's contribution is neither zero
+    # nor its full payoff, and no per-leg base can stand for it.
+    #
+    # The two implementations answered it anyway and disagreed: the oracle credited a banded
+    # sibling with zero, Go with its full unbanded payoff, so they reported different
+    # binding prices for the same bundle. Neither is right. A size window that presumes a
+    # separability the evaluator does not have is worse than none -- the same rule that took
+    # sizing off the full-value base on 20 Sep (EVIDENCE section 9).
+    joint = set()
+    for reduction in reductions:
+        members = [reduction["leg"]] + list(reduction.get("with", []))
+        if len(members) > 1:
+            joint.update(members)
     windows = [w for w in (_sized_leg_window(lowered, leg, lower, upper, baseline, cap)
-                           for leg in lowered["legs"] if leg["id"] not in zeroed) if w]
+                           for leg in lowered["legs"]
+                           if leg["id"] not in zeroed and leg["id"] not in joint) if w]
     if windows:
         result["size_windows"] = windows
     return result
