@@ -346,6 +346,7 @@ def main():
     price_touch_bound()
     price_touch_lowering()
     established_failures()
+    onchain_representable()
     isolated_perp()
     assumption_vocabulary()
     synthesis_refusal_classes()
@@ -693,6 +694,94 @@ def reference_map():
 def O_terms(outcome):
     """The catalogue's `key:value|...` description, as a dict."""
     return dict(part.split(":", 1) for part in outcome.get("description", "").split("|") if ":" in part)
+
+
+def onchain_representable():
+    """Every number an on-chain gate would carry survives 10^8 fixed point, exactly.
+
+    Retained evidence (085ccfb, `interacting-with-hypercore.md`) says a CoreWriter limit order
+    sends `limitPx` and `sz` as "10^8 * the human readable value". That is a LOSSY encoding for
+    anything not a multiple of 10^-8 -- so a gate on chain would check a different number from
+    the one the oracle proved, silently, for any price with a longer expansion.
+
+    It does not happen, and the reason is a decision already made elsewhere. `defs.cost` carries
+    a walked premium as a TOTAL rather than a per-unit price, because "a walk over several
+    levels has no single price, and its average is a derived quantity that is usually a
+    repeating decimal". The envelope follows: `limit_price` is the price of the highest level
+    the walk TOUCHED -- a displayed price -- and `max_cost` is a sum of (displayed price x whole
+    contracts). Displayed prices are multiples of 10^-8 and sizes are whole, so every product
+    and every sum of them is a multiple of 10^-8.
+
+    The AVERAGE is where it breaks: 1,409 contracts at 645.76904 averages 8072113/17612500,
+    which no fixed point represents. The schema never carries one. This guard pins that the
+    property holds, because the on-chain gate's soundness rests on it and it is a consequence
+    of a choice that could be revisited without anyone noticing this.
+    """
+    scale = F(10) ** 8
+
+    def exact_at_scale(text):
+        return (O.num(text) * scale).denominator == 1
+
+    def decimals(text):
+        """The smallest e with value * 10^e integral, or None if no power of ten works."""
+        value = O.num(text)
+        for exponent in range(0, 20):
+            if (value * F(10) ** exponent).denominator == 1:
+                return exponent
+        return None
+
+    # ---- every displayed number in every retained book
+    checked = 0
+    for path in sorted((PROJECT / "fixtures" / "replay").rglob("book-*.json")):
+        if path.name.endswith(".request.json"):
+            continue  # the retained request record, not the response
+        book = json.loads(path.read_text())
+        for side in book["levels"]:
+            for level in side:
+                for key in ("px", "sz"):
+                    check(exact_at_scale(level[key]),
+                          f"on-chain: {path.name} {key} {level[key]} is not a multiple of 10^-8")
+                    checked += 1
+    check(checked >= 40, f"on-chain: only {checked} displayed numbers checked")
+    # HEADROOM, not just representability. Checking "integral at 10^8" alone passes at 10^6
+    # too, so it does not establish that the venue's scale is the binding one -- it would
+    # still pass if the scale were smaller than the data needs. What is worth pinning is the
+    # margin: the retained books need 10^5 at most, five orders of magnitude inside 10^8, so
+    # the encoding has room and a price with a longer expansion would be a NEW observation
+    # rather than a silent truncation.
+    needed = max(decimals(level[key])
+                 for path in sorted((PROJECT / "fixtures" / "replay").rglob("book-*.json"))
+                 if not path.name.endswith(".request.json")
+                 for side in json.loads(path.read_text())["levels"]
+                 for level in side for key in ("px", "sz"))
+    check(needed == 5,
+          f"on-chain: the retained books need 10^{needed} decimals, recorded as 5 -- a change "
+          f"is a new observation about the venue, not a rounding")
+    check(needed < 8, "on-chain: and that is inside the 10^8 the venue encodes at")
+
+    # ---- and every envelope the bundles carry
+    envelopes = 0
+    for path in sorted((PROJECT / "fixtures" / "bundles").glob("*/result.json")):
+        result = canon.loads(path.read_bytes())
+        envelope = result.get("order_envelope")
+        if envelope is None:
+            continue
+        for key in ("limit_price", "size", "max_cost"):
+            check(exact_at_scale(envelope[key]),
+                  f"on-chain: {path.parent.name} {key} {envelope[key]} is not a multiple of 10^-8")
+        envelopes += 1
+    check(envelopes >= 1, "on-chain: no envelope was checked")
+
+    # ---- THE AVERAGE WOULD BREAK IT, which is why the schema carries a total
+    #
+    # Hand-derived: 1,409 contracts for a walked total of 8072113/12500 averages
+    # 8072113/17612500, whose expansion does not terminate at 10^-8.
+    average = F(8072113, 12500) / F(1409)
+    check((average * scale).denominator != 1,
+          "on-chain: the worked average really is unrepresentable, so the total matters")
+    check(O.fmt(F(8072113, 12500)) == "645.76904"
+          and (F(8072113, 12500) * scale).denominator == 1,
+          "on-chain: while the total it came from is exact")
 
 
 def isolated_perp():
