@@ -26,6 +26,11 @@ import oracle
 
 SCHEMA_VERSION = "1"
 
+# Families whose payoff is path-dependent AND for which lowering carries a sound bound.
+# A `bounded` family absent from this set is refused: the status says a terminal kernel
+# cannot compute it, and without a bound there is nothing to put in its place.
+BOUNDED_FAMILIES = {"template.priceTouch"}
+
 
 class Refused(Exception):
     """A proposal that cannot be lowered. `code` is the reason code."""
@@ -230,15 +235,12 @@ def resolve(leg, registry):
     if leg["semantics_version"] != version:
         _refuse("SEMANTICS_PIN_MISMATCH",
                 f"{leg['id']}: pins {leg['semantics_version'][:12]}, the registry entry is {version[:12]}")
-    if entry["status"] == "bounded":
-        # A bounded family's payoff is NOT a function of the terminal price. `priceTouch`
-        # is the case: whether the price ever touched a level is path-dependent, and a
-        # terminal-price kernel cannot compute it. PLAN section 2 gives the bound -- the
-        # inclusive terminal digital at the target, and only when the touch window covers
-        # the valuation time -- but no such family exists yet, so there is no rule here to
-        # apply. Until one does, refusing is the safe direction: evaluating a bounded
-        # family with the terminal machinery would silently treat a path payoff as a
-        # terminal one, which over-credits it at prices it may never have touched.
+    if entry["status"] == "bounded" and entry["family"] not in BOUNDED_FAMILIES:
+        # A bounded family's payoff is NOT a function of the terminal price, so evaluating
+        # it with the terminal machinery would treat a path payoff as a terminal one and
+        # over-credit it at prices it may never have touched. A family with a bound in
+        # BOUNDED_FAMILIES is lowered under that bound; one without is refused, because a
+        # bound that does not exist cannot be applied.
         _refuse("UNSUPPORTED_FAMILY",
                 f"{leg['id']}: {entry['family']} is bounded, not computed, and lowering has no bound for it yet")
     if entry["status"] == "refused":
