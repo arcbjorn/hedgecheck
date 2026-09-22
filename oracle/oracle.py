@@ -482,7 +482,15 @@ def evaluate(lowered):
         group = [_leg(leg) for leg in lowered["legs"] if leg["id"] in set(members)]
         band_parts.append(band_infimum(total(group), num(reduction["bound"])))
 
-    zeroed = {reduction["leg"] for reduction in reductions} - banded
+    # A TOUCH-BOUNDED LEG IS KEPT, NOT ZEROED, for the same reason a banded group is.
+    #
+    # Its `pays_on` already IS the bound: lowering replaced the path-dependent payoff with
+    # the inclusive terminal digital at the target, on the side the reference must travel.
+    # Zeroing it here would discard that bound and make a sound lower bound worth exactly
+    # as much as none. The leg is still REDUCED -- the bound is loose, so it can only make
+    # a proposal need review -- but its value is the bound, not zero.
+    bounded = {reduction["leg"] for reduction in reductions if reduction["rule"] == "price_touch"}
+    zeroed = {reduction["leg"] for reduction in reductions} - banded - bounded
     loose_legs = {reduction["leg"] for reduction in reductions if not reduction["tight"]}
 
     # A reduced leg is valued at zero in the lower profile. Its premium still counts:
@@ -503,6 +511,16 @@ def evaluate(lowered):
     if banded:
         upper_parts = [_leg(leg) for leg in lowered["legs"] if leg["id"] in banded]
         upper_pnl = total([upper_pnl] + upper_parts + [-part for part in band_parts])
+    # A TOUCH-BOUNDED leg's upper bound is its FULL SIZE, not the bound.
+    #
+    # The bound pays only where the terminal price proves a touch; the leg itself pays on
+    # every path that ever reached the target, including those that retraced. At any
+    # terminal price below the target the true payoff may still be the full size, so the
+    # best case is the whole size everywhere. The correction is size less the bound, which
+    # is non-negative everywhere because the bound pays at most the size.
+    for leg in lowered["legs"]:
+        if leg["id"] in bounded:
+            upper_pnl = total([upper_pnl, cash(num(leg["size"])), -_leg(leg)])
 
     failing, undecided, codes = [], [], []
     for clause in lowered["objective"]:
@@ -655,6 +673,7 @@ def _clip(interval, lower, upper):
 
 
 ADVERSE_STATES = {
+    "price_touch": "the leg pays only where the terminal price proves a touch",
     "horizon_mismatch": "the leg's own observation pays zero",
     "unreviewed_family": "nothing is established about what the leg pays",
     "deployer_settled": "the deployer chooses what the leg pays",
