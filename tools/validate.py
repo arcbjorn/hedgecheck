@@ -155,7 +155,7 @@ def mutate(document, path, value=DELETE):
 def main():
     # ---- the schemas stay inside the subset this validator enforces
     names = sorted(p.name for p in SCHEMAS.glob("*.schema.json"))
-    check(names == ["bundle-manifest.schema.json", "comparison.schema.json", "defs.schema.json", "ir.schema.json", "proposal.schema.json", "reference-map.schema.json", "refusal.schema.json", "registry-entry.schema.json", "result.schema.json", "snapshot-record.schema.json"], "the ten schema files")
+    check(names == ["bundle-manifest.schema.json", "comparison.schema.json", "defs.schema.json", "ir.schema.json", "proposal.schema.json", "reference-map.schema.json", "refusal.schema.json", "registry-entry.schema.json", "result.schema.json", "snapshot-record.schema.json", "synthesis.schema.json"], "the eleven schema files")
     for name in names:
         lint(load(name), name)
         check(True, f"{name}: only enforced keywords")
