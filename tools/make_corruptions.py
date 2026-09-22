@@ -102,7 +102,7 @@ def second_leg():
 
 
 def build_good(proposal_file="bucket0.proposal.json", envelope=False, settlement=None,
-               reference=None, basis_bound=None, grouped=False):
+               reference=None, basis_bound=None, grouped=False, liquidation=None):
     """Lower and evaluate an 18 Sep replay proposal against a reviewed entry.
 
     `settlement` forces the entry's settlement, so a bundle can carry a family whose
@@ -115,6 +115,20 @@ def build_good(proposal_file="bucket0.proposal.json", envelope=False, settlement
     disagree about it, because every other fixture has one reference throughout.
     """
     proposal = canon.loads((REPLAY / proposal_file).read_bytes())
+    if liquidation is not None:
+        # AN ISOLATED PERP, liquidatable inside the path domain. The exposure is the thing
+        # being hedged, and unlike an outcome token it can be liquidated -- retained evidence
+        # at 085ccfb says outcomes "do not involve leverage or liquidations". Without this
+        # bundle the path reduction is code no bundle exercises, so the three implementations
+        # cannot be held to agreeing on it.
+        proposal = dict(proposal, exposure={
+            "kind": "isolated_perp",
+            "underlying": proposal["exposure"]["underlying"],
+            "quantity": proposal["exposure"]["quantity"],
+            "reference": proposal["exposure"]["reference"],
+            "liquidation_price": liquidation,
+            "isolated_margin": "5000",
+        })
     if grouped:
         # TWO legs on the same foreign reference, so the band is applied to their SUMMED
         # payoff. The infimum of a sum is not the sum of infima, and a bucket YES over
@@ -408,9 +422,15 @@ BASES = {
     # `basis_band`'s cancelling pair in oracle/verify.py, which is where the arithmetic is
     # pinned. This bundle pins the PLUMBING: that a group is recorded, carried and agreed.
     "good-basis-grouped": "bucket0.proposal.json",
+    # An isolated perp whose liquidation price sits inside the path domain: the exposure is
+    # worth minus its margin at EVERY terminal price, so the hedge cannot save it. TIGHT, so
+    # this bundle FAILS -- the only good bundle that fails for a reason on the exposure rather
+    # than on a leg.
+    "good-liquidated": "bucket0.proposal.json",
 }
 ENVELOPE_BASES = {"good-envelope"}
 DEPLOYER_BASES = {"good-deployer"}
+LIQUIDATED_BASES = {"good-liquidated": "80000"}
 BASIS_BASES = {"good-basis-band": "500", "good-basis-unbridged": None,
                "good-basis-grouped": "500"}
 GROUPED_BASES = {"good-basis-grouped"}
@@ -439,6 +459,7 @@ CORRUPTIONS = [
 def generate():
     goods = {name: build_good(source, envelope=name in ENVELOPE_BASES,
                               settlement="deployer" if name in DEPLOYER_BASES else None,
+                              liquidation=LIQUIDATED_BASES.get(name),
                               reference=FOREIGN_REFERENCE if name in BASIS_BASES else None,
                               grouped=name in GROUPED_BASES,
                               basis_bound=BASIS_BASES.get(name))
