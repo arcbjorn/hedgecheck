@@ -20,6 +20,7 @@ var readers = map[string]func([]byte) error{
 	"registry-entry":  func(raw []byte) error { _, err := ReadEntry(raw); return err },
 	"comparison":      func(raw []byte) error { _, err := ReadComparison(raw); return err },
 	"bundle-manifest": func(raw []byte) error { _, err := ReadManifest(raw); return err },
+	"synthesis":       func(raw []byte) error { _, err := ReadSynthesis(raw); return err },
 }
 
 // Every document under fixtures/rejected/ must be refused, by the same decoder the
