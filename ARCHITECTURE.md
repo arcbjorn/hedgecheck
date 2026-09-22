@@ -461,6 +461,7 @@ fixtures/   golden/   lowered proposal and its generated expected result
                       horizon fixture valued a day after its leg is observed
             generated/ ir/  320 lowered proposals and results  ── DERIVED, gitignored
             refusals/       one proposal per refusal code      ── DERIVED, gitignored
+            bundles/        7 good and 17 corrupted bundles    ── DERIVED, gitignored
 registry/   semantics entries as data: recurring.priceBinary, recurring.priceBucket,
             template.binaryPrice and template.priceTouch as model drafts
 references/ what a venue's free-text price description denotes, versioned separately
@@ -557,9 +558,10 @@ an entry; it never runs inside lowering, evaluation or checking.
   three implementations must pass before it is committed.
 - **A document field:** the schema, a mutation that must be refused, and
   `--write` for any generated fixture — never a hand edit.
-- **A derived corpus is not in git.** `fixtures/generated/ir` (320 proposals, 640 files)
-  and `fixtures/refusals` are written by `tools/make_ir_cases.py` and
-  `tools/make_refusals.py`, and are read by all three implementations — Python writes
+- **A derived corpus is not in git.** `fixtures/generated/ir` (320 proposals, 640 files),
+  `fixtures/refusals` and `fixtures/bundles` (184 files) are written by
+  `tools/make_ir_cases.py`, `tools/make_refusals.py` and `tools/make_corruptions.py`,
+  and are read by all three implementations — Python writes
   them, Go and the TypeScript checker read them to prove the three agree byte for byte.
   They are `.gitignore`d and built by `make generated`, which every target that reads
   them depends on. Their gate is therefore **reproducibility, not staleness**: "does the
@@ -567,7 +569,8 @@ an entry; it never runs inside lowering, evaluation or checking.
   compares, which catches an unseeded draw or a dict iteration leaking into the output.
   The assertions that carry the weight are elsewhere and unchanged: each refusal fixture's
   actual code must equal the one it declares, every code `lower.py` raises must have a
-  fixture, and Go must reproduce every generated result exactly. A Go suite that finds the
+  fixture, each bundle must be accepted or refused with exactly the class its manifest
+  names, and Go must reproduce every generated result exactly. A Go suite that finds the
   corpus missing fails naming `make generated`; it never passes on an empty corpus.
 
 ---
