@@ -53,7 +53,7 @@ var (
 	// segment may be a {placeholder} an instance resolves. PLAN section 6 says a reference
 	// is "never free text"; the entry's was read with no pattern at all, so "free text
 	// here" and "" were accepted.
-	refTemplatePattern = regexp.MustCompile(`\A(?:synthetic|[a-z0-9]+(?::(?:\{[a-z_]+\}|[A-Za-z0-9/._-]+)){2,3})\z`)
+	refTemplatePattern = regexp.MustCompile(`\A(?:synthetic|[a-z0-9]+(?::(?:\{[a-z_]+\}|[A-Za-z0-9/._-])+){2,3})\z`)
 )
 
 // reader consumes an object's keys one at a time and refuses whatever is left.
