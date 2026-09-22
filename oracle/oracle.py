@@ -502,7 +502,7 @@ def evaluate(lowered):
     # rule would raise the lower profile on a leg that may pay nothing, which is the one
     # direction that can turn a failing proposal into a passing one.
     zeroing = {reduction["leg"] for reduction in reductions if reduction["rule"] != "price_touch"}
-    pass
+    bounded -= zeroing
     zeroed = ({reduction["leg"] for reduction in reductions} - banded - bounded)
     loose_legs = {reduction["leg"] for reduction in reductions if not reduction["tight"]}
 
