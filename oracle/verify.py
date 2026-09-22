@@ -346,6 +346,7 @@ def main():
     price_touch_bound()
     price_touch_lowering()
     established_failures()
+    assumption_vocabulary()
     synthesis_refusal_classes()
     one_definition()
     synthesis()
@@ -691,6 +692,83 @@ def reference_map():
 def O_terms(outcome):
     """The catalogue's `key:value|...` description, as a dict."""
     return dict(part.split(":", 1) for part in outcome.get("description", "").split("|") if ":" in part)
+
+
+def assumption_vocabulary():
+    """The assumption vocabulary is closed, defined once, and the same on both sides.
+
+    An assumption is carried into the result and shown to a reader, who relies on what it
+    MEANS. Until 22 Sep nothing checked the name: the schema types `assumptions` as any slug,
+    so a proposal declaring `nothing_can_go_wrong` validated, lowered, and appeared in the
+    result's own `assumptions` list beside the real ones with equal standing. Verified before
+    the fix and refused after.
+
+    TWO LISTS IN TWO LANGUAGES DRIFT. The oracle's `ASSUMPTIONS` and the engine's
+    `assumptions` are the same vocabulary written twice, so they are compared here -- and
+    every name is required to be USED, because a name nothing asks for is a word with no
+    meaning to look up.
+    """
+    import lower
+
+    check(lower.ASSUMPTIONS, "assumptions: the vocabulary is not empty")
+    check(all(reason for reason in lower.ASSUMPTIONS.values()),
+          "assumptions: every assumption says what declaring it asserts")
+
+    # The Go vocabulary, read from its source. A second list is a second thing to keep right.
+    source = (PROJECT / "engine" / "lower" / "lower.go").read_text()
+    marker = "var assumptions = map[string]string{"
+    check(marker in source, "assumptions: the engine declares its vocabulary")
+    body = source[source.index(marker):]
+    body = body[:body.index("\n}")]
+    engine = set(re.findall(r'"([a-z_]+)":', body))
+    check(engine == set(lower.ASSUMPTIONS),
+          f"assumptions: the oracle has {sorted(set(lower.ASSUMPTIONS) - engine)} and the engine has "
+          f"{sorted(engine - set(lower.ASSUMPTIONS))}")
+
+    # EVERY NAME IS USED. `zero_base_fee` is required by lowering, `deployer_settles_as_written`
+    # by a registry entry, and `common_reference` is declared by real proposals. A name none of
+    # those reach is a word in a dictionary nobody reads.
+    required_by_lowering = set(re.findall(r'for required in \(([^)]*)\)',
+                                          (PROJECT / "oracle" / "lower.py").read_text()))
+    from_lowering = set(re.findall(r'"([a-z_]+)"', " ".join(required_by_lowering)))
+    from_registry = set()
+    for path in sorted((PROJECT / "registry").glob("*.json")):
+        from_registry.update(json.loads(path.read_text())["assumptions_required"])
+    from_proposals = set()
+    for path in sorted((PROJECT / "fixtures" / "replay").rglob("*.proposal.json")):
+        from_proposals.update(canon.loads(path.read_bytes())["assumptions"])
+    used = from_lowering | from_registry | from_proposals
+    check(set(lower.ASSUMPTIONS) <= used,
+          f"assumptions: {sorted(set(lower.ASSUMPTIONS) - used)} are defined but nothing uses them")
+    check(used <= set(lower.ASSUMPTIONS),
+          f"assumptions: {sorted(used - set(lower.ASSUMPTIONS))} are used but not defined")
+
+    # AND AN UNKNOWN ONE IS REFUSED, including a near-miss typo -- the likelier fault, which
+    # used to pass here and then fail the zero_base_fee requirement with a confusing message.
+    replay = REPLAY
+    snapshots = {}
+    for stem in ("book-bucket0-3971-yes", "meta-and-asset-ctxs", "outcome-meta"):
+        digest, document = lower.snapshot((replay / f"{stem}.json").read_bytes())
+        snapshots[digest] = document
+    registry = {}
+    for path in sorted((PROJECT / "registry").glob("*.json")):
+        entry = canon.loads(path.read_bytes())
+        registry[entry["family"]] = entry
+    base = canon.loads((replay / "bucket0.proposal.json").read_bytes())
+    for invented in ("nothing_can_go_wrong", "zero_base_fees", "ZERO_BASE_FEE"):
+        proposal = json.loads(json.dumps(base))
+        proposal["assumptions"] = sorted(set(proposal["assumptions"]) | {invented})
+        try:
+            lower.lower(proposal, registry, snapshots)
+        except lower.Refused as refusal:
+            check(refusal.code == "ASSUMPTION_UNKNOWN",
+                  f"assumptions: {invented!r} is refused as ASSUMPTION_UNKNOWN, not {refusal.code}")
+        else:
+            raise AssertionError(f"assumptions: {invented!r} was accepted")
+    # The honest proposal still lowers, so the rule refuses the wrong thing and not everything.
+    lowered, _ = lower.lower(base, registry, snapshots)
+    check(set(lowered["assumptions"]) <= set(lower.ASSUMPTIONS),
+          "assumptions: a lowered proposal carries only defined assumptions")
 
 
 def synthesis_refusal_classes():
