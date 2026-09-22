@@ -200,20 +200,24 @@ def catalogue_reference(leg, item, references):
     template, one trailing space, different windows -- so trimming would answer for a string
     nobody wrote.
 
-    NOT YET A REFUSAL. An unmapped or `ambiguous` description must become `AMBIGUOUS_RULES`,
-    which EVIDENCE section 1 names. It is unreachable today: a templated leg is refused by
-    `check_terms` with UNSUPPORTED_FAMILY before this runs, because no templated family has a
-    terms rule or a reviewed payoff. Raising a code no input can produce would be a refusal
-    class that looks tested and is not -- so the resolver is here, the refusal waits for the
-    family, and `fixtures/refusals/` stays one fixture per reachable code.
+    AN UNMAPPABLE DESCRIPTION IS REFUSED, never resolved. Returning None here would fall
+    back to the entry's own reference, so a leg nobody can map would be treated as sharing
+    the objective's series -- the silent resolution PLAN section 6 forbids by name.
     """
     described = _terms_of(item.get("description", ""))
     if "priceDescription" not in described:
         return None
     key = (item.get("venue", ""), described["priceDescription"], described.get("seconds", ""))
     mapping = references.get(key)
-    if mapping is None or mapping["state"] == "ambiguous":
-        return None
+    if mapping is None:
+        _refuse("AMBIGUOUS_RULES",
+                f"{leg['id']}: no reviewed mapping for {described['priceDescription']!r} "
+                f"at {described.get('seconds', '?')}s on {item.get('venue', '?')!r}")
+    if mapping["state"] == "ambiguous":
+        # `1-minute candle` names neither a source nor a series; 42 instances name a Pyth
+        # series under a template saying the market must refer to a Hyperliquid perp.
+        # Either resolution would be a reading the evidence contradicts.
+        _refuse("AMBIGUOUS_RULES", f"{leg['id']}: {mapping['why']}")
     return mapping["reference"]
 
 
