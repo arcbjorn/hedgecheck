@@ -105,6 +105,14 @@ def cases():
         ("assumption-required", "ASSUMPTION_REQUIRED",
          mutate(proposal, ["assumptions"], ["common_reference"]), entries, snapshots,
          "pricing at displayed asks without the dated zero_base_fee assumption"),
+        # AN INVENTED ASSUMPTION IS REFUSED, not displayed. Until 22 Sep the schema typed
+        # `assumptions` as any slug, so this proposal validated, lowered, and carried
+        # `nothing_can_go_wrong` into the result's own assumptions list beside the real ones
+        # -- where a reader relies on what an assumption MEANS, and this one means nothing.
+        ("assumption-unknown", "ASSUMPTION_UNKNOWN",
+         mutate(proposal, ["assumptions"],
+                sorted(proposal["assumptions"] + ["nothing_can_go_wrong"])), entries, snapshots,
+         "an assumption outside the vocabulary this system defines"),
         ("unknown-family", "UNKNOWN_FAMILY",
          proposal, {"recurring.priceBinary": entries["recurring.priceBinary"]}, snapshots,
          "a leg naming a family the registry does not carry"),
