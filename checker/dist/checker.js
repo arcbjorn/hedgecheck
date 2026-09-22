@@ -561,6 +561,45 @@ function check(value, rawSchema, rawContext, at2, found) {
     }
   }
 }
+function stringAt(value, path) {
+  const found = walk(value, path);
+  if (typeof found !== "string") {
+    throw new DocError(path.join("."), "not a string");
+  }
+  return found;
+}
+function listAt(value, path) {
+  const found = walk(value, path);
+  if (!Array.isArray(found)) throw new DocError(path.join("."), "not an array");
+  return found;
+}
+function objectAt(value, path) {
+  const found = walk(value, path);
+  if (typeof found !== "object" || Array.isArray(found)) {
+    throw new DocError(path.join("."), "not an object");
+  }
+  return found;
+}
+function optional(value, path) {
+  try {
+    return walk(value, path);
+  } catch {
+    return void 0;
+  }
+}
+function walk(value, path) {
+  let here = value;
+  for (const step of path) {
+    if (typeof here !== "object" || here === null || Array.isArray(here)) {
+      throw new DocError(path.join("."), "not an object");
+    }
+    if (!Object.prototype.hasOwnProperty.call(here, step)) {
+      throw new DocError(path.join("."), "missing");
+    }
+    here = here[step];
+  }
+  return here;
+}
 function unwrap(value) {
   if (isNumber(value)) return numberLexeme(value);
   return value;
@@ -680,6 +719,15 @@ function lte(a, b) {
 }
 function midpoint(a, b) {
   return div(add(a, b), fromInt(2n));
+}
+function ceilDiv(num, den) {
+  const quotient = num / den;
+  return num % den !== 0n && num < 0n === den < 0n ? quotient + 1n : quotient;
+}
+function ceilLot(value, lot) {
+  if (sign(lot) <= 0) throw new NumberError("the lot must be positive");
+  const steps = div(value, lot);
+  return mul(fromInt(ceilDiv(steps.num, steps.den)), lot);
 }
 
 // src/pwa.ts
@@ -1370,6 +1418,270 @@ function floorLotLocal(value, lot) {
   return mul(fromInt(rounded), lot);
 }
 
+// src/synthesis.ts
+function refuse(cls, at2, detail) {
+  return {
+    accepted: false,
+    refusal: {
+      class: cls,
+      at: at2,
+      detail
+    }
+  };
+}
+function paysOnBounds(on) {
+  const lo = on["lower"] === void 0 ? NEG_INF : finite(parse2(String(on["lower"])), on["lower_inclusive"] === true);
+  const hi = on["upper"] === void 0 ? POS_INF : finite(parse2(String(on["upper"])), on["upper_inclusive"] === true);
+  return [
+    lo,
+    hi
+  ];
+}
+function basePart(part) {
+  const kind = String(part["kind"]);
+  if (kind === "linear") {
+    return linear(parse2(String(part["quantity"])), parse2(String(part["baseline"])));
+  }
+  if (kind === "indicator") {
+    const [lo, hi] = paysOnBounds(objectAt(part, [
+      "pays_on"
+    ]));
+    return indicator(parse2(String(part["size"])), lo, hi);
+  }
+  if (kind === "cash") {
+    return cash(parse2(String(part["amount"])));
+  }
+  throw new Error(`unsupported base part: ${kind}`);
+}
+function rows(base, units, lower, upper) {
+  const combined2 = sum([
+    base,
+    ...units
+  ]);
+  const SIDE_ORDER = {
+    at: 0,
+    below: 1,
+    above: 2
+  };
+  const best = /* @__PURE__ */ new Map();
+  const push = (price, side) => {
+    const alpha = valueOf(base, price, side);
+    const coefficients = units.map((unit) => valueOf(unit, price, side));
+    const key = [
+      format(alpha),
+      ...coefficients.map(format)
+    ].join("|");
+    const held = best.get(key);
+    if (held !== void 0 && SIDE_ORDER[held.side] <= SIDE_ORDER[side]) {
+      return;
+    }
+    best.set(key, {
+      price,
+      side,
+      alpha,
+      coefficients
+    });
+  };
+  for (const piece of profile(combined2, lower, upper)) {
+    push(piece.lower, piece.lowerInclusive ? "at" : "above");
+    if (!equals(piece.lower, piece.upper)) {
+      push(piece.upper, piece.upperInclusive ? "at" : "below");
+    }
+  }
+  return [
+    ...best.values()
+  ].sort((a, b) => {
+    const byPrice = cmp(a.price, b.price);
+    if (byPrice !== 0) return byPrice;
+    return SIDE_ORDER[a.side] - SIDE_ORDER[b.side];
+  });
+}
+function valueOf(f, price, side) {
+  for (const piece of f.pieces) {
+    const loBelow = piece.lo.value === null || lt(piece.lo.value, price);
+    const hiAbove = piece.hi.value === null || lt(price, piece.hi.value);
+    const owns = (loBelow || equals(piece.lo.value, price) && piece.lo.closed) && (hiAbove || equals(piece.hi.value, price) && piece.hi.closed);
+    const leftOf = loBelow && piece.hi.value !== null && equals(piece.hi.value, price);
+    const rightOf = hiAbove && piece.lo.value !== null && equals(piece.lo.value, price);
+    const wanted = side === "at" ? owns : side === "below" ? leftOf : rightOf;
+    if (wanted) return add(mul(piece.slope, price), piece.intercept);
+  }
+  for (const piece of f.pieces) {
+    const afterLo = piece.lo.value === null || lt(piece.lo.value, price) || equals(piece.lo.value, price) && piece.lo.closed;
+    const beforeHi = piece.hi.value === null || lt(price, piece.hi.value) || equals(piece.hi.value, price) && piece.hi.closed;
+    if (afterLo && beforeHi) return add(mul(piece.slope, price), piece.intercept);
+  }
+  throw new Error(`no piece covers ${format(price)}`);
+}
+function verifySynthesis(document) {
+  const request = objectAt(document, [
+    "request"
+  ]);
+  const objective = objectAt(document, [
+    "request",
+    "objective"
+  ]);
+  const floor = parse2(String(objective["min_pnl"]));
+  const domain = objectAt(document, [
+    "request",
+    "domain"
+  ]);
+  const lower = parse2(String(domain["lower"]));
+  const upper = parse2(String(domain["upper"]));
+  if (!lt(lower, upper)) {
+    return refuse("OBJECTIVE_MISMATCH", "$.request.domain", "the domain is empty");
+  }
+  const baseParts = listAt(document, [
+    "request",
+    "base"
+  ]);
+  const base = baseParts.length === 0 ? cash(ZERO) : sum(baseParts.map((part) => basePart(part)));
+  const candidates = listAt(document, [
+    "request",
+    "candidates"
+  ]);
+  const units = [];
+  const prices = [];
+  const ids = [];
+  for (const raw of candidates) {
+    const candidate = raw;
+    const [lo, hi] = paysOnBounds(objectAt(raw, [
+      "pays_on"
+    ]));
+    units.push(indicator(parse2("1"), lo, hi));
+    prices.push(parse2(String(candidate["price"])));
+    ids.push(String(candidate["id"]));
+  }
+  const derived = rows(base, units, lower, upper).map((row) => ({
+    ...row,
+    coefficients: row.coefficients.map((value, index) => sub(value, prices[index]))
+  }));
+  const status = stringAt(document, [
+    "status"
+  ]);
+  if (status === "feasible") {
+    return checkFeasible(document, derived, ids, prices, floor);
+  }
+  if (status === "infeasible") {
+    return checkCertificate(document, derived, floor);
+  }
+  if (optional(document, [
+    "sizes"
+  ]) !== void 0) {
+    return refuse("VERDICT_MISMATCH", "$.sizes", "a refused rounding reports sizes, which it did not establish");
+  }
+  return {
+    accepted: true
+  };
+}
+function checkFeasible(document, derived, ids, prices, floor) {
+  const reported = listAt(document, [
+    "sizes"
+  ]);
+  if (reported.length !== ids.length) {
+    return refuse("SIZE_WINDOW", "$.sizes", `${reported.length} sizes for ${ids.length} candidates`);
+  }
+  const sizes = [];
+  for (let index = 0; index < reported.length; index += 1) {
+    const entry = reported[index];
+    if (String(entry["candidate"]) !== ids[index]) {
+      return refuse("SIZE_WINDOW", `$.sizes[${index}].candidate`, `names ${String(entry["candidate"])}, the request's candidate ${index} is ${ids[index]}`);
+    }
+    const size = parse2(String(entry["size"]));
+    if (sign(size) < 0) {
+      return refuse("SIZE_WINDOW", `$.sizes[${index}].size`, "a negative size");
+    }
+    sizes.push(size);
+  }
+  for (const row of derived) {
+    let value = row.alpha;
+    for (let index = 0; index < sizes.length; index += 1) {
+      value = add(value, mul(row.coefficients[index], sizes[index]));
+    }
+    if (lt(value, floor)) {
+      return refuse("SIZE_WINDOW", `$.sizes`, `at ${format(row.price)} (${row.side}) the structure is worth ${format(value)}, which misses the floor of ${format(floor)}`);
+    }
+  }
+  const stated = optional(document, [
+    "cost"
+  ]);
+  if (stated === void 0) {
+    return refuse("COST_MISMATCH", "$.cost", "a feasible answer does not say what it costs");
+  }
+  let cost = ZERO;
+  for (let index = 0; index < sizes.length; index += 1) {
+    cost = add(cost, mul(prices[index], sizes[index]));
+  }
+  if (!equals(parse2(String(stated)), cost)) {
+    return refuse("COST_MISMATCH", "$.cost", `states ${String(stated)}, the sizes at the request's prices cost ${format(cost)}`);
+  }
+  const lotText = optional(document, [
+    "request",
+    "lot"
+  ]);
+  const lot = lotText === void 0 ? parse2("1") : parse2(String(lotText));
+  if (sign(lot) > 0) {
+    for (let index = 0; index < sizes.length; index += 1) {
+      const size = sizes[index];
+      if (!equals(ceilLot(size, lot), size)) {
+        return refuse("SIZE_WINDOW", `$.sizes[${index}].size`, `${format(size)} is not a whole multiple of the lot ${format(lot)}`);
+      }
+    }
+  }
+  return {
+    accepted: true
+  };
+}
+function checkCertificate(document, derived, floor) {
+  const weights = listAt(document, [
+    "certificate",
+    "weights"
+  ]);
+  const index = /* @__PURE__ */ new Map();
+  for (const row of derived) index.set(`${format(row.price)}|${row.side}`, row);
+  const y = /* @__PURE__ */ new Map();
+  for (let position = 0; position < weights.length; position += 1) {
+    const entry = weights[position];
+    const key = `${format(parse2(String(entry["price"])))}|${String(entry["side"])}`;
+    const row = index.get(key);
+    if (row === void 0) {
+      return refuse("CERTIFICATE_WEIGHTS", `$.certificate.weights[${position}]`, `names the site ${key.replace("|", " ")}, which is not a row of this program`);
+    }
+    if (y.has(key)) {
+      return refuse("CERTIFICATE_WEIGHTS", `$.certificate.weights[${position}]`, `names the site ${key.replace("|", " ")} twice`);
+    }
+    const weight = parse2(String(entry["weight"]));
+    if (sign(weight) <= 0) {
+      return refuse("CERTIFICATE_WEIGHTS", `$.certificate.weights[${position}].weight`, `${format(weight)} is not strictly positive`);
+    }
+    y.set(key, weight);
+  }
+  const columns = derived[0]?.coefficients.length ?? 0;
+  for (let column = 0; column < columns; column += 1) {
+    let total = ZERO;
+    for (const row of derived) {
+      const weight = y.get(`${format(row.price)}|${row.side}`);
+      if (weight === void 0) continue;
+      total = add(total, mul(weight, row.coefficients[column]));
+    }
+    if (sign(total) > 0) {
+      return refuse("CERTIFICATE_WEIGHTS", "$.certificate.weights", `column ${column} of A^T y is ${format(total)}, which is positive, so the weights do not cancel the sizes`);
+    }
+  }
+  let right = ZERO;
+  for (const row of derived) {
+    const weight = y.get(`${format(row.price)}|${row.side}`);
+    if (weight === void 0) continue;
+    right = add(right, mul(weight, sub(floor, row.alpha)));
+  }
+  if (sign(right) <= 0) {
+    return refuse("CERTIFICATE_WEIGHTS", "$.certificate.weights", `b . y is ${format(right)}, which is not positive, so the rows are not contradictory`);
+  }
+  return {
+    accepted: true
+  };
+}
+
 // src/verify.ts
 var Refused = class extends Error {
   refusal;
@@ -1378,7 +1690,7 @@ var Refused = class extends Error {
     this.refusal = refusal;
   }
 };
-function refuse(className, at2, detail) {
+function refuse2(className, at2, detail) {
   throw new Refused({
     class: className,
     at: at2,
@@ -1437,7 +1749,7 @@ async function readEvidence(bundle, options) {
     ]) {
       const found = problems(value, schema, options.schemas);
       if (found.length > 0) {
-        refuse(classForSchemaProblem(found[0]), `$${name}`, found[0]);
+        refuse2(classForSchemaProblem(found[0]), `$${name}`, found[0]);
       }
     }
   }
@@ -1445,13 +1757,13 @@ async function readEvidence(bundle, options) {
   for (const [claimed, raw] of bundle.snapshots) {
     const actual = await sha256(raw);
     if (actual !== claimed) {
-      refuse("SNAPSHOT_BYTES", `$snapshots.${short(claimed)}`, `the bytes hash to ${short(actual)}`);
+      refuse2("SNAPSHOT_BYTES", `$snapshots.${short(claimed)}`, `the bytes hash to ${short(actual)}`);
     }
     snapshots.set(actual, raw);
   }
   for (const cited of citedSnapshots(proposal)) {
     if (!snapshots.has(cited)) {
-      refuse("SNAPSHOT_NOT_CITED", `$proposal`, `${short(cited)} is cited but not supplied`);
+      refuse2("SNAPSHOT_NOT_CITED", `$proposal`, `${short(cited)} is cited but not supplied`);
     }
   }
   const entries = /* @__PURE__ */ new Map();
@@ -1460,7 +1772,7 @@ async function readEvidence(bundle, options) {
     if (options.schemas !== void 0) {
       const found = problems(entry, "registry-entry.schema.json", options.schemas);
       if (found.length > 0) {
-        refuse("ENGINE_DISAGREES", `$registry.${family}`, `not a valid entry: ${found[0]}`);
+        refuse2("ENGINE_DISAGREES", `$registry.${family}`, `not a valid entry: ${found[0]}`);
       }
     }
     const withoutReview = {};
@@ -1480,14 +1792,14 @@ async function readEvidence(bundle, options) {
     const pin = text(item["semantics_version"], "$proposal.legs[].semantics_version");
     const entry = entries.get(family);
     if (entry === void 0) {
-      refuse("SEMANTICS_PIN", `$proposal.legs.${family}`, "no registry entry was supplied");
+      refuse2("SEMANTICS_PIN", `$proposal.legs.${family}`, "no registry entry was supplied");
     }
     if (entry.version !== pin) {
-      refuse("SEMANTICS_PIN", `$proposal.legs.${family}`, `the pin is ${short(pin)}, the entry's semantics_version is ${short(entry.version)}`);
+      refuse2("SEMANTICS_PIN", `$proposal.legs.${family}`, `the pin is ${short(pin)}, the entry's semantics_version is ${short(entry.version)}`);
     }
     const status = text(entry.value["status"], `$registry.${family}.status`);
     if (status !== "computed") {
-      refuse("SEMANTICS_PIN", `$proposal.legs.${family}`, `the entry's status is ${status}, and only a computed family has a terminal payoff to check`);
+      refuse2("SEMANTICS_PIN", `$proposal.legs.${family}`, `the entry's status is ${status}, and only a computed family has a terminal payoff to check`);
     }
   }
   return {
@@ -1533,11 +1845,11 @@ function relower(evidence) {
     const coin = text(source["coin"], "$proposal.baseline.source.coin");
     const raw = evidence.snapshots.get(snapshot);
     if (raw === void 0) {
-      refuse("SNAPSHOT_NOT_CITED", "$proposal.baseline.source", `${short(snapshot)} was not supplied`);
+      refuse2("SNAPSHOT_NOT_CITED", "$proposal.baseline.source", `${short(snapshot)} was not supplied`);
     }
     const found = markPrice(parseVenue(raw), coin);
     if (!equals(found, claimedBaseline)) {
-      refuse("TERMS_MISMATCH", "$proposal.baseline.price", `the proposal says ${format(claimedBaseline)}, the snapshot says ${format(found)}`);
+      refuse2("TERMS_MISMATCH", "$proposal.baseline.price", `the proposal says ${format(claimedBaseline)}, the snapshot says ${format(found)}`);
     }
   }
   const legs = [];
@@ -1552,7 +1864,7 @@ function relower(evidence) {
     const size = number(leg["size"], `$proposal.legs.${id}.size`);
     const terms = object(leg["terms"], `$proposal.legs.${id}.terms`);
     const entry = evidence.entries.get(family);
-    if (entry === void 0) refuse("SEMANTICS_PIN", `$proposal.legs.${id}`, "no entry");
+    if (entry === void 0) refuse2("SEMANTICS_PIN", `$proposal.legs.${id}`, "no entry");
     checkInstance(evidence, leg, terms, id, family);
     const parts = resolvePayoff(entry.value, side, terms, size, id);
     const acquisition = object(leg["acquisition"], `$proposal.legs.${id}.acquisition`);
@@ -1658,7 +1970,7 @@ function legReference(entry, terms, id, family) {
   return template.replace(/\{([a-z_]+)\}/g, (_match, name) => {
     const value = terms[name];
     if (typeof value !== "string") {
-      refuse("SEMANTICS_PIN", `$proposal.legs.${id}.terms.${name}`, `the entry's reference names {${name}}, which the leg's terms do not carry as a single value`);
+      refuse2("SEMANTICS_PIN", `$proposal.legs.${id}.terms.${name}`, `the entry's reference names {${name}}, which the leg's terms do not carry as a single value`);
     }
     return value;
   });
@@ -1673,24 +1985,24 @@ function checkInstance(evidence, leg, terms, id, family) {
   const side = text(leg["side"], `$proposal.legs.${id}.side`);
   const raw = evidence.snapshots.get(catalogueDigest);
   if (raw === void 0) {
-    refuse("SNAPSHOT_NOT_CITED", `$proposal.legs.${id}.instance`, `${short(catalogueDigest)} was not supplied`);
+    refuse2("SNAPSHOT_NOT_CITED", `$proposal.legs.${id}.instance`, `${short(catalogueDigest)} was not supplied`);
   }
   const catalogue = parseVenue(raw);
   const offset = side === "yes" || side === "long" ? 0 : 1;
   const expectedCoin = `#${BigInt(outcome) * 10n + BigInt(offset)}`;
   if (coin !== expectedCoin) {
-    refuse("TERMS_MISMATCH", `$proposal.legs.${id}.instance.coin`, `outcome ${outcome} side ${side} encodes ${expectedCoin}, the leg says ${coin}`);
+    refuse2("TERMS_MISMATCH", `$proposal.legs.${id}.instance.coin`, `outcome ${outcome} side ${side} encodes ${expectedCoin}, the leg says ${coin}`);
   }
   const described = describedTerms(catalogue, outcome, family);
   if (described === null) {
-    refuse("TERMS_MISMATCH", `$proposal.legs.${id}.instance.outcome`, `${outcome} is not in the catalogue`);
+    refuse2("TERMS_MISMATCH", `$proposal.legs.${id}.instance.outcome`, `${outcome} is not in the catalogue`);
   }
   for (const [name, wanted] of Object.entries(described)) {
     const claimed = terms[name];
     if (claimed === void 0) continue;
     const claimedText = Array.isArray(claimed) ? claimed.map((item) => String(item)).join(",") : String(claimed);
     if (claimedText !== wanted) {
-      refuse("TERMS_MISMATCH", `$proposal.legs.${id}.terms.${name}`, `the catalogue says ${wanted}, the leg says ${claimedText}`);
+      refuse2("TERMS_MISMATCH", `$proposal.legs.${id}.terms.${name}`, `the catalogue says ${wanted}, the leg says ${claimedText}`);
     }
   }
 }
@@ -1748,24 +2060,24 @@ function resolvePayoff(entry, side, terms, size, id) {
     for (const rawPays of list(payoff["pays"], "$registry.payoffs[].pays")) {
       const pays = object(rawPays, "$registry.payoffs[].pays[]");
       if (pays["primitive"] !== "indicator") {
-        refuse("ENGINE_DISAGREES", `$registry.payoffs`, `unsupported primitive ${String(pays["primitive"])}`);
+        refuse2("ENGINE_DISAGREES", `$registry.payoffs`, `unsupported primitive ${String(pays["primitive"])}`);
       }
       const paysOn = object(pays["pays_on"], "$registry.payoffs[].pays[].pays_on");
       parts.push(indicator(size, boundFrom(paysOn, "lower", terms, id), boundFrom(paysOn, "upper", terms, id)));
     }
     if (parts.length === 0) {
-      refuse("ENGINE_DISAGREES", `$registry.payoffs`, `${id} resolves to no payoff`);
+      refuse2("ENGINE_DISAGREES", `$registry.payoffs`, `${id} resolves to no payoff`);
     }
     return parts;
   }
-  refuse("TERMS_MISMATCH", `$proposal.legs.${id}`, `the entry has no payoff for side ${side}`);
+  refuse2("TERMS_MISMATCH", `$proposal.legs.${id}`, `the entry has no payoff for side ${side}`);
 }
 function boundFrom(paysOn, which, terms, id) {
   const reference = paysOn[which];
   if (reference === void 0) return which === "lower" ? NEG_INF : POS_INF;
   const closed = paysOn[`${which}_inclusive`];
   if (typeof closed !== "boolean") {
-    refuse("ENDPOINT_OWNERSHIP", `$registry.payoffs.${which}`, "a bound with no owner");
+    refuse2("ENDPOINT_OWNERSHIP", `$registry.payoffs.${which}`, "a bound with no owner");
   }
   const spec = object(reference, `$registry.payoffs.${which}`);
   const termName = text(spec["term"], `$registry.payoffs.${which}.term`);
@@ -1773,16 +2085,16 @@ function boundFrom(paysOn, which, terms, id) {
   const positionText = spec["at"];
   if (typeof positionText === "string") {
     if (!Array.isArray(raw)) {
-      refuse("TERMS_MISMATCH", `$proposal.legs.${id}.terms.${termName}`, "expected a list");
+      refuse2("TERMS_MISMATCH", `$proposal.legs.${id}.terms.${termName}`, "expected a list");
     }
     const item = raw[digitsOf(positionText)];
     if (typeof item !== "string") {
-      refuse("TERMS_MISMATCH", `$proposal.legs.${id}.terms.${termName}`, `no item at ${positionText}`);
+      refuse2("TERMS_MISMATCH", `$proposal.legs.${id}.terms.${termName}`, `no item at ${positionText}`);
     }
     return finite(parse2(item), closed);
   }
   if (typeof raw !== "string") {
-    refuse("TERMS_MISMATCH", `$proposal.legs.${id}.terms.${termName}`, "expected a number as text");
+    refuse2("TERMS_MISMATCH", `$proposal.legs.${id}.terms.${termName}`, "expected a number as text");
   }
   return finite(parse2(raw), closed);
 }
@@ -1798,12 +2110,12 @@ function priceLeg(evidence, acquisition, size, id) {
   const snapshot = text(acquisition["snapshot"], `$proposal.legs.${id}.acquisition.snapshot`);
   const raw = evidence.snapshots.get(snapshot);
   if (raw === void 0) {
-    refuse("SNAPSHOT_NOT_CITED", `$proposal.legs.${id}.acquisition`, `${short(snapshot)} was not supplied`);
+    refuse2("SNAPSHOT_NOT_CITED", `$proposal.legs.${id}.acquisition`, `${short(snapshot)} was not supplied`);
   }
   const levels = asksOf(parseVenue(raw), id);
   const walked = askCost(levels, size);
   if (!walked.covered || walked.total === null) {
-    refuse("COST_MISMATCH", `$proposal.legs.${id}.acquisition`, "the displayed depth cannot fill the size");
+    refuse2("COST_MISMATCH", `$proposal.legs.${id}.acquisition`, "the displayed depth cannot fill the size");
   }
   return {
     total: walked.total,
@@ -1815,10 +2127,10 @@ function asksOf(book, id) {
     "levels"
   ]);
   if (!Array.isArray(sides) || sides.length !== 2 || !Array.isArray(sides[1])) {
-    refuse("SNAPSHOT_NOT_CITED", `$proposal.legs.${id}.acquisition.snapshot`, "the cited snapshot is not an l2Book response, so this leg cites no book");
+    refuse2("SNAPSHOT_NOT_CITED", `$proposal.legs.${id}.acquisition.snapshot`, "the cited snapshot is not an l2Book response, so this leg cites no book");
   }
-  const rows = sides[1];
-  return rows.map((row, position) => ({
+  const rows2 = sides[1];
+  return rows2.map((row, position) => ({
     price: parse2(quantityText(row, [
       "px"
     ])),
@@ -1829,14 +2141,14 @@ function asksOf(book, id) {
 }
 function markPrice(contexts, coin) {
   if (!Array.isArray(contexts) || contexts.length !== 2) {
-    refuse("TERMS_MISMATCH", "$proposal.baseline.source", "not a contexts response");
+    refuse2("TERMS_MISMATCH", "$proposal.baseline.source", "not a contexts response");
   }
   const universe = at(contexts[0], [
     "universe"
   ]);
   const states = contexts[1];
   if (!Array.isArray(universe) || !Array.isArray(states)) {
-    refuse("TERMS_MISMATCH", "$proposal.baseline.source", "not a contexts response");
+    refuse2("TERMS_MISMATCH", "$proposal.baseline.source", "not a contexts response");
   }
   for (let index = 0; index < universe.length; index += 1) {
     const asset = universe[index];
@@ -1849,7 +2161,7 @@ function markPrice(contexts, coin) {
       "markPx"
     ]));
   }
-  refuse("TERMS_MISMATCH", "$proposal.baseline.source", `${coin} is not in the snapshot`);
+  refuse2("TERMS_MISMATCH", "$proposal.baseline.source", `${coin} is not in the snapshot`);
 }
 async function compareLowering(evidence, rebuilt) {
   const lowered = evidence.lowered;
@@ -1861,30 +2173,30 @@ async function compareLowering(evidence, rebuilt) {
     const snapshot = premium["snapshot"];
     if (typeof snapshot !== "string") continue;
     if (!cited.has(snapshot)) {
-      refuse("SNAPSHOT_NOT_CITED", `$lowered.legs.${String(leg["id"])}.premium.snapshot`, `${short(snapshot)} priced this leg, but the proposal cites no such snapshot`);
+      refuse2("SNAPSHOT_NOT_CITED", `$lowered.legs.${String(leg["id"])}.premium.snapshot`, `${short(snapshot)} priced this leg, but the proposal cites no such snapshot`);
     }
   }
   compareObjective(evidence, rebuilt);
   const claimedLegs = list(lowered["legs"], "$lowered.legs");
   if (claimedLegs.length !== rebuilt.legs.length) {
-    refuse("ENGINE_DISAGREES", "$lowered.legs", `the lowered proposal has ${claimedLegs.length} legs, the proposal has ${rebuilt.legs.length}`);
+    refuse2("ENGINE_DISAGREES", "$lowered.legs", `the lowered proposal has ${claimedLegs.length} legs, the proposal has ${rebuilt.legs.length}`);
   }
   for (let index = 0; index < claimedLegs.length; index += 1) {
     const claimed2 = object(claimedLegs[index], "$lowered.legs[]");
     const mine = rebuilt.legs[index];
     if (claimed2["id"] !== mine.id) {
-      refuse("ENGINE_DISAGREES", `$lowered.legs[${index}].id`, `expected ${mine.id}`);
+      refuse2("ENGINE_DISAGREES", `$lowered.legs[${index}].id`, `expected ${mine.id}`);
     }
     const premium = object(claimed2["premium"], `$lowered.legs.${mine.id}.premium`);
     const claimedTotal = number(premium["total"], `$lowered.legs.${mine.id}.premium.total`);
     if (!equals(claimedTotal, mine.premium)) {
-      refuse("COST_MISMATCH", `$lowered.legs.${mine.id}.premium.total`, `the walk gives ${format(mine.premium)}, the lowered proposal says ${format(claimedTotal)}`);
+      refuse2("COST_MISMATCH", `$lowered.legs.${mine.id}.premium.total`, `the walk gives ${format(mine.premium)}, the lowered proposal says ${format(claimedTotal)}`);
     }
   }
   const irDigest = await digest(lowered);
   const claimed = evidence.result["ir_digest"];
   if (claimed !== irDigest) {
-    refuse("ENGINE_DISAGREES", "$result.ir_digest", `the result cites ${short(String(claimed))}, the lowered proposal digests to ${short(irDigest)}`);
+    refuse2("ENGINE_DISAGREES", "$result.ir_digest", `the result cites ${short(String(claimed))}, the lowered proposal digests to ${short(irDigest)}`);
   }
 }
 function evaluateAndCompare(evidence, rebuilt) {
@@ -1938,80 +2250,80 @@ function compareEnvelope(evidence, rebuilt) {
   const raw = result["order_envelope"];
   const present = raw !== void 0;
   if (present !== (readiness === "envelope_issued")) {
-    refuse("ENVELOPE_MISMATCH", "$result.execution_readiness", `readiness is ${String(readiness)} and an envelope is ${present ? "present" : "absent"}`);
+    refuse2("ENVELOPE_MISMATCH", "$result.execution_readiness", `readiness is ${String(readiness)} and an envelope is ${present ? "present" : "absent"}`);
   }
   if (!present) return;
   const envelope = object(raw, "$result.order_envelope");
   const verdict = result["model_result"];
   if (verdict !== "passes") {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope", `an envelope on a ${String(verdict)}`);
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope", `an envelope on a ${String(verdict)}`);
   }
   if (rebuilt.legs.length !== 1) {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope", `the proposal has ${rebuilt.legs.length} legs; an envelope describes one order`);
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope", `the proposal has ${rebuilt.legs.length} legs; an envelope describes one order`);
   }
   const leg = rebuilt.legs[0];
   if (leg.levels.length === 0) {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope", "the leg is not priced on a book");
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope", "the leg is not priced on a book");
   }
   if (envelope["coin"] !== leg.coin) {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.coin", `the envelope names ${String(envelope["coin"])}, the proposal names ${leg.coin}`);
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope.coin", `the envelope names ${String(envelope["coin"])}, the proposal names ${leg.coin}`);
   }
   if (envelope["side"] !== "buy") {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.side", `side is ${String(envelope["side"])}`);
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope.side", `side is ${String(envelope["side"])}`);
   }
   if (envelope["time_in_force"] !== "Ioc") {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.time_in_force", `time in force is ${String(envelope["time_in_force"])}`);
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope.time_in_force", `time in force is ${String(envelope["time_in_force"])}`);
   }
   const size = number(envelope["size"], "$result.order_envelope.size");
   if (!equals(size, leg.size)) {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.size", `the envelope buys ${format(size)}, the proposal asks for ${format(leg.size)}`);
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope.size", `the envelope buys ${format(size)}, the proposal asks for ${format(leg.size)}`);
   }
   const limit = walkLimit(leg.levels, leg.size);
   if (limit === null) {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.limit_price", "the depth does not fill the size");
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope.limit_price", "the depth does not fill the size");
   }
   const claimedLimit = number(envelope["limit_price"], "$result.order_envelope.limit_price");
   if (!equals(claimedLimit, limit)) {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.limit_price", `the envelope says ${format(claimedLimit)}, the walk ends in ${format(limit)}`);
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope.limit_price", `the envelope says ${format(claimedLimit)}, the walk ends in ${format(limit)}`);
   }
   const walked = askCost(leg.levels, leg.size);
   if (!walked.covered || walked.total === null) {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.max_cost", "the depth does not fill the size");
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope.max_cost", "the depth does not fill the size");
   }
   const claimedCost = number(envelope["max_cost"], "$result.order_envelope.max_cost");
   if (!equals(claimedCost, walked.total)) {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.max_cost", `the envelope says ${format(claimedCost)}, the walk costs ${format(walked.total)}`);
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope.max_cost", `the envelope says ${format(claimedCost)}, the walk costs ${format(walked.total)}`);
   }
   const stated = result["input_digest"];
   if (stated === void 0) {
-    refuse("ENVELOPE_MISMATCH", "$result.input_digest", "an envelope was issued for a result that does not name its input digest");
+    refuse2("ENVELOPE_MISMATCH", "$result.input_digest", "an envelope was issued for a result that does not name its input digest");
   }
   if (envelope["input_digest"] !== stated) {
-    refuse("ENVELOPE_MISMATCH", "$result.order_envelope.input_digest", `the envelope belongs to ${short(String(envelope["input_digest"]))}, the result is ${short(String(stated))}`);
+    refuse2("ENVELOPE_MISMATCH", "$result.order_envelope.input_digest", `the envelope belongs to ${short(String(envelope["input_digest"]))}, the result is ${short(String(stated))}`);
   }
 }
 function compareProfile(mine, claimed, at2) {
   if (claimed.length !== mine.length) {
-    refuse("PROFILE_COVERAGE", at2, `the result states ${claimed.length} pieces, the proposal gives ${mine.length}`);
+    refuse2("PROFILE_COVERAGE", at2, `the result states ${claimed.length} pieces, the proposal gives ${mine.length}`);
   }
   for (let index = 0; index < mine.length; index += 1) {
     const piece = object(claimed[index], `${at2}[${index}]`);
     const want = mine[index];
     const where = `${at2}[${index}]`;
     if (!equals(number(piece["lower"], `${where}.lower`), want.lower)) {
-      refuse("PROFILE_COVERAGE", where, `lower is ${String(piece["lower"])}, expected ${format(want.lower)}`);
+      refuse2("PROFILE_COVERAGE", where, `lower is ${String(piece["lower"])}, expected ${format(want.lower)}`);
     }
     if (!equals(number(piece["upper"], `${where}.upper`), want.upper)) {
-      refuse("PROFILE_COVERAGE", where, `upper is ${String(piece["upper"])}, expected ${format(want.upper)}`);
+      refuse2("PROFILE_COVERAGE", where, `upper is ${String(piece["upper"])}, expected ${format(want.upper)}`);
     }
     if (piece["lower_inclusive"] !== want.lowerInclusive || piece["upper_inclusive"] !== want.upperInclusive) {
-      refuse("ENDPOINT_OWNERSHIP", where, `ownership is [${String(piece["lower_inclusive"])}, ${String(piece["upper_inclusive"])}], expected [${want.lowerInclusive}, ${want.upperInclusive}]`);
+      refuse2("ENDPOINT_OWNERSHIP", where, `ownership is [${String(piece["lower_inclusive"])}, ${String(piece["upper_inclusive"])}], expected [${want.lowerInclusive}, ${want.upperInclusive}]`);
     }
     if (!equals(number(piece["slope"], `${where}.slope`), want.slope)) {
-      refuse("PROFILE_VALUE", where, `slope is ${String(piece["slope"])}, expected ${format(want.slope)}`);
+      refuse2("PROFILE_VALUE", where, `slope is ${String(piece["slope"])}, expected ${format(want.slope)}`);
     }
     if (!equals(number(piece["intercept"], `${where}.intercept`), want.intercept)) {
-      refuse("PROFILE_VALUE", where, `intercept is ${String(piece["intercept"])}, expected ${format(want.intercept)}`);
+      refuse2("PROFILE_VALUE", where, `intercept is ${String(piece["intercept"])}, expected ${format(want.intercept)}`);
     }
   }
 }
@@ -2019,11 +2331,11 @@ function compareObjective(evidence, rebuilt) {
   const proposalObjective = canonical(evidence.proposal["objective"]);
   const loweredObjective = canonical(evidence.lowered["objective"]);
   if (new TextDecoder().decode(proposalObjective) !== new TextDecoder().decode(loweredObjective)) {
-    refuse("OBJECTIVE_MISMATCH", "$lowered.objective", "the lowered proposal states a different objective from the proposal");
+    refuse2("OBJECTIVE_MISMATCH", "$lowered.objective", "the lowered proposal states a different objective from the proposal");
   }
   const claimedTime = evidence.result["objective_valuation_time"];
   if (claimedTime !== rebuilt.valuationTime) {
-    refuse("OBJECTIVE_MISMATCH", "$result.objective_valuation_time", `the result says ${String(claimedTime)}, the proposal says ${rebuilt.valuationTime}`);
+    refuse2("OBJECTIVE_MISMATCH", "$result.objective_valuation_time", `the result says ${String(claimedTime)}, the proposal says ${rebuilt.valuationTime}`);
   }
 }
 function clausesOf(evidence) {
@@ -2059,7 +2371,7 @@ function compareVerdict(evidence, rebuilt, lowerFn, upperFn) {
   else expected = anyLoose ? "needs_review" : "fails";
   const claimed = evidence.result["model_result"];
   if (claimed !== expected) {
-    refuse("VERDICT_MISMATCH", "$result.model_result", `the result says ${String(claimed)}, the evidence gives ${expected}`);
+    refuse2("VERDICT_MISMATCH", "$result.model_result", `the result says ${String(claimed)}, the evidence gives ${expected}`);
   }
   void upperFn;
   compareIntervals(evidence, rebuilt, lowerFn, clauses);
@@ -2076,17 +2388,17 @@ function compareIntervals(evidence, rebuilt, lowerFn, clauses) {
     for (const interval of below(lowerFn, clause.minPnl, lower, upper)) mine.push(interval);
   }
   if (stated.length !== mine.length) {
-    refuse("INTERVAL_MISMATCH", "$result.failing_intervals", `the result states ${stated.length} intervals, the evidence gives ${mine.length}`);
+    refuse2("INTERVAL_MISMATCH", "$result.failing_intervals", `the result states ${stated.length} intervals, the evidence gives ${mine.length}`);
   }
   for (let index = 0; index < mine.length; index += 1) {
     const claimed = object(stated[index], `$result.intervals[${index}]`);
     const want = mine[index];
     const where = `$result.intervals[${index}]`;
     if (!equals(number(claimed["lower"], `${where}.lower`), want.lower) || !equals(number(claimed["upper"], `${where}.upper`), want.upper)) {
-      refuse("INTERVAL_MISMATCH", where, `the result says [${String(claimed["lower"])}, ${String(claimed["upper"])}], the evidence gives [${format(want.lower)}, ${format(want.upper)}]`);
+      refuse2("INTERVAL_MISMATCH", where, `the result says [${String(claimed["lower"])}, ${String(claimed["upper"])}], the evidence gives [${format(want.lower)}, ${format(want.upper)}]`);
     }
     if (claimed["lower_inclusive"] !== want.lowerInclusive || claimed["upper_inclusive"] !== want.upperInclusive) {
-      refuse("INTERVAL_MISMATCH", where, "the interval's endpoint ownership differs");
+      refuse2("INTERVAL_MISMATCH", where, "the interval's endpoint ownership differs");
     }
   }
 }
@@ -2096,7 +2408,7 @@ function compareReductions(evidence, rebuilt) {
   const declaredFor = new Set(stated.map((entry) => text(object(entry, "$result.reductions[]")["leg"], "$result.reductions[].leg")));
   for (const leg of mine) {
     if (leg.reductionRule === "unreviewed_family" && !declaredFor.has(leg.id)) {
-      refuse("REDUCTION_UNDECLARED", "$result.reductions", `leg ${leg.id} rests on ${leg.family} at version ${leg.version}, which is not in this checker's allowlist, so this checker reduces it under unreviewed_family; the result declares no reduction for that leg`);
+      refuse2("REDUCTION_UNDECLARED", "$result.reductions", `leg ${leg.id} rests on ${leg.family} at version ${leg.version}, which is not in this checker's allowlist, so this checker reduces it under unreviewed_family; the result declares no reduction for that leg`);
     }
   }
   const expected = mine.flatMap((leg) => leg.reductionRules.map((each) => ({
@@ -2105,23 +2417,23 @@ function compareReductions(evidence, rebuilt) {
     tight: each.tight
   })));
   if (stated.length !== expected.length) {
-    refuse("REDUCTION_UNDECLARED", "$result.reductions", `the result declares ${stated.length} reductions, the evidence requires ${expected.length}`);
+    refuse2("REDUCTION_UNDECLARED", "$result.reductions", `the result declares ${stated.length} reductions, the evidence requires ${expected.length}`);
   }
   for (let index = 0; index < expected.length; index += 1) {
     const claimed = object(stated[index], `$result.reductions[${index}]`);
     const want = expected[index];
     const where = `$result.reductions[${index}]`;
     if (claimed["leg"] !== want.leg) {
-      refuse("REDUCTION_UNDECLARED", where, `expected the reduction on ${want.leg}`);
+      refuse2("REDUCTION_UNDECLARED", where, `expected the reduction on ${want.leg}`);
     }
     if (claimed["rule"] !== want.rule) {
-      refuse("REDUCTION_UNSOUND", where, `expected the rule ${want.rule}`);
+      refuse2("REDUCTION_UNSOUND", where, `expected the rule ${want.rule}`);
     }
     if (claimed["tight"] !== want.tight) {
-      refuse("REDUCTION_UNSOUND", where, `the result calls ${want.rule} ${claimed["tight"] === true ? "tight" : "loose"}; it is not`);
+      refuse2("REDUCTION_UNSOUND", where, `the result calls ${want.rule} ${claimed["tight"] === true ? "tight" : "loose"}; it is not`);
     }
     if (typeof claimed["reason_code"] !== "string" || claimed["reason_code"] === "") {
-      refuse("REDUCTION_UNDECLARED", where, "the reduction states no reason code");
+      refuse2("REDUCTION_UNDECLARED", where, "the reduction states no reason code");
     }
   }
 }
@@ -2129,11 +2441,11 @@ function compareCost(evidence, rebuilt, lowerFn) {
   const cost = object(evidence.result["cost"], "$result.cost");
   const claimedPremium = number(cost["premium"], "$result.cost.premium");
   if (!equals(claimedPremium, rebuilt.premium)) {
-    refuse("COST_MISMATCH", "$result.cost.premium", `the result says ${format(claimedPremium)}, the walks give ${format(rebuilt.premium)}`);
+    refuse2("COST_MISMATCH", "$result.cost.premium", `the result says ${format(claimedPremium)}, the walks give ${format(rebuilt.premium)}`);
   }
   const claimedOther = number(cost["other_costs"], "$result.cost.other_costs");
   if (!equals(claimedOther, rebuilt.otherCosts)) {
-    refuse("COST_MISMATCH", "$result.cost.other_costs", "the result states different other costs");
+    refuse2("COST_MISMATCH", "$result.cost.other_costs", "the result states different other costs");
   }
   const mine = below(lowerFn, ZERO, rebuilt.domainLower, rebuilt.domainUpper);
   const claimedBreakevens = list(cost["breakevens"] ?? [], "$result.cost.breakevens");
@@ -2144,7 +2456,7 @@ function compareCost(evidence, rebuilt, lowerFn) {
   }
   for (const claimed of claimedBreakevens) {
     if (typeof claimed !== "string" || !crossings.has(claimed)) {
-      refuse("COST_MISMATCH", "$result.cost.breakevens", `${String(claimed)} is not where the payoff crosses zero`);
+      refuse2("COST_MISMATCH", "$result.cost.breakevens", `${String(claimed)} is not where the payoff crosses zero`);
     }
   }
 }
@@ -2160,7 +2472,7 @@ function compareSizeWindows(evidence, rebuilt) {
     const legId = text(claimed["leg"], `$result.size_windows[${index}].leg`);
     const leg = rebuilt.legs.find((candidate) => candidate.id === legId);
     if (leg === void 0) {
-      refuse("SIZE_WINDOW", `$result.size_windows[${index}]`, `no leg named ${legId}`);
+      refuse2("SIZE_WINDOW", `$result.size_windows[${index}]`, `no leg named ${legId}`);
     }
     const baseParts = [
       linear(rebuilt.quantity, rebuilt.baseline)
@@ -2174,7 +2486,7 @@ function compareSizeWindows(evidence, rebuilt) {
     const claimedSmallest = claimed["smallest"];
     if (typeof claimedSmallest === "string" && window2.smallest !== null) {
       if (!equals(parse2(claimedSmallest), window2.smallest)) {
-        refuse("SIZE_WINDOW", `$result.size_windows[${index}].smallest`, `the result says ${claimedSmallest}, the evidence gives ${format(window2.smallest)}`);
+        refuse2("SIZE_WINDOW", `$result.size_windows[${index}].smallest`, `the result says ${claimedSmallest}, the evidence gives ${format(window2.smallest)}`);
       }
     }
   }
@@ -2222,12 +2534,12 @@ function compareWitnesses(evidence, rebuilt, upperFn) {
       const clauseId = interval["clause"];
       const clause = typeof clauseId === "string" ? byId.get(clauseId) : void 0;
       if (clause === void 0) {
-        refuse(className, `$result.${field}[]`, `the witness names no clause this proposal has`);
+        refuse2(className, `$result.${field}[]`, `the witness names no clause this proposal has`);
       }
       if (field === "failing_intervals" && looseLegs.size > 0) {
         const best = evaluateOn(upperFn, price);
         if (!lt(best, clause.minPnl)) {
-          refuse(className, `$result.${field}[].witness`, `at ${format(price)} the upper profile gives ${format(best)}, which meets ${format(clause.minPnl)}`);
+          refuse2(className, `$result.${field}[].witness`, `at ${format(price)} the upper profile gives ${format(best)}, which meets ${format(clause.minPnl)}`);
         }
       }
       for (const rawState of list(found["adverse_states"] ?? [], `$result.${field}[].witness.adverse_states`)) {
@@ -2235,10 +2547,10 @@ function compareWitnesses(evidence, rebuilt, upperFn) {
         const legId = text(state["leg"], `$...adverse_states[].leg`);
         const reduced = reducedLegs.get(legId);
         if (reduced === void 0) {
-          refuse(className, `$result.${field}[].witness.adverse_states`, `${legId} was not reduced, so no rule can produce an adverse state for it`);
+          refuse2(className, `$result.${field}[].witness.adverse_states`, `${legId} was not reduced, so no rule can produce an adverse state for it`);
         }
         if (state["rule"] !== reduced.reductionRule) {
-          refuse(className, `$result.${field}[].witness.adverse_states`, `${legId} was reduced by ${String(reduced.reductionRule)}, not ${String(state["rule"])}`);
+          refuse2(className, `$result.${field}[].witness.adverse_states`, `${legId} was reduced by ${String(reduced.reductionRule)}, not ${String(state["rule"])}`);
         }
       }
     }
@@ -2250,7 +2562,7 @@ function evaluateOn(fn2, price) {
     const beforeHi = piece.hi.value === null || (piece.hi.closed ? lte(price, piece.hi.value) : lt(price, piece.hi.value));
     if (afterLo && beforeHi) return add(mul(piece.slope, price), piece.intercept);
   }
-  refuse("WITNESS_INADMISSIBLE", "$result.witness.price", "the price is outside the profile");
+  refuse2("WITNESS_INADMISSIBLE", "$result.witness.price", "the price is outside the profile");
 }
 function compareCertificates(evidence) {
   for (const rawWindow of list(evidence.result["size_windows"] ?? [], "$result.size_windows")) {
@@ -2263,7 +2575,7 @@ function compareCertificates(evidence) {
     for (const raw of list(found["weights"] ?? [], where)) {
       const weight = number(raw, where);
       if (sign(weight) < 0) {
-        refuse("CERTIFICATE_WEIGHTS", where, `${format(weight)} is negative; a negative weight reverses the inequality it multiplies`);
+        refuse2("CERTIFICATE_WEIGHTS", where, `${format(weight)} is negative; a negative weight reverses the inequality it multiplies`);
       }
     }
   }
@@ -2272,29 +2584,29 @@ function readDocument(raw, what) {
   try {
     return parse(raw);
   } catch (error) {
-    refuse("ENGINE_DISAGREES", `$${what}`, error instanceof Error ? error.message : String(error));
+    refuse2("ENGINE_DISAGREES", `$${what}`, error instanceof Error ? error.message : String(error));
   }
 }
 function object(value, at2) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    refuse("ENGINE_DISAGREES", at2, "expected an object");
+    refuse2("ENGINE_DISAGREES", at2, "expected an object");
   }
   return value;
 }
 function list(value, at2) {
-  if (!Array.isArray(value)) refuse("ENGINE_DISAGREES", at2, "expected an array");
+  if (!Array.isArray(value)) refuse2("ENGINE_DISAGREES", at2, "expected an array");
   return value;
 }
 function text(value, at2) {
-  if (typeof value !== "string") refuse("ENGINE_DISAGREES", at2, "expected a string");
+  if (typeof value !== "string") refuse2("ENGINE_DISAGREES", at2, "expected a string");
   return value;
 }
 function number(value, at2) {
-  if (typeof value !== "string") refuse("ENGINE_DISAGREES", at2, "expected a number as text");
+  if (typeof value !== "string") refuse2("ENGINE_DISAGREES", at2, "expected a number as text");
   try {
     return parse2(value);
   } catch {
-    refuse("ENGINE_DISAGREES", at2, `${value} is not in the number grammar`);
+    refuse2("ENGINE_DISAGREES", at2, `${value} is not in the number grammar`);
   }
 }
 function citedSnapshots(proposal) {
@@ -2336,7 +2648,7 @@ function digitsOf(text2) {
   let total = 0;
   for (const digit of text2) {
     const place = "0123456789".indexOf(digit);
-    if (place < 0) refuse("ENGINE_DISAGREES", "$registry.payoffs.at", `${text2} is not a position`);
+    if (place < 0) refuse2("ENGINE_DISAGREES", "$registry.payoffs.at", `${text2} is not a position`);
     total = total * 10 + place;
   }
   return total;
@@ -2345,5 +2657,7 @@ function short(hex) {
   return hex.length <= 12 ? hex : hex.slice(0, 12);
 }
 export {
-  verify
+  rows as synthesisRows,
+  verify,
+  verifySynthesis
 };
