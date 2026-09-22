@@ -501,6 +501,69 @@ def _snapshots_cited(proposal):
 # --------------------------------------------------------------------------- lowering
 
 
+def lowered_exposure(exposure):
+    """The exposure, with its KIND carried rather than discarded.
+
+    Lowering used to write `{"kind": "linear", ...}` whatever the proposal said, so an
+    isolated perp arrived at the evaluator indistinguishable from spot. A checker cannot
+    re-derive a reduction from an IR that does not say what is exposed.
+    """
+    quantity = exact.format(num(exposure["quantity"]))
+    if exposure["kind"] == "isolated_perp":
+        return {"kind": "isolated_perp", "quantity": quantity,
+                "liquidation_price": exact.format(num(exposure["liquidation_price"])),
+                "isolated_margin": exact.format(num(exposure["isolated_margin"]))}
+    return {"kind": "linear", "quantity": quantity}
+
+
+def path_domain(proposal, baseline):
+    """Every price the path can take: the hull of the terminal domain and where it starts.
+
+    PLAN section 2: "every price between now and the valuation time, so it contains the
+    current price and the terminal domain". The price is at the baseline NOW and may end
+    anywhere in the domain, so the path passes through the first and reaches the second, and
+    the hull is the smallest interval containing both. A baseline outside the terminal domain
+    WIDENS it, which is right: the path starts there whatever the terminal range says.
+    """
+    lower, upper = num(proposal["domain"]["lower"]), num(proposal["domain"]["upper"])
+    return min(lower, baseline), max(upper, baseline)
+
+
+def liquidation_reduction(proposal, baseline):
+    """A reduction when the exposure can be liquidated inside the path domain, or None.
+
+    THE HEDGE CANNOT BE LIQUIDATED; THE EXPOSURE CAN. Retained evidence at 085ccfb states
+    that outcomes "do not involve leverage or liquidations", so an outcome leg is safe and an
+    isolated perp is not.
+
+    The rule is PLAN section 2's: with the liquidation price inside the path domain, the leg
+    is worth MINUS ITS ISOLATED MARGIN at every terminal price. Not "sometimes" -- at every
+    one, because liquidation at any moment closes the position permanently and a later
+    recovery does not bring it back. That is the priceTouch situation mirrored: path
+    dependence a terminal kernel cannot compute, except here it cuts against the holder, so
+    the worst case is the one that must be taken.
+
+    TIGHT, unlike a loose bound. The adverse state is ADMISSIBLE, not merely unproven: a path
+    that reaches the liquidation price really does end the position, so a verdict may rest on
+    this alone and it CAN make a proposal fail. That is the difference from `price_touch`,
+    whose bound understates a payoff and therefore may only ask for review.
+    """
+    exposure = proposal["exposure"]
+    if exposure["kind"] != "isolated_perp":
+        return None
+    price = num(exposure["liquidation_price"])
+    low, high = path_domain(proposal, baseline)
+    if not (low <= price <= high):
+        # The path cannot reach it within the declared domain, so there is nothing to reduce.
+        # Silence here is a statement: the result carries no rule, and a reader sees that the
+        # verdict did not rest on one.
+        return None
+    if num(exposure["isolated_margin"]) < 0:
+        _refuse("EXPOSURE_UNSOUND", "an isolated margin cannot be negative")
+    return {"leg": "exposure", "rule": "liquidated_in_path", "tight": True,
+            "reason_code": "LIQUIDATED_IN_PATH"}
+
+
 def lower(proposal, registry, snapshots, references=None):
     """(proposal, registry entries by family, snapshot bytes by SHA-256) -> lowered proposal.
 
@@ -520,6 +583,12 @@ def lower(proposal, registry, snapshots, references=None):
     baseline = read_baseline(proposal, snapshots)
 
     legs, versions, reductions = [], [], []
+    # THE EXPOSURE'S OWN REDUCTION, before any leg's. An isolated perp liquidated inside the
+    # path domain is worth minus its margin at every terminal price, and no hedge can undo
+    # that -- so the reader should see it first among the rules the verdict rests on.
+    liquidation = liquidation_reduction(proposal, baseline)
+    if liquidation is not None:
+        reductions.append(liquidation)
     # Each leg's resolved price series, for the basis-band grouping after the loop.
     leg_references = {}
     for leg in proposal["legs"]:
@@ -626,7 +695,7 @@ def lower(proposal, registry, snapshots, references=None):
         # The baseline keeps its provenance: a checker re-reads the price from the same
         # retained response rather than trusting the number the lowering wrote down.
         "baseline": dict(proposal["baseline"], price=exact.format(baseline)),
-        "exposure": {"kind": "linear", "quantity": exact.format(num(proposal["exposure"]["quantity"]))},
+        "exposure": lowered_exposure(proposal["exposure"]),
         "legs": legs,
         "objective": proposal["objective"],
         "objective_valuation_time": proposal["objective_valuation_time"],
