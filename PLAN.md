@@ -325,7 +325,7 @@ endpoint ownership, known ambiguities, status. Instance ids are never in it.
 | `recurring.priceBucket` | Same page; index order **[V]** in three settlements | Same | Computed; protocol-settled. The top bucket has not been seen paying |
 | `template.binaryPrice` | Template text **[V]** | Mapped from `priceDescription` | Computed under `deployer_settles_as_written`; strike owned by neither side. **Reviewed 22 Sep** on those two judgements: 'above' is strict, so a holder of both sides is paid nothing at exactly one price; and the payoff holds only under that assumption, which is **[U]** because `settleFraction` is submitted rather than computed |
 | `template.scalarPrice` | Template text **[V]** | Same | Same assumption. Continuous, so no strike question. No live instance yet |
-| `template.priceTouch` | Template text **[V]** | Same | Bounded (§2), never computed as terminal. **Left draft on purpose**, and the direction question is now settled: the bound does NOT go in `pays_on`. See §2's touch row and ARCHITECTURE §7 |
+| `template.priceTouch` | Template text **[V]** | Same | Bounded (§2), never computed as terminal. The bound is **implemented** (22 Sep) and **dominated by `deployer_settled`**, so it reaches no verdict today — see the `bounded` note below. **Left draft on purpose**: a review is now meaningful, since the bound exists to review. See §2's touch row and ARCHITECTURE §7 |
 | Everything else | — | — | Refused |
 
 **`status` decides whether a family is evaluated at all**, and all three implementations
@@ -335,13 +335,27 @@ agree on it:
   evaluates it.
 - **`bounded`** — it is not. `priceTouch` is path-dependent: whether the price ever
   touched a level is not recoverable from where it ended. §2 gives the bound — the
-  inclusive terminal digital at the target, and only when the touch window covers the
-  valuation time — but no bound is implemented yet, so lowering **refuses**
-  (`UNSUPPORTED_FAMILY`) rather than reaching for the terminal machinery. Evaluating one
-  as terminal would over-credit it at prices it may never have touched.
-  **Nine live instances carry it** on the 18 September catalogue (EVIDENCE §1,
-  re-counted 22 Sep). This line said “no such family exists yet”, which was wrong: the
-  refusal is right, the reason given for it was not.
+  inclusive terminal digital at the target, on the side the reference must travel — and
+  **it is now implemented** (`lower.touch_bound`, 22 Sep): a `bounded` family named in
+  `BOUNDED_FAMILIES` is lowered under its bound, and one that is not is still **refused**
+  (`UNSUPPORTED_FAMILY`), because a bound that does not exist cannot be applied.
+  Evaluating a bounded family as terminal would over-credit it at prices it may never
+  have touched. **Nine live instances carry it** on the 18 September catalogue (EVIDENCE
+  §1, re-counted 22 Sep). This line said “no such family exists yet”, which was wrong:
+  the refusal was right, the reason given for it was not.
+
+  **AND THE BOUND IS CURRENTLY UNREACHABLE — built, correct and dominated.** A zeroing
+  rule beats a bound: `deployer_settled` says the leg may pay nothing at any price, while
+  `price_touch` says it is worth at least the terminal digital, and the LOWER of the two
+  is the one a verdict may rest on. Crediting the bound over a zeroing rule would raise
+  the lower profile on a leg that may pay nothing — the one direction that can turn a
+  failing proposal into a passing one. In the registry as it stands `bounded` and
+  `deployer` **coincide exactly**: the only bounded family is deployer-settled, so the
+  bound reaches no verdict at all. It is pinned that way on purpose, so the day a
+  protocol-settled bounded family appears the arithmetic is already right, and until then
+  nobody reads the touch machinery as doing work it is not doing. `price_touch_lowering`
+  in `oracle/verify.py` holds both halves: the leg is worth its bound when the bound is
+  its only reduction, and worth zero the moment any zeroing rule applies.
 - **`refused`** — the registry has no reading. A **refusal, not a reduction**: a
   reduction still produces a verdict, and there is no verdict to produce about a payoff
   nobody has read. Worst-casing it to zero would answer a question declared
