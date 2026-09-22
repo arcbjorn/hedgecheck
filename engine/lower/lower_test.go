@@ -162,6 +162,14 @@ func referenceMap(t *testing.T) References {
 	if err := json.Unmarshal(raw, &document); err != nil {
 		t.Fatal(err)
 	}
+	// AN UNREVIEWED MAP CARRIES NO MAPPINGS, the same seal the registry uses: the digest
+	// is taken over the document WITHOUT its review block, so a review cannot sign itself
+	// and any edit to a mapping voids it. A mapping nobody reviewed can point a leg at the
+	// objective's OWN series, and then the basis reduction never fires -- measured in the
+	// oracle, that turns a needs_review at -1923.90676 into a passes at -999.90676.
+	if !reviewedMap(t, raw) {
+		t.Fatal("the reference map on disk is not reviewed, so it resolves nothing")
+	}
 	out := References{}
 	for _, m := range document.Mappings {
 		out[ReferenceKey(m.Venue, m.PriceDescription, m.Seconds)] = doc.ReferenceMapping{
@@ -173,6 +181,28 @@ func referenceMap(t *testing.T) References {
 		t.Fatal("the reference map is empty")
 	}
 	return out
+}
+
+// reviewedMap reports whether the map's review block seals its current text. Mirrors
+// canon.semantics_version in the oracle: digest the document with `review` removed, and
+// require review.state == "reviewed" with review.digest equal to that.
+func reviewedMap(t *testing.T, raw []byte) bool {
+	t.Helper()
+	var whole map[string]any
+	if err := json.Unmarshal(raw, &whole); err != nil {
+		t.Fatal(err)
+	}
+	review, _ := whole["review"].(map[string]any)
+	if review == nil || review["state"] != "reviewed" {
+		return false
+	}
+	claimed, _ := review["digest"].(string)
+	delete(whole, "review")
+	truth, err := canon.Digest(whole)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return claimed != "" && claimed == truth
 }
 
 func TestRefusesWithTheSameCode(t *testing.T) {
