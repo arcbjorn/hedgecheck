@@ -138,6 +138,43 @@ func oracleLowered(t *testing.T, proposalPath string) ([]byte, bool) {
 }
 
 // Every refusal code has a fixture, and Go raises exactly the code the oracle does.
+// referenceMap loads the reviewed mapping the refusal fixtures need.
+//
+// Without it a templated leg is refused for having NO mapping, which happens to be the
+// same code -- so the `ambiguous` branch, the one that matters, went untested. The map is
+// data, so the test reads it rather than restating it.
+func referenceMap(t *testing.T) References {
+	t.Helper()
+	raw, err := os.ReadFile("../../references/reference-map.json")
+	if err != nil {
+		t.Skipf("no reference map: %v", err)
+	}
+	var document struct {
+		Mappings []struct {
+			Venue            string `json:"venue"`
+			PriceDescription string `json:"price_description"`
+			Seconds          string `json:"seconds"`
+			State            string `json:"state"`
+			Reference        string `json:"reference"`
+			Why              string `json:"why"`
+		} `json:"mappings"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	out := References{}
+	for _, m := range document.Mappings {
+		out[ReferenceKey(m.Venue, m.PriceDescription, m.Seconds)] = doc.ReferenceMapping{
+			Venue: m.Venue, PriceDescription: m.PriceDescription, Seconds: m.Seconds,
+			State: m.State, Reference: m.Reference, Why: m.Why,
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("the reference map is empty")
+	}
+	return out
+}
+
 func TestRefusesWithTheSameCode(t *testing.T) {
 	matches, _ := filepath.Glob("../../fixtures/refusals/*.json")
 	if len(matches) < 17 {
@@ -145,6 +182,7 @@ func TestRefusesWithTheSameCode(t *testing.T) {
 	}
 	registry := reviewedRegistry(t)
 	snapshots := replaySnapshots(t, "../../fixtures/replay/2026-09-18")
+	references := referenceMap(t)
 	seen := map[string]bool{}
 	for _, path := range matches {
 		raw, err := os.ReadFile(path)
@@ -200,7 +238,7 @@ func TestRefusesWithTheSameCode(t *testing.T) {
 					bytes[digest] = replacement
 				}
 			}
-			_, _, err = Lower(proposal, cases, bytes)
+			_, _, err = Lower(proposal, cases, bytes, references)
 			if err == nil {
 				t.Fatalf("accepted a proposal that must be refused: %s", fixture.Why)
 			}
