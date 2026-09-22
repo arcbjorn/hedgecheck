@@ -145,14 +145,32 @@ def _check_objective(bundle, lowered):
 
 
 def _payoff(lowered, include_reduced):
-    """The combined payoff. With `include_reduced`, no leg is bounded away."""
+    """The combined payoff. With `include_reduced`, no leg is bounded away.
+
+    A BAND reduction is banded, not zeroed. Every other reduction worst-cases its leg to
+    zero; a declared basis bound says more -- the group is worth the infimum of its SUMMED
+    payoff over the band. Zeroing it here would make this refuser reject the very bundles
+    the lowering it checks produces, which is how the difference was found.
+    """
     baseline = exact.parse(lowered["baseline"]["price"])
-    zeroed = {reduction["leg"] for reduction in lowered.get("reductions", [])}
+    reductions = lowered.get("reductions", [])
     premium = sum((O.leg_cost(leg) for leg in lowered["legs"]), F(0))
     parts = [O.linear(exact.parse(lowered["exposure"]["quantity"]), baseline),
              O.cash(-premium - exact.parse(lowered["other_costs"]))]
+
+    banded = set()
+    if not include_reduced:
+        for reduction in reductions:
+            if reduction["rule"] != "basis_band":
+                continue
+            members = set([reduction["leg"]] + list(reduction.get("with", [])))
+            banded |= members
+            group = [O._leg(leg) for leg in lowered["legs"] if leg["id"] in members]
+            parts.append(O.band_infimum(O.total(group), exact.parse(reduction["bound"])))
+    zeroed = {reduction["leg"] for reduction in reductions} - banded
+
     for leg in lowered["legs"]:
-        if include_reduced or leg["id"] not in zeroed:
+        if include_reduced or (leg["id"] not in zeroed and leg["id"] not in banded):
             parts.append(O._leg(leg))
     return O.total(parts)
 
