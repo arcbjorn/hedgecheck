@@ -323,9 +323,9 @@ endpoint ownership, known ambiguities, status. Instance ids are never in it.
 |---|---|---|---|
 | `recurring.priceBinary` | Contract specifications, text retained | `hl:perp:BTC:mark-interp` | Computed; protocol-settled. Inclusivity rests on the text alone |
 | `recurring.priceBucket` | Same page; index order **[V]** in three settlements | Same | Computed; protocol-settled. The top bucket has not been seen paying |
-| `template.binaryPrice` | Template text **[V]** | Mapped from `priceDescription` | Computed under `deployer_settles_as_written`; strike owned by neither side |
+| `template.binaryPrice` | Template text **[V]** | Mapped from `priceDescription` | Computed under `deployer_settles_as_written`; strike owned by neither side. **Reviewed 22 Sep** on those two judgements: 'above' is strict, so a holder of both sides is paid nothing at exactly one price; and the payoff holds only under that assumption, which is **[U]** because `settleFraction` is submitted rather than computed |
 | `template.scalarPrice` | Template text **[V]** | Same | Same assumption. Continuous, so no strike question. No live instance yet |
-| `template.priceTouch` | Template text **[V]** | Same | Bounded (§2), never computed as terminal |
+| `template.priceTouch` | Template text **[V]** | Same | Bounded (§2), never computed as terminal. **Left draft on purpose**: reviewing it changes no verdict, because `status: bounded` refuses the leg until the bound is implemented, and the bound needs the direction read from the BASELINE rather than the entry — which would move the payoff out of the reviewable data. That design question is open |
 | Everything else | — | — | Refused |
 
 **`status` decides whether a family is evaluated at all**, and all three implementations
