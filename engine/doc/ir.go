@@ -83,6 +83,9 @@ type Reduction struct {
 // HasBound reports whether this reduction states the bound it used.
 func (r Reduction) HasBound() bool { return r.hasBound }
 
+// SetBound states the declared basis bound a band reduction used.
+func (r *Reduction) SetBound(bound exact.Q) { r.Bound, r.hasBound = bound, true }
+
 // Capture is how the evidence was gathered, as asserted by whatever gathered it. It
 // cannot be re-derived: the contexts response carries no venue timestamp.
 type Capture struct {
