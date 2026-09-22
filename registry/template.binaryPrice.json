@@ -4,8 +4,11 @@
   "status": "computed",
   "settlement": "deployer",
   "review": {
-    "state": "draft",
-    "drafted_by": "model"
+    "state": "reviewed",
+    "drafted_by": "model",
+    "reviewed_by": "owner",
+    "reviewed_on": "2026-09-22",
+    "digest": "cec0735ba4c16e731496ad2809aff7675e8f42095e4d936067c9f5c5dfed4589"
   },
   "reference": "synthetic",
   "observation": "An n-second TWAP of a free-text price description, ending at the expiry. The description is not a reference: what it denotes is a separate reviewed mapping in references/reference-map.json, keyed by the venue's exact text. This entry states the PAYOFF only.",
