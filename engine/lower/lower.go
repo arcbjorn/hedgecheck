@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,6 +110,8 @@ func Lower(proposal doc.Proposal, registry map[string]doc.Entry, snapshots Snaps
 	}
 
 	legs := []doc.Leg{}
+	// Each leg's resolved price series, for the basis-band grouping after the loop.
+	references := map[string]string{}
 	versions := []string{}
 	reductions := []doc.Reduction{}
 	for _, leg := range proposal.Legs {
@@ -190,6 +193,54 @@ func Lower(proposal doc.Proposal, registry map[string]doc.Entry, snapshots Snaps
 			ID: leg.ID, Kind: "indicator", Size: size, PaysOn: paysOn,
 			Premium: premium, ObservationTime: expiry, Semantics: version,
 		})
+		reference, err := legReference(leg, entry)
+		if err != nil {
+			return doc.IR{}, nil, err
+		}
+		references[leg.ID] = reference
+	}
+
+	// ---- the basis band: legs observed on a reference the objective is not stated on
+	//
+	// GROUPED, never leg by leg. PLAN section 2 states the rule as the infimum of the
+	// GROUP's SUMMED payoff, and the infimum of a sum is not the sum of infima: two legs
+	// whose payoffs cancel have a flat sum that no basis move can hurt, while each alone is
+	// stepped. Reducing them separately invents a loss on a perfectly hedged position.
+	if proposal.ObjectiveReference != "" {
+		declared := map[string]exact.Q{}
+		for _, bound := range proposal.BasisBounds {
+			declared[referenceKey(bound.Between[0], bound.Between[1])] = bound.Bound
+		}
+		groups := map[string][]string{}
+		for _, leg := range proposal.Legs {
+			if references[leg.ID] != proposal.ObjectiveReference {
+				groups[references[leg.ID]] = append(groups[references[leg.ID]], leg.ID)
+			}
+		}
+		foreign := make([]string, 0, len(groups))
+		for reference := range groups {
+			foreign = append(foreign, reference)
+		}
+		sort.Strings(foreign)
+		for _, reference := range foreign {
+			members := groups[reference]
+			sort.Strings(members)
+			reduction := doc.Reduction{Leg: members[0], Tight: false}
+			if len(members) > 1 {
+				reduction.With = members[1:]
+			}
+			bound, known := declared[referenceKey(proposal.ObjectiveReference, reference)]
+			if known {
+				reduction.Rule, reduction.ReasonCode = "basis_band", "BASIS_BAND"
+				reduction.SetBound(bound)
+			} else {
+				// PLAN section 2: "No bound declared: zero". The reference is KNOWN -- it
+				// just cannot be related to the objective's -- so this is a reduction and
+				// not a refusal. Loose: the group is probably worth more than zero.
+				reduction.Rule, reduction.ReasonCode = "basis_unbridged", "BASIS_UNBRIDGED"
+			}
+			reductions = append(reductions, reduction)
+		}
 	}
 
 	ir := doc.IR{
@@ -461,3 +512,41 @@ func short(digest string) string {
 	}
 	return digest
 }
+
+// legReference is the price series a leg is observed on, resolved from its entry.
+//
+// An entry carries a TEMPLATE -- `hl:perp:{underlying}:mark-interp` -- because one reading
+// covers every instance of a family. Each `{name}` is the leg's own term of that name, so
+// the reference is a fact about the leg and is never restated in the proposal.
+//
+// A template naming a term the leg does not carry is a MALFORMED ENTRY, not a leg on a
+// foreign reference: there is no series to name at all.
+func legReference(leg doc.ProposalLeg, entry doc.Entry) (string, error) {
+	var failure error
+	out := placeholderPattern.ReplaceAllStringFunc(entry.Reference, func(match string) string {
+		name := match[1 : len(match)-1]
+		value, ok := leg.Terms[name].(string)
+		if !ok {
+			failure = refuse("UNSUPPORTED_FAMILY",
+				"%s: the entry's reference names {%s}, which the leg's terms do not carry as a single value",
+				leg.ID, name)
+			return match
+		}
+		return value
+	})
+	if failure != nil {
+		return "", failure
+	}
+	return out, nil
+}
+
+// referenceKey names an unordered pair of references, so a declared bound is found
+// whichever way round the proposal wrote it.
+func referenceKey(a, b string) string {
+	if a > b {
+		a, b = b, a
+	}
+	return a + "\x00" + b
+}
+
+var placeholderPattern = regexp.MustCompile(`\{[a-z_]+\}`)
