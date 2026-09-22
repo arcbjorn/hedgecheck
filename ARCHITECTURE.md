@@ -453,7 +453,7 @@ rests on the harness.
 
 ```text
 ARCHITECTURE.md  PLAN.md  EVIDENCE.md  Makefile
-schema/     ten draft schemas. The only thing implementations share
+schema/     11 draft schemas. The only thing implementations share
 fixtures/   golden/   lowered proposal and its generated expected result
             vectors/  numbers and canonical JSON, generated from hand-written cases
             replay/   retained responses, their request records, and the real
@@ -462,6 +462,8 @@ fixtures/   golden/   lowered proposal and its generated expected result
             generated/ ir/  320 lowered proposals and results  ── DERIVED, gitignored
             refusals/       one proposal per refusal code      ── DERIVED, gitignored
             bundles/        7 good and 17 corrupted bundles    ── DERIVED, gitignored
+            rejected/       one document per thing a schema
+                            must refuse, across 7 schemas      ── DERIVED, gitignored
 registry/   semantics entries as data: recurring.priceBinary, recurring.priceBucket,
             template.binaryPrice and template.priceTouch as model drafts
 references/ what a venue's free-text price description denotes, versioned separately
@@ -559,9 +561,11 @@ an entry; it never runs inside lowering, evaluation or checking.
 - **A document field:** the schema, a mutation that must be refused, and
   `--write` for any generated fixture — never a hand edit.
 - **A derived corpus is not in git.** `fixtures/generated/ir` (320 proposals, 640 files),
-  `fixtures/refusals` and `fixtures/bundles` (184 files) are written by
-  `tools/make_ir_cases.py`, `tools/make_refusals.py` and `tools/make_corruptions.py`,
-  and are read by all three implementations — Python writes
+  `fixtures/refusals`, `fixtures/bundles` (184 files) and `fixtures/rejected` (98 files)
+  are written by `tools/make_ir_cases.py`, `tools/make_refusals.py`,
+  `tools/make_corruptions.py` and `tools/make_rejected.py`, and are read by all three
+  implementations. What IS tracked is the retained EVIDENCE — `golden`, `kernel`, `replay`,
+  `testnet`, `vectors` — which no generator can reproduce — Python writes
   them, Go and the TypeScript checker read them to prove the three agree byte for byte.
   They are `.gitignore`d and built by `make generated`, which every target that reads
   them depends on. Their gate is therefore **reproducibility, not staleness**: "does the
@@ -570,7 +574,9 @@ an entry; it never runs inside lowering, evaluation or checking.
   The assertions that carry the weight are elsewhere and unchanged: each refusal fixture's
   actual code must equal the one it declares, every code `lower.py` raises must have a
   fixture, each bundle must be accepted or refused with exactly the class its manifest
-  names, and Go must reproduce every generated result exactly. A Go suite that finds the
+  names, every rejected document must be refused by the Python validator AND by the Go
+  decoder — which must EXIST for every schema present, the check that forced
+  `doc.ReadSynthesis` into being — and Go must reproduce every generated result exactly. A Go suite that finds the
   corpus missing fails naming `make generated`; it never passes on an empty corpus.
 
 ---
