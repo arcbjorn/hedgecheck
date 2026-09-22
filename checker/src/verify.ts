@@ -20,6 +20,7 @@ import {
 } from "./exact.ts";
 import {
   askCost,
+  bandInfimumFn,
   below,
   cash,
   finite,
@@ -302,6 +303,8 @@ interface RebuiltLeg {
 
 interface Rebuilt {
   readonly legs: RebuiltLeg[];
+  /** Legs grouped by a foreign price series, with the bound declared for it if any. */
+  readonly bandGroups: { leg: string; members: string[]; bound: Rational | undefined }[];
   readonly baseline: Rational;
   readonly quantity: Rational;
   readonly domainLower: Rational;
@@ -346,6 +349,9 @@ function relower(evidence: Evidence): Rebuilt {
   }
 
   const legs: RebuiltLeg[] = [];
+  /** Each leg's resolved price series, for the basis-band grouping after the loop. */
+  const references = new Map<string, string>();
+  const bandGroups: { leg: string; members: string[]; bound: Rational | undefined }[] = [];
   let premium = ZERO;
   for (const rawLeg of list(proposal["legs"], "$proposal.legs")) {
     const leg = object(rawLeg, "$proposal.legs[]");
@@ -396,10 +402,46 @@ function relower(evidence: Evidence): Rebuilt {
       id, parts, size, premium: total, observationTime, reduced, reductionRule: rule, tight, levels, coin,
       family, version: entry.version, reductionRules: rules,
     });
+    references.set(id, legReference(entry.value, terms, id, family));
+  }
+
+  // ---- the basis band, derived on GROUPS after every leg is known
+  //
+  // A band reduction is the infimum of the group's SUMMED payoff, so it cannot be derived
+  // inside the per-leg loop above. Grouped by resolved reference, exactly as lowering
+  // does: the infimum of a sum is not the sum of infima, and two legs whose payoffs cancel
+  // have a flat sum that no basis move can hurt.
+  const objectiveReference = proposal["objective_reference"];
+  if (typeof objectiveReference === "string") {
+    const declared = new Map<string, Rational>();
+    for (const raw of list(proposal["basis_bounds"] ?? [], "$proposal.basis_bounds")) {
+      const item = object(raw, "$proposal.basis_bounds[]");
+      const pair = list(item["between"], "$proposal.basis_bounds[].between");
+      const left = text(pair[0], "$proposal.basis_bounds[].between[0]");
+      const right = text(pair[1], "$proposal.basis_bounds[].between[1]");
+      declared.set([left, right].sort().join("\u0000"), number(item["bound"], "$proposal.basis_bounds[].bound"));
+    }
+    const groups = new Map<string, string[]>();
+    for (const [id, reference] of references) {
+      if (reference === objectiveReference) continue;
+      const members = groups.get(reference) ?? [];
+      members.push(id);
+      groups.set(reference, members);
+    }
+    for (const reference of [...groups.keys()].sort()) {
+      const members = (groups.get(reference) as string[]).slice().sort();
+      const bound = declared.get([objectiveReference, reference].sort().join("\u0000"));
+      const head = members[0] as string;
+      const leg = legs.find((each) => each.id === head) as RebuiltLeg;
+      // Loose either way: a group on another series is probably worth more than its bound.
+      leg.reductionRules.push({ rule: bound === undefined ? "basis_unbridged" : "basis_band", tight: false });
+      bandGroups.push({ leg: head, members, bound });
+    }
   }
 
   return {
     legs,
+    bandGroups,
     baseline: claimedBaseline,
     quantity,
     domainLower,
@@ -408,6 +450,36 @@ function relower(evidence: Evidence): Rebuilt {
     premium,
     valuationTime,
   };
+}
+
+/**
+ * The price series a leg is observed on, resolved from its entry's template.
+ *
+ * A registry entry carries a TEMPLATE -- `hl:perp:{underlying}:mark-interp` -- because one
+ * reading covers every instance of a family. Each `{name}` is the leg's own term of that
+ * name, so the reference is a fact about the leg and is never restated in the proposal.
+ *
+ * A template naming a term the leg does not carry is a MALFORMED ENTRY, not a leg on a
+ * foreign reference: there is no series to name at all.
+ */
+function legReference(
+  entry: Record<string, Value>,
+  terms: Record<string, Value>,
+  id: string,
+  family: string,
+): string {
+  const template = text(entry["reference"], `$registry.${family}.reference`);
+  return template.replace(/\{([a-z_]+)\}/g, (_match, name: string) => {
+    const value = terms[name];
+    if (typeof value !== "string") {
+      refuse(
+        "SEMANTICS_PIN",
+        `$proposal.legs.${id}.terms.${name}`,
+        `the entry's reference names {${name}}, which the leg's terms do not carry as a single value`,
+      );
+    }
+    return value;
+  });
 }
 
 /** The instance the leg names really is the one the catalogue describes. */
@@ -718,8 +790,24 @@ function evaluateAndCompare(evidence: Evidence, rebuilt: Rebuilt): void {
   const lowerParts: Fn[] = [linear(rebuilt.quantity, rebuilt.baseline), cash(neg(add(rebuilt.premium, rebuilt.otherCosts)))];
   const upperParts: Fn[] = [...lowerParts];
   let upperCeiling = ZERO;
+  // A BANDED group is banded, not zeroed: the bound says more than "worth nothing".
+  // Grouped, because the infimum of a sum is not the sum of infima.
+  const bandedLegs = new Set<string>();
+  for (const group of rebuilt.bandGroups) {
+    if (group.bound === undefined) continue;
+    for (const member of group.members) bandedLegs.add(member);
+    const parts: Fn[] = [];
+    for (const leg of rebuilt.legs) {
+      if (group.members.includes(leg.id)) parts.push(...leg.parts);
+    }
+    lowerParts.push(bandInfimumFn(sum(parts), group.bound));
+    // The best a banded group can be worth is its UNBANDED payoff, so the upper profile
+    // takes the pieces themselves rather than crediting the full size.
+    upperParts.push(...parts);
+  }
   for (const leg of rebuilt.legs) {
-    if (leg.reduced) {
+    if (bandedLegs.has(leg.id)) continue;
+    if (leg.reduced || leg.reductionRules.length > 0) {
       // The upper profile credits a reduced leg with its full size: a long, fully
       // collateralized token pays at most that.
       upperCeiling = add(upperCeiling, leg.size);
@@ -956,7 +1044,10 @@ function intervalOf(raw: Record<string, Value>): Interval {
 
 function compareVerdict(evidence: Evidence, rebuilt: Rebuilt, lowerFn: Fn, upperFn: Fn): void {
   const clauses = clausesOf(evidence);
-  const anyLoose = rebuilt.legs.some((leg) => leg.reduced && !leg.tight);
+  // From the RULES, not the `reduced` flag: a band reduction is pushed on after the
+  // per-leg loop sets that flag, so filtering on it missed every band and the checker
+  // derived `fails` where a loose rule forbids anything but `needs_review`.
+  const anyLoose = rebuilt.legs.some((leg) => leg.reductionRules.some((each) => !each.tight));
 
   let broken = false;
   for (const clause of clauses) {
@@ -965,9 +1056,15 @@ function compareVerdict(evidence: Evidence, rebuilt: Rebuilt, lowerFn: Fn, upper
     if (below(lowerFn, clause.minPnl, lower, upper).length > 0) broken = true;
   }
 
-  // ARCHITECTURE section 4, the two-profile table:
+  // ARCHITECTURE section 4, the two-profile table. Every row of it is conditioned on
+  // "where the violation lives", so with NO violation no row applies and the verdict is
+  // `passes` -- a loose rule downgrades a failure to undecided, it does not manufacture
+  // doubt where nothing broke. This read `anyLoose ? "needs_review" : "passes"` on the
+  // unbroken branch, which demanded review of a proposal that breaches nothing. Exposed
+  // by the first bundle with a loose reduction and no failing interval: a banded group,
+  // whose bound is precisely what keeps it inside the cap.
   let expected: string;
-  if (!broken) expected = anyLoose ? "needs_review" : "passes";
+  if (!broken) expected = "passes";
   else expected = anyLoose ? "needs_review" : "fails";
 
   const claimed = evidence.result["model_result"];
@@ -1032,7 +1129,11 @@ function compareIntervals(
 
 function compareReductions(evidence: Evidence, rebuilt: Rebuilt): void {
   const stated = list(evidence.result["reductions"] ?? [], "$result.reductions");
-  const mine = rebuilt.legs.filter((leg) => leg.reduced);
+  // Derived from the RULES, not from the `reduced` flag: a band reduction is pushed onto
+  // a leg's rules after the per-leg loop has set that flag, so filtering on it dropped
+  // every banded leg and the checker derived zero reductions for a bundle that declares
+  // one. Found by the first bundle that had a band at all.
+  const mine = rebuilt.legs.filter((leg) => leg.reductionRules.length > 0);
 
   // AN UNDECLARED `unreviewed_family` IS NAMED FOR WHAT IT IS.
   //
