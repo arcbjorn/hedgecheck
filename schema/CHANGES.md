@@ -169,6 +169,48 @@ error is invisible in the direction the invariants check.
 
 `schema_version` stays `"1"`: the change only adds an optional field.
 
+## Forced by the reference map (T4)
+
+**The forcing case.** T4 needs a mapping from a venue's free-text `priceDescription` to a
+canonical reference id. Writing the first one against the real 18 September catalogue found
+that `defs.schema.json`'s `reference` pattern **refuses two of the four ids PLAN section 6
+lists as canonical**:
+
+    $.mappings[6].reference: 'hl:perp:BTC:trade-twap:90s' does not match
+      ^(?:synthetic|[a-z0-9]+(?::[A-Za-z0-9/._-]+){2,3})$
+
+The format is `source:series:statistic[:window]`, and PLAN section 6 names
+`hl:perp:BTC:mark-twap:60s` and `hl:perp:BTC:trade-twap:90s`. There the series is itself
+two parts (`perp:BTC`), so a windowed id has **four** segments after the source. The
+pattern allowed three. It has always disagreed with that document, and nothing caught it
+because no fixture used a windowed `hl:` id: `hl:perp:BTC:mark-interp` has three, and
+`pyth:BTC/USD:price-twap:90s` has three because the pair is one segment.
+
+- **`defs.reference` widens from `{2,3}` to `{2,4}` segments.** Additive: every id valid
+  before is valid now. `hl:perp` is still refused, so the lower bound still bites. Both Go
+  patterns (`refPattern` and `refTemplatePattern`) were widened to match, or the
+  implementations would disagree about the same string.
+- **`reference-map.schema.json` is added**, the tenth schema. A mapping states what a
+  venue's exact text denotes, keyed by `(venue, price_description, seconds)`.
+
+**Why a separate schema rather than a field on a registry entry.** A registry entry is one
+reviewed reading of a family's **payoff**; `recurring.priceBinary` pays
+`indicator(S >= target_price)` and does not mention the reference at all. A mapping says
+which `S`. Bundling them would put the mapping inside `semantics_version`, so every new
+market's description would invalidate every payoff review that shared its family — a
+review treadmill for a claim the payoff does not depend on. Separately versioned, a
+mapping changes without touching a single payoff review.
+
+**Three states, because a mapping is not always possible.** `interpreted` is the owner's
+reading and surfaces in every result resting on it; `confirmed` means the deployer
+confirmed it in writing and `sources` carries that writing; `ambiguous` is a description
+that cannot be mapped at all, which lowering refuses rather than guessing. On the 18
+September catalogue **6 of 11** descriptions are ambiguous, covering **61 of 78** instances —
+so the ambiguous state is the common case, not the exotic one.
+
+`schema_version` stays `"1"` on both: the `defs` change is additive, and a new schema
+carries its own version from the start.
+
 ## Not changed, and why
 
 - **`schema_version` stays `"1"`.** Every change above is additive: no field was removed, no field became required, no existing value became invalid. A document valid at `062a245` is valid now.
