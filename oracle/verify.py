@@ -295,6 +295,7 @@ def main():
                 checked_sizes += 1
         print(f"size windows: {checked_sizes} reported sizes verified against the lower profile")
 
+    price_touch_bound()
     reference_map()
     basis_band()
     replay()
@@ -347,6 +348,58 @@ BETTER = {
 # worth nothing then, its premium still counts, so P&L(S) = 0.1*(S - 77631.4) - 160.76676.
 HORIZON = {"pieces": [("0.1", "-7923.90676")], "fails_on": ("60000", True, "69239.0676", False),
            "worst": {"pnl": "-1923.90676", "attained": True, "price": "60000"}}
+
+
+def price_touch_bound():
+    """The priceTouch bound never exceeds the payoff it bounds.
+
+    PLAN section 2: lower-bound a touch market by the INCLUSIVE terminal digital at the
+    target, in the direction the reference must travel to reach it. A terminal observation at
+    or through the target implies a touch, so the bound can only understate -- but "can only
+    understate" is the whole claim, and a path that touched and came back is exactly where a
+    wrong bound would over-credit. Checked by brute force over both directions.
+
+    The bound is NOT implemented in lowering, and `template.priceTouch` carries
+    `status: bounded` so a leg on it is refused. This pins the arithmetic the bound will use
+    when it is, so the claim in that entry's evidence is verified rather than asserted.
+    """
+    target, size = F(100), F(1000)
+    rise = O.indicator(size, lower=target, lower_inclusive=True)
+    fall = O.indicator(size, upper=target, upper_inclusive=True)
+
+    # "Equals or crosses" pays AT the target, in either direction. `digital_below` is
+    # exclusive there and would have been the wrong primitive for a falling touch.
+    check(rise(target) == size and fall(target) == size,
+          "priceTouch: the bound pays at the target itself, because the text says 'equals or crosses'")
+    check(rise(target + 1) == size and rise(target - 1) == 0, "priceTouch: a rising touch pays at or above")
+    check(fall(target - 1) == size and fall(target + 1) == 0, "priceTouch: a falling touch pays at or below")
+
+    # Brute force: the bound may never exceed the true payoff on any path.
+    state = 20260922
+    def step():
+        nonlocal state
+        state = (state * 1103515245 + 12345) % (2 ** 31)
+        return state
+    violations, touched_and_returned = 0, 0
+    for _ in range(4000):
+        start = [80, 90, 95, 105, 110, 120][step() % 6]
+        path, price = [start], start
+        for _ in range(6):
+            price = max(1, price + [-12, -6, -1, 0, 1, 6, 12][step() % 7])
+            path.append(price)
+        rising = start < 100
+        did_touch = any((p >= 100) if rising else (p <= 100) for p in path)
+        terminal = path[-1]
+        bounded = (terminal >= 100) if rising else (terminal <= 100)
+        if bounded and not did_touch:
+            violations += 1
+        if did_touch and not bounded:
+            touched_and_returned += 1
+    check(violations == 0, f"priceTouch: the bound exceeded the true payoff on {violations} paths")
+    # And the bound is genuinely LOOSE: paths that touched and came back are why it is a
+    # bound rather than the payoff. Without any, the check above would prove nothing.
+    check(touched_and_returned > 0,
+          "priceTouch: no path touched and returned, so the corpus cannot show the bound is strict")
 
 
 def reference_map():
