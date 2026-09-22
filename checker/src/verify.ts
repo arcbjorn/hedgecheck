@@ -41,6 +41,16 @@ import {
 } from "./pwa.ts";
 import { parseVenue, quantityText, type VenueValue, at as venueAt } from "./venue.ts";
 
+// A synthesis answer is a different document asking a different question, so it has its own
+// checker -- re-exported here so a consumer reaches both through one door.
+export {
+  rows as synthesisRows,
+  type SynthesisOutcome,
+  type SynthesisRefusal,
+  type SynthesisRefusalClass,
+  verifySynthesis,
+} from "./synthesis.ts";
+
 /** The closed list. A fault that fits none of these is ENGINE_DISAGREES. */
 export type RefusalClass =
   | "SNAPSHOT_BYTES"
