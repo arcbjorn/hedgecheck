@@ -176,9 +176,13 @@ func referenceMap(t *testing.T) References {
 }
 
 func TestRefusesWithTheSameCode(t *testing.T) {
+	// The fixtures are DERIVED and are not in git: `make generated` writes them, or
+	// `python3 tools/make_refusals.py`. Zero of them is a missing corpus, not a passing
+	// test, so this fails loudly rather than verifying nothing.
 	matches, _ := filepath.Glob("../../fixtures/refusals/*.json")
 	if len(matches) < 17 {
-		t.Fatalf("only %d refusal fixtures; every code lowering can raise needs one", len(matches))
+		t.Fatalf("only %d refusal fixtures; every code lowering can raise needs one. "+
+			"They are generated, not committed: run `make generated`", len(matches))
 	}
 	registry := reviewedRegistry(t)
 	snapshots := replaySnapshots(t, "../../fixtures/replay/2026-09-18")
