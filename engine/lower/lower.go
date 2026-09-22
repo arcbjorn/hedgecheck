@@ -94,6 +94,17 @@ func (s Snapshots) cited(digest, what string) (any, error) {
 	return snapshot.value, nil
 }
 
+// assumptions is the closed vocabulary, mirroring oracle/lower.py's ASSUMPTIONS. Each value
+// says what declaring it asserts, because a name a reader cannot interpret is no better than
+// an invented one. `common_reference` is a NOTE and not a gate: it does not switch the basis
+// rule off, because that reduction rests on the RESOLVED references rather than on an
+// assertion about them.
+var assumptions = map[string]string{
+	"zero_base_fee":               "the venue charges no base fee on an outcome trade",
+	"deployer_settles_as_written": "the deployer settles as the template is written",
+	"common_reference":            "the holder believes every leg is observed on the objective's series",
+}
+
 // References maps a venue's exact price description to what it denotes. The key is
 // (venue, price_description, seconds), spacing included.
 type References map[[3]string]doc.ReferenceMapping
@@ -115,6 +126,22 @@ func Lower(proposal doc.Proposal, registry map[string]doc.Entry, snapshots Snaps
 	}
 	if proposal.SchemaVersion != "1" {
 		return doc.IR{}, nil, refuse("UNSUPPORTED_SCHEMA", "proposal schema_version %q", proposal.SchemaVersion)
+	}
+	// THE ASSUMPTION VOCABULARY IS CLOSED, and mirrors oracle/lower.py's `ASSUMPTIONS`.
+	//
+	// An assumption is carried into the result and shown to a reader, who relies on what it
+	// MEANS. An invented slug means nothing, so it is refused rather than displayed beside the
+	// real ones with equal standing -- which is what happened until 22 Sep, on both sides: the
+	// schema types `assumptions` as any slug, so a proposal declaring `nothing_can_go_wrong`
+	// validated, lowered and appeared in the result's own list. It also catches the likelier
+	// fault, a near-miss typo: `zero_base_fees` is refused where it used to pass silently and
+	// then fail the `zero_base_fee` requirement with a confusing message.
+	for _, declared := range proposal.Assumptions {
+		if _, known := assumptions[declared]; !known {
+			return doc.IR{}, nil, refuse("ASSUMPTION_UNKNOWN",
+				"%q is not an assumption this system defines, so it means nothing to a reader",
+				declared)
+		}
 	}
 	if !contains(proposal.Assumptions, "zero_base_fee") {
 		return doc.IR{}, nil, refuse("ASSUMPTION_REQUIRED",
