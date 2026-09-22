@@ -1,7 +1,7 @@
 # One command runs everything: `make check`. Every target is offline and needs no install step.
 # Requires python3, go, node (>= 23.6, which runs TypeScript natively) and deno (type-check only).
 
-.PHONY: check bundlecheck vectors bundles kernel rejected ircases refusals schema oracle engine checker consumer cross clean
+.PHONY: check bundlecheck vectors bundles kernel rejected ircases generated refusals schema oracle engine checker consumer cross clean
 
 check: vectors bundlecheck bundles kernel rejected ircases refusals schema oracle engine checker consumer cross clean
 	@echo "all checks passed"
@@ -26,6 +26,15 @@ rejected:
 ircases:
 	@python3 tools/make_ir_cases.py --check
 
+# The generated corpus is Python's OUTPUT and Go's INPUT: `engine/evaluate`, `engine/lower`
+# and `engine/canon` read it to prove the two implementations agree byte for byte. It is
+# gitignored -- 640 files of derived data -- so a fresh clone has to produce it before any
+# Go test can compare against it. This target does that and nothing else; `ircases` above
+# is the staleness GATE, which is a different question and belongs in `check`.
+generated:
+	@test -d fixtures/generated/ir || python3 tools/make_ir_cases.py >/dev/null
+	@test -d fixtures/refusals || python3 tools/make_refusals.py >/dev/null
+
 # One proposal per refusal code lowering can raise, so both sides refuse alike.
 refusals:
 	@python3 tools/make_refusals.py --check
@@ -38,10 +47,10 @@ schema:
 	@python3 tools/validate.py
 
 # Includes the guard on the example result printed in PLAN.md.
-oracle:
+oracle: generated
 	@python3 oracle/verify.py
 
-engine:
+engine: generated
 	@cd engine && test -z "$$(gofmt -l .)" || { echo "gofmt: unformatted files"; exit 1; }
 	@cd engine && go vet ./... && go test -race -count=1 ./...
 
@@ -49,7 +58,7 @@ engine:
 bundlecheck:
 	@python3 tools/build_checker.py --check
 
-checker:
+checker: generated
 	@cd checker && deno check --quiet src/*.ts
 	@cd checker && deno check --quiet --node-modules-dir=none test/*.ts
 	@cd checker && node --test "test/*.test.ts" > .test.log 2>&1; status=$$?; grep -E "^(ℹ (tests|pass|fail)|✖)" .test.log; rm -f .test.log; exit $$status
