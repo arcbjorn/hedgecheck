@@ -93,6 +93,38 @@ Every one carries the template metadata "This market must refer to the price of
 a Hyperliquid perp." Fifteen name Pyth. Return `AMBIGUOUS_RULES` or an explicit
 assumption; never resolve it silently.
 
+**[V] The table above is a SAMPLE, not the distribution** (re-counted from the same
+retained `outcome-meta.json`, 22 Sep). It lists 23 of **78** price-described outcomes.
+The full count, by template and exact `priceDescription`:
+
+| Template | `priceDescription` | TWAP | Instances |
+|---|---|---:|---:|
+| `binaryPrice` | `1-minute candle` | 300 s | **18** |
+| `binaryPrice` | `the Pyth BTC/USD price` | 90 s | 15 |
+| `binaryPrice` | `the Pyth US100 index price` | 90 s | 9 |
+| `binaryPrice` | `the Pyth US500 index price` | 90 s | 9 |
+| `binaryPrice` | `the Pyth HYPE/USD price` | 90 s | 9 |
+| `priceTouch` | `BTC-USDC mark` | 1 s | 7 |
+| `binaryPrice` | `the Hyperliquid BTC perp trade` | 90 s | 6 |
+| `priceTouch` | `HYPE-USDC perp mark` | 1 s, 3 s | 2 |
+| `binaryPrice` | `BTC-USDC mark` · `BTC-USDC perp mark` · `xyz:CL` | 1 s, 60 s, 1 s | 1 each |
+
+Three things the earlier table hid, each of which changes what the registry must do:
+
+- **The most common description names no venue at all.** `1-minute candle`, 18
+  instances, is the single largest group and says neither a source nor a series. It
+  cannot be mapped to `source:series:statistic[:window]` by any reading, so it is the
+  clearest `AMBIGUOUS_RULES` case rather than an edge one.
+- **The Pyth conflict is 42 instances, not 15.** US100, US500 and HYPE/USD are the same
+  contradiction as BTC/USD: a Pyth series under a template restricted to "the price of a
+  Hyperliquid perp".
+- **`priceTouch` HAS live instances — 9 of them.** PLAN section 6 lists the family as
+  "Bounded (§2), never computed as terminal", which reads as forward-looking; it is not.
+  Nine outcomes on the 18 September catalogue carry it.
+
+`xyz:CL` is retained as written. A description that is itself a bare identifier is
+evidence about how little the field is constrained.
+
 **[V] Structure** — text of the [HIP-4](https://hyperliquid.gitbook.io/hyperliquid-docs/hyperliquid-improvement-proposals-hips/hip-4-outcome-markets) page, retained 18 Sep.
 Fully collateralized, two-sided, no leverage, no liquidation — though the page
 also says outcomes compose "with other primitives such as portfolio margin",
