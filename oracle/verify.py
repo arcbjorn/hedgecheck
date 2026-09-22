@@ -370,8 +370,23 @@ def reference_map():
     # The three states, on real instances rather than constructed ones.
     leg = {"id": "probe"}
     by_id = {str(o["outcome"]): o for o in outcomes}
-    check(lower.catalogue_reference(leg, by_id["2494"], index) is None,
-          "reference map: `1-minute candle` names no series, so it resolves to nothing")
+    # REFUSED, not resolved to nothing: returning None would fall back to the entry's own
+    # reference, so a leg nobody can map would be treated as sharing the objective's series.
+    try:
+        lower.catalogue_reference(leg, by_id["2494"], index)
+        check(False, "reference map: `1-minute candle` was resolved instead of refused")
+    except lower.Refused as refusal:
+        check(refusal.code == "AMBIGUOUS_RULES",
+              f"reference map: `1-minute candle` refused as {refusal.code}, want AMBIGUOUS_RULES")
+    # And a description absent from the map is refused the same way, not silently allowed.
+    try:
+        lower.catalogue_reference(leg, dict(by_id["2494"],
+                                            description="perp:BTC|priceDescription:nothing maps this"
+                                                        "|seconds:7|threshold:1|time:20261001-0000"), index)
+        check(False, "reference map: an unmapped description was resolved instead of refused")
+    except lower.Refused as refusal:
+        check(refusal.code == "AMBIGUOUS_RULES",
+              f"reference map: an unmapped description refused as {refusal.code}")
     check(lower.catalogue_reference(leg, by_id["3971"], index) is None,
           "reference map: a canonical instance describes no series, so the entry's template governs")
     check(lower.catalogue_reference(leg, by_id["1209"], index) == "hl:perp:HYPE:mark-twap:1s",
@@ -556,7 +571,12 @@ def replay():
         copy["review"] = {"state": "draft", "drafted_by": "model"}
         drafted[family] = copy
 
-    on_disk_reviewed = all(canon.reviewed(entry) for entry in registry.values())
+    # The entries these PROPOSALS use, not every entry on disk. A draft for a family no
+    # replay proposal names -- a newly drafted template family, say -- says nothing about
+    # whether these two proposals are reduced, and treating it as if it did sent the whole
+    # replay down the draft branch.
+    used = {leg["family"] for proposal in proposals.values() for leg in proposal["legs"]}
+    on_disk_reviewed = all(canon.reviewed(registry[family]) for family in used)
     for name, proposal in proposals.items():
         lowered, _ = lower.lower(proposal, registry, snapshots)
         rules = [r["rule"] for r in lowered.get("reductions", [])]
