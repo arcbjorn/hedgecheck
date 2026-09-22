@@ -213,7 +213,22 @@ def leg_reference(leg, entry):
 
 
 def reference_index(document):
-    """A reference map, keyed for lookup. The caller reads the file; this module does no I/O."""
+    """A reference map, keyed for lookup. The caller reads the file; this module does no I/O.
+
+    AN UNREVIEWED DOCUMENT CARRIES NO MAPPINGS. The same seal the registry uses:
+    `semantics_version` digests the document WITHOUT its `review` key, so a review cannot
+    sign itself and any edit to a mapping voids it. Until 22 Sep nothing checked it here --
+    every mapping was honoured whatever the document said about itself, while
+    `catalogue_reference` refused with "no REVIEWED mapping", a word the code did not mean.
+
+    Returning an empty index rather than raising keeps the refusal in one place: a templated
+    leg then finds no key and `catalogue_reference` refuses it as `AMBIGUOUS_RULES`, which
+    is what an unestablished reference already means. Falling back to the entry's own
+    template instead would treat a leg nobody mapped as sharing the objective's series --
+    measured, that flips a `needs_review` at -1923.90676 into a `passes` at -999.90676.
+    """
+    if not canon.reviewed(document or {}):
+        return {}
     return {(m["venue"], m["price_description"], m["seconds"]): m
             for m in (document or {}).get("mappings", [])}
 
