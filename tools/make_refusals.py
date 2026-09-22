@@ -16,6 +16,7 @@ never evaluated at all.
 import copy
 from hashlib import sha256
 import json
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -252,7 +253,18 @@ def main():
             expected = next(e for n, e, *_ in cases() if n == name)
             print(f"  {name}: expected {expected}, the oracle raised {got}", file=sys.stderr)
         return 1
-    print(f"{written} refusal fixtures, one per code lowering can raise")
+    # "One per code" was a LABEL, not an assertion: the two sets happened to match and
+    # nothing checked it, so a code added without a fixture would have been reachable in
+    # principle and untested in fact -- which is what this whole file exists to prevent.
+    raised = set(re.findall(r'_refuse\("([A-Z_]+)"', (PROJECT / "oracle" / "lower.py").read_text()))
+    covered = set(produced.values())
+    if raised != covered:
+        for code in sorted(raised - covered):
+            print(f"  {code} can be raised by lowering and has no fixture", file=sys.stderr)
+        for code in sorted(covered - raised):
+            print(f"  {code} has a fixture and lowering cannot raise it", file=sys.stderr)
+        return 1
+    print(f"{written} refusal fixtures, one per code lowering can raise ({len(raised)} codes)")
     return 0
 
 
