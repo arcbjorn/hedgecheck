@@ -19,7 +19,7 @@ kernel:
 	@python3 tools/make_kernel_cases.py --check
 
 # Documents every schema must refuse, as files so every language can use them.
-rejected:
+rejected: generated
 	@python3 tools/make_rejected.py --check
 
 # Whole results on generated proposals: the oracle's answers, which Go must reproduce.
@@ -34,6 +34,7 @@ ircases:
 generated:
 	@test -d fixtures/generated/ir || python3 tools/make_ir_cases.py >/dev/null
 	@test -d fixtures/refusals || python3 tools/make_refusals.py >/dev/null
+	@test -d fixtures/bundles || python3 tools/make_corruptions.py >/dev/null
 
 # One proposal per refusal code lowering can raise, so both sides refuse alike.
 refusals:
@@ -70,7 +71,7 @@ checker: generated
 # stops asserting what it means to assert is the failure this project keeps meeting.
 # `unrepresentable.ts` is excluded because it is DELIBERATELY uncompilable --
 # typegate.test.ts runs deno over it and fails if it SUCCEEDS.
-consumer:
+consumer: generated
 	@cd consumer && deno check --quiet --node-modules-dir=none src/*.ts
 	@cd consumer && deno check --quiet --node-modules-dir=none $$(ls test/*.ts | grep -v unrepresentable.ts)
 	@cd consumer && node --test "test/*.test.ts" > .test.log 2>&1; status=$$?; grep -E "^(ℹ (tests|pass|fail)|✖)" .test.log; \
