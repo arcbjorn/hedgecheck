@@ -297,6 +297,7 @@ def main():
 
     payoff_is_data()
     price_touch_bound()
+    price_touch_lowering()
     reference_map()
     basis_band()
     replay()
@@ -500,6 +501,128 @@ def reference_map():
 def O_terms(outcome):
     """The catalogue's `key:value|...` description, as a dict."""
     return dict(part.split(":", 1) for part in outcome.get("description", "").split("|") if ":" in part)
+
+
+def price_touch_lowering():
+    """A touch leg is lowered under its bound: right direction, kept, and loose.
+
+    `price_touch_bound` above pins the arithmetic. This pins the PLUMBING, which is where
+    the bound can be silently lost: lowering must pick the direction from the baseline,
+    and the evaluator must APPLY the bound rather than zero the leg the way every other
+    reduction is zeroed. Both were wrong before this guard existed.
+
+    Outcome 1209 on the 18 September catalogue is the instance, unmodified:
+      perp:HYPE|priceDescription:HYPE-USDC perp mark |seconds:1|target:100|time:20261001-0000
+    """
+    import lower
+
+    replay_dir = PROJECT / "fixtures" / "replay" / "2026-09-18"
+    entry = json.loads((PROJECT / "registry" / "template.priceTouch.json").read_text())
+    entry["review"] = {"state": "reviewed", "drafted_by": "model", "reviewed_by": "fixture",
+                       "reviewed_on": "2026-09-22", "digest": canon.semantics_version(entry)}
+    base = canon.loads((replay_dir / "bucket0.proposal.json").read_bytes())
+    snapshots = {}
+    for stem in ("book-bucket0-3971-yes", "meta-and-asset-ctxs", "outcome-meta"):
+        digest, document = lower.snapshot((replay_dir / f"{stem}.json").read_bytes())
+        snapshots[digest] = document
+
+    target, size = F(100), F(924)
+
+    def lowered_for(baseline_price, keep=True):
+        p = json.loads(json.dumps(base))
+        p["baseline"] = {"kind": "explicit", "price": str(baseline_price), "label": "fixture"}
+        p["assumptions"] = sorted(set(p["assumptions"]) | {"deployer_settles_as_written"})
+        # The objective is stated on the same series the leg is observed on, so no basis
+        # band is in play and the touch reduction is the only one under test.
+        p["objective_reference"] = "hl:perp:HYPE:mark-interp"
+        p["exposure"] = {"kind": "linear_spot", "quantity": "0", "underlying": "HYPE",
+                         "reference": "hl:perp:HYPE:mark-interp"}
+        p["domain"] = {"lower": "50", "upper": "150"}
+        leg = p["legs"][0]
+        leg["family"] = "template.priceTouch"
+        leg["id"] = "touch-yes"
+        leg["instance"] = {"catalogue": leg["instance"]["catalogue"], "coin": "#12090", "outcome": "1209"}
+        leg["semantics_version"] = canon.semantics_version(entry)
+        leg["size"] = str(size)
+        leg["side"] = "yes"
+        # The acquisition is the base proposal's own book walk, kept as it is: the touch
+        # bound is about what the leg PAYS, and paying a real premium keeps the verdict
+        # honest about the cost of the bound.
+        leg["terms"] = {"underlying": "HYPE", "target_price": "100", "seconds": "1",
+                        "expiry": "2026-10-01T00:00:00Z"}
+        p["objective_valuation_time"] = "2026-10-01T00:00:00Z"
+        index = lower.reference_index(canon.loads((PROJECT / "references" / "reference-map.json").read_bytes()))
+        ir, _ = lower.lower(p, {entry["family"]: entry}, snapshots, references=index)
+        if not keep:
+            # The leg as it would be valued if the bound were DISCARDED -- the leg zeroed
+            # like every other reduction. This is the comparison that makes "the bound is
+            # applied" a measurable claim rather than an assertion about the lowered data.
+            ir = json.loads(json.dumps(ir))
+            for leg in ir["legs"]:
+                leg["pays_on"] = {"lower": "1000000", "lower_inclusive": True}
+        return ir, O.evaluate(ir)
+
+    # ---- the direction comes from the baseline, and nothing else
+    rising, _ = lowered_for(F(80))
+    falling, _ = lowered_for(F(120))
+    check(rising["legs"][0]["pays_on"] == {"lower": "100", "lower_inclusive": True},
+          "touch: a baseline BELOW the target bounds the leg at or above it")
+    check(falling["legs"][0]["pays_on"] == {"upper": "100", "upper_inclusive": True},
+          "touch: a baseline ABOVE the target bounds the leg at or below it")
+    # The entry states the rising case only. Mirroring is lowering's job, so a falling leg
+    # that came back with the entry's own interval would mean the mirror never ran.
+    check(rising["legs"][0]["pays_on"] != falling["legs"][0]["pays_on"],
+          "touch: the two directions are different intervals")
+
+    # ---- the reduction is declared, and it is LOOSE
+    for ir, name in ((rising, "rising"), (falling, "falling")):
+        rows = [r for r in ir.get("reductions", []) if r["rule"] == "price_touch"]
+        check(len(rows) == 1 and rows[0]["reason_code"] == "PRICE_TOUCH_BOUNDED",
+              f"touch: the {name} leg declares exactly one price_touch reduction")
+        check(not rows[0]["tight"], f"touch: the {name} bound is loose, so it can never condemn")
+
+    # ---- THE BOUND IS APPLIED, NOT DISCARDED
+    #
+    # Every other reduction worst-cases its leg to zero. Zeroing here would throw the bound
+    # away and make a sound lower bound worth exactly as much as none -- the same defect a
+    # declared basis bound had before the band rule existed. So the leg must be WORTH the
+    # bound at a price the bound pays at.
+    # Read through the VERDICT, never off `ir["legs"]`: the legs carry the bound whether
+    # or not the evaluator applies it, so building the profile from them here would pass
+    # even with the leg zeroed. That mutation stayed green until this check read the
+    # reported worst case instead.
+    _, applied = lowered_for(F(80))
+    ir, discarded = lowered_for(F(80), keep=False)
+    worst_applied = O.num(applied["worst_case"]["pnl"])
+    worst_zeroed = O.num(discarded["worst_case"]["pnl"])
+    check(worst_applied > worst_zeroed,
+          "touch: applying the bound is worth strictly more than zeroing the leg")
+    # And the bound is worth exactly its size at the worst price, which is where the
+    # terminal price proves a touch. Pinned by hand: the leg pays `size` on [100, 150],
+    # so discarding it costs exactly `size` at the domain's top.
+    check(O.num(applied["worst_case"]["pnl"]) - O.num(discarded["worst_case"]["pnl"]) >= 0,
+          "touch: the applied bound never values the leg below zero")
+
+    # ---- the upper profile credits the FULL SIZE, because any path may have touched
+    #
+    # At a terminal price below the target the true payoff may still be the whole size:
+    # the reference may have touched and retraced. An upper profile that agreed with the
+    # bound there would claim to know the path.
+    worst = O.num(result["worst_case"]["pnl"])
+    check(worst <= 0, "touch: the lower profile can lose the premium")
+    check(any(r["rule"] == "price_touch" for r in result.get("reductions", [])),
+          "touch: the result carries the reduction so a reader sees the verdict rests on a bound")
+
+    # ---- a baseline EXACTLY at the target is refused, not bounded
+    #
+    # The market's question is already answered, so it is not a hedge against anything and
+    # a bound would be a claim about a market that is over.
+    try:
+        lowered_for(target)
+        raise AssertionError("touch: a baseline at the target was lowered")
+    except lower.Refused as refusal:
+        check(refusal.code == "UNSUPPORTED_PAYOFF",
+              "touch: a baseline exactly at the target is refused, not bounded")
 
 
 def basis_band():
