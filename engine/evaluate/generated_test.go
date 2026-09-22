@@ -12,9 +12,12 @@ import (
 // The broad agreement fixture: whole results, on proposals neither author chose.
 // Where the kernel cases test one query, these test every field of a result at once.
 func TestAgreesWithTheOracleOnGeneratedProposals(t *testing.T) {
+	// The corpus is DERIVED and is not in git: `make generated` writes it, or
+	// `python3 tools/make_ir_cases.py`. An empty corpus is a missing input, never a pass.
 	matches, err := filepath.Glob("../../fixtures/generated/ir/*.ir.json")
 	if err != nil || len(matches) == 0 {
-		t.Fatalf("no generated IR cases found: %v", err)
+		t.Fatalf("no generated IR cases found (%v). They are generated, not committed: "+
+			"run `make generated`", err)
 	}
 	if len(matches) < 300 {
 		t.Fatalf("only %d cases; the corpus is meant to be broad", len(matches))
