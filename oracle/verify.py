@@ -346,6 +346,7 @@ def main():
     price_touch_bound()
     price_touch_lowering()
     established_failures()
+    isolated_perp()
     assumption_vocabulary()
     synthesis_refusal_classes()
     one_definition()
@@ -692,6 +693,124 @@ def reference_map():
 def O_terms(outcome):
     """The catalogue's `key:value|...` description, as a dict."""
     return dict(part.split(":", 1) for part in outcome.get("description", "").split("|") if ":" in part)
+
+
+def isolated_perp():
+    """A liquidatable exposure is worth minus its margin at every terminal price.
+
+    THE HEDGE CANNOT BE LIQUIDATED; THE EXPOSURE CAN. Retained evidence at 085ccfb states
+    that outcomes "do not involve leverage or liquidations" -- so an outcome leg is safe, and
+    the liquidation risk sits on the thing being hedged. That is why this is an EXPOSURE rule
+    and not a leg rule, and why `linear_spot` could never express it.
+
+    PLAN section 2 gives the rule: with the liquidation price inside the PATH domain, the leg
+    is worth minus its isolated margin at EVERY terminal price. Not sometimes -- liquidation
+    at any moment closes the position permanently, and a later recovery does not bring it
+    back. Path dependence a terminal kernel cannot compute, mirrored from `priceTouch` except
+    that here it cuts against the holder, so the worst case is the one that must be taken.
+    """
+    import lower
+
+    replay = REPLAY
+    snapshots = {}
+    for stem in ("book-bucket0-3971-yes", "meta-and-asset-ctxs", "outcome-meta"):
+        digest, document = lower.snapshot((replay / f"{stem}.json").read_bytes())
+        snapshots[digest] = document
+    registry = {}
+    for path in sorted((PROJECT / "registry").glob("*.json")):
+        entry = canon.loads(path.read_bytes())
+        registry[entry["family"]] = entry
+    base = canon.loads((replay / "bucket0.proposal.json").read_bytes())
+
+    def perp(liquidation_price, margin="5000", **overrides):
+        proposal = json.loads(json.dumps(base))
+        proposal["exposure"] = {
+            "kind": "isolated_perp", "underlying": "BTC",
+            "quantity": proposal["exposure"]["quantity"],
+            "reference": proposal["exposure"]["reference"],
+            "liquidation_price": liquidation_price, "isolated_margin": margin,
+        }
+        proposal.update(overrides)
+        lowered, _ = lower.lower(proposal, registry, snapshots)
+        return lowered, O.evaluate(lowered)
+
+    # ---- THE PATH DOMAIN IS THE HULL of the terminal domain and where the price starts
+    #
+    # PLAN section 2: "every price between now and the valuation time, so it contains the
+    # current price and the terminal domain". A baseline OUTSIDE the terminal domain widens
+    # it, which is right: the path starts there whatever the terminal range says.
+    for label, baseline, expected in (("inside", F(77631), (F(60000), F(110000))),
+                                      ("above", F(120000), (F(60000), F(120000))),
+                                      ("below", F(50000), (F(50000), F(110000)))):
+        proposal = {"domain": {"lower": "60000", "upper": "110000"}}
+        check(lower.path_domain(proposal, baseline) == expected,
+              f"isolated perp: a baseline {label} the domain gives the hull {expected}, "
+              f"got {lower.path_domain(proposal, baseline)}")
+
+    # ---- THE REDUCTION FIRES ON THE PATH DOMAIN, not on the terminal one
+    #
+    # The 18 September baseline is 77,631.4 and the domain is [60,000, 110,000], so the two
+    # coincide here; the distinction is checked above on the hull itself.
+    inside, _ = perp("80000")
+    check([r["rule"] for r in inside.get("reductions", [])] == ["liquidated_in_path"],
+          f"isolated perp: a liquidation price inside the path domain reduces, "
+          f"got {[r['rule'] for r in inside.get('reductions', [])]}")
+    outside, _ = perp("40000")
+    check([r["rule"] for r in outside.get("reductions", [])] == [],
+          "isolated perp: a liquidation price the path cannot reach reduces nothing")
+
+    # TIGHT, unlike a loose bound: the adverse state is ADMISSIBLE, not merely unproven, so a
+    # verdict may rest on it alone and it CAN make a proposal fail. That is the difference from
+    # `price_touch`, whose bound understates a payoff and may therefore only ask for review.
+    row = inside["reductions"][0]
+    check(row["tight"] and row["reason_code"] == "LIQUIDATED_IN_PATH",
+          f"isolated perp: the rule is tight and names its code, got {row}")
+
+    # ---- THE IR CARRIES THE KIND, so a checker can re-derive the reduction
+    #
+    # Lowering used to write `{"kind": "linear", ...}` whatever the proposal said, which left
+    # an isolated perp indistinguishable from spot by the time the evaluator saw it.
+    check(inside["exposure"]["kind"] == "isolated_perp",
+          f"isolated perp: the IR says what is exposed, got {inside['exposure']}")
+    check(inside["exposure"]["liquidation_price"] == "80000"
+          and inside["exposure"]["isolated_margin"] == "5000",
+          "isolated perp: and carries the two numbers the reduction rests on")
+    spot_ir, _ = lower.lower(base, registry, snapshots)
+    check(spot_ir["exposure"] == {"kind": "linear", "quantity": "0.1"},
+          f"isolated perp: a spot exposure is unchanged, got {spot_ir['exposure']}")
+
+    # ---- MINUS THE MARGIN AT EVERY PRICE, and the profile is FLAT because of it
+    #
+    # Hand-derived: margin 5,000 plus the retained book walk of 160.76676 is 5,160.76676 at
+    # and above the bucket's 75,908 threshold, where the hedge pays nothing. Below it the
+    # hedge pays its 924, so the loss is 4,236.76676. Both pieces are flat, which is the
+    # signature of an exposure that has stopped being a function of the terminal price.
+    _, result = perp("80000")
+    check([(piece["lower"], piece["upper"], piece["slope"], piece["intercept"])
+           for piece in result["profile"]]
+          == [("60000", "75908", "0", "-4236.76676"),
+              ("75908", "110000", "0", "-5160.76676")],
+          f"isolated perp: the liquidated profile is two flat pieces, got {result['profile']}")
+    check(result["worst_case"] == {"pnl": "-5160.76676", "attained": True, "price": "75908"},
+          f"isolated perp: the worst case is the margin plus the premium, got {result['worst_case']}")
+    check(F("5000") + F("160.76676") == F("5160.76676"),
+          "isolated perp: and that is exactly margin plus premium")
+
+    # IT CAN FAIL A PROPOSAL, which a loose rule may never do. The same proposal passes on
+    # spot and fails on a liquidatable perp, which is the whole point of the tier.
+    spot_result = O.evaluate(spot_ir)
+    check(spot_result["model_result"] == "passes" and result["model_result"] == "fails",
+          f"isolated perp: spot passes and a liquidatable perp fails, got "
+          f"{spot_result['model_result']} and {result['model_result']}")
+
+    # ---- A NEGATIVE MARGIN IS REFUSED, not reduced: a position with negative money at risk
+    # is not a position, and reducing by it would CREDIT the holder for being liquidated.
+    try:
+        perp("80000", margin="-5000")
+        raise AssertionError("isolated perp: a negative isolated margin was accepted")
+    except lower.Refused as refusal:
+        check(refusal.code == "EXPOSURE_UNSOUND",
+              f"isolated perp: a negative margin is EXPOSURE_UNSOUND, not {refusal.code}")
 
 
 def assumption_vocabulary():
@@ -1874,9 +1993,19 @@ def bundles():
         else:
             refused[manifest["expects"]] = refused.get(manifest["expects"], 0) + 1
             check("corruption" in manifest, f"bundles: {path.name} is refused and documents its one change")
-    check(accepted == 7, "bundles: seven good bundles -- passing, failing, passing with its envelope, "
+    check(accepted == 8, "bundles: eight good bundles -- passing, failing, passing with its envelope, "
                          "a deployer-settled family, a foreign reference with and without a bound, "
-                         "and two legs on one foreign reference banded as a GROUP")
+                         "two legs on one foreign reference banded as a GROUP, and an isolated perp "
+                         "liquidated inside the path domain")
+    # THE LIQUIDATED BUNDLE FAILS, and it is the only good bundle that fails for a reason on
+    # the EXPOSURE rather than on a leg. A tight rule may condemn, so this is where that is
+    # exercised end to end: lowering reduces, the evaluator applies, the refuser rebuilds the
+    # same profile independently and accepts the bundle.
+    liquidated = canon.loads((directory / "good-liquidated" / "result.json").read_bytes())
+    check(liquidated["model_result"] == "fails",
+          f"bundles: the liquidated bundle fails, got {liquidated['model_result']}")
+    check([(r["rule"], r["tight"]) for r in liquidated["reductions"]] == [("liquidated_in_path", True)],
+          f"bundles: and does so under one tight rule, got {liquidated.get('reductions')}")
     # THE GROUP IS CARRIED, not merely present. A `with` list is the only part of a
     # reduction that names other legs, and until the grouped bundle existed no fixture had
     # one -- so Go and the TypeScript checker each implemented grouping and neither was
