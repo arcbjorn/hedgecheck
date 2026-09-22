@@ -39,3 +39,8 @@ fixtures/bundles/
 # one -- and that Go has a decoder for every schema present, which is what makes a new
 # schema land in both implementations or not at all.
 fixtures/rejected/
+
+# Derived the same way, by tools/make_synthesis.py: the oracle's own synthesis answers and
+# one corruption per refusal class. What is asserted is that the TypeScript checker accepts
+# each good answer and refuses each corruption with exactly the class it names.
+fixtures/synthesis/
