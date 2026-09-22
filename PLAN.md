@@ -365,6 +365,17 @@ Both non-`computed` values were evaluated as if `computed` until 21 Sep — a fa
 registry REFUSES produced a clean `passes`. Fixtures
 `fixtures/refusals/family-bounded-not-computed` and `family-status-refused` hold it.
 
+**The map is REVIEWED** (22 Sep, digest `d2b36412`), and that review is load-bearing:
+`reference_index` returns nothing for a document whose seal does not hold, so every
+deployer-templated leg then refuses with `AMBIGUOUS_RULES` rather than resolving. Until
+22 Sep nothing checked it — every mapping was honoured whatever the document said about
+itself, while the refusal message read "no REVIEWED mapping", a word the code did not mean.
+It is not cosmetic: a mapping nobody reviewed can point a leg at the objective's OWN series,
+and then the basis reduction never fires. Measured on the 18 September bucket proposal, that
+turns a `needs_review` worst case of −1,923.90676 into a `passes` at −999.90676. Both the
+oracle and the Go loader enforce it, and both were seen failing on a forged digest and on an
+edited mapping.
+
 **Reference ids** are `source:series:statistic[:window]`, never free text:
 `hl:perp:BTC:mark-interp` · `hl:perp:BTC:mark-twap:60s` ·
 `hl:perp:BTC:trade-twap:90s` · `pyth:BTC/USD:price-twap:90s`. The registry maps
@@ -419,7 +430,7 @@ Each tier ships only through its gate. No tier has a date.
 | **T1** Contract, on real data — **done, 19 Sep** | The live canonical check end to end **on the oracle**: discover instances → coherent snapshots → proposal → lowering → verdict, cost, alternatives → replay. Schema v1 frozen ([schema/CHANGES.md](./schema/CHANGES.md)). Fixtures: the 18 Sep replay, a 19 Sep live capture, fourteen certificate bundles. | Every line proved by a command, below |
 | **T2** Engine — **done, 21 Sep** | Go. A **pure evaluator** — library and CLI, proposal and snapshots in, result out, no I/O — then the live adapter, the service, and one result screen ordering binary, bucket and exposure reduction by the cost of the smallest passing size | **Frozen v1 schemas, not drafts: a shape change now needs a new `schema_version` and a row in `schema/CHANGES.md`.** A snapshot's hash says nothing about its shape, so a leg citing the catalogue where a book belongs is refused, never a crash (T1 found this by crashing). Byte-identical results to the fixtures; agreement with the oracle on generated primitives; replay from stored snapshots reproduces the result byte for byte; T1's adapter deleted |
 | **T3** Checker and consumer — **done, 21 Sep, except the live testnet order** | TypeScript checker, run by the result screen on every view. Then a simulated approval gate, then a **testnet** order behind it, with the order envelope the cost bound assumes, and a re-check after any partial fill | Returns the closed classes in `refusal.schema.json`, so a disagreement with `oracle/refuse.py` is a real one. **A checker that re-adds the pieces the engine emitted proves nothing** — it must establish domain coverage, endpoint ownership and proposal-to-pieces correspondence independently, and evaluate each witness on the *unreduced* payoff. Every corrupted certificate and rejected input refused; engine and checker agree on every fixture; anything but `passes` produces zero downstream calls, asserted; a partial fill triggers the re-check, whose result — top up as a new proposal, or unwind — is the consumer's policy and never the gate's |
-| **T4** | Deployer families, the reference registry, the band reduction, the `priceTouch` bound | Each reference string reviewed; **every deployer-settled payoff reduced, not assumed** — `settleFraction` is submitted, so no confirmation from a deployer can bind their next settlement or anyone else's (EVIDENCE §1, and the corrected belief in §9). A deployer leg is worst-cased under a loose rule, so it can make a proposal need review and can never make one fail; fixtures for the shrunk middle bucket and for mixed legs on one foreign reference |
+| **T4** — **done, 22 Sep** | Deployer families, the reference registry, the band reduction, the `priceTouch` bound | Each reference string reviewed; **every deployer-settled payoff reduced, not assumed** — `settleFraction` is submitted, so no confirmation from a deployer can bind their next settlement or anyone else's (EVIDENCE §1, and the corrected belief in §9). A deployer leg is worst-cased under a loose rule, so it can make a proposal need review and can never make one fail; fixtures for the shrunk middle bucket and for mixed legs on one foreign reference |
 | **T5** | Exact synthesis with infeasibility certificates | The checker verifies optimal structures and certificates alike; every rounded structure re-checked |
 | **T6** | Path reductions: isolated perps | Liquidation semantics reviewed from official text, portfolio margin included; every **[U]** it touches resolved |
 | **T7** | Certificate checker on HyperEVM, gating CoreWriter orders. On-chain the cost is bounded by `limit price × size`, so **no book read is needed** | An outcome limit order through CoreWriter accepted on testnet; the seconds-long delay priced in; stated plainly that an `Ioc` order can fill partly and no on-chain gate can undo that |
