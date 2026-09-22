@@ -1,9 +1,9 @@
 # One command runs everything: `make check`. Every target is offline and needs no install step.
 # Requires python3, go, node (>= 23.6, which runs TypeScript natively) and deno (type-check only).
 
-.PHONY: check bundlecheck vectors bundles kernel rejected ircases generated refusals schema oracle engine checker consumer cross clean
+.PHONY: check bundlecheck vectors bundles kernel rejected ircases generated refusals synthesis schema oracle engine checker consumer cross clean
 
-check: vectors bundlecheck bundles kernel rejected ircases refusals schema oracle engine checker consumer cross clean
+check: vectors bundlecheck bundles kernel rejected ircases refusals synthesis schema oracle engine checker consumer cross clean
 	@echo "all checks passed"
 
 # Vector files are generated from hand-written cases; a stale file is an error.
@@ -36,6 +36,11 @@ generated:
 	@test -d fixtures/refusals || python3 tools/make_refusals.py >/dev/null
 	@test -d fixtures/bundles || python3 tools/make_corruptions.py >/dev/null
 	@test -d fixtures/rejected || python3 tools/make_rejected.py >/dev/null
+	@test -d fixtures/synthesis || python3 tools/make_synthesis.py >/dev/null
+
+# Synthesis answers and one corruption per refusal class, for the checker to judge.
+synthesis:
+	@python3 tools/make_synthesis.py --check
 
 # One proposal per refusal code lowering can raise, so both sides refuse alike.
 refusals:
