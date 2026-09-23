@@ -1,0 +1,11 @@
+# Offline and hermetic, like every other target in `make check`: no remappings, no
+# dependencies, no network. The gate is one file and its test is one file.
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = []
+offline = true
+# The gate does integer comparisons and one keccak. No optimiser games: the code should read
+# the way it runs, because what it refuses is the point.
+optimizer = false
