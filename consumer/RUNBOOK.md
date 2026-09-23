@@ -74,16 +74,37 @@ figure written here is stale the moment an expiry passes. The rest of the quoted
 World Cup and CPI markets, which this tool refuses as price legs rather than inventing a
 series for.
 
-**A hedgeable ladder exists today.** `xyz:AAPL` at `20260923-1900` carries five strikes —
-7,600 · 7,650 · 7,700 · 7,750 · 7,800 — with asks on both YES and NO at several of them, and
-`xyz:XYZ100` at the same expiry carries five more. `BTC` has `70000` at `20260930-1200` quoted
-on both sides. A long position plus YES at one strike and NO at another is the shape this
-project verifies.
+**STEP 0 STILL BLOCKS, and not on depth.** Measured 23 Sep by running the live path rather
+than reasoning about the catalogue:
 
-**So step 0 no longer blocks.** Re-run the sweep first anyway: these are dated instruments and
-`20260923-1900` expires today, so the ladder that unblocks you this hour may be gone the next.
-Build the proposal from a CURRENT capture, never from a bundle in this repository — see the
-mainnet warning above.
+    $ hedgecheck check --live --network testnet --underlying BTC ...
+    no expiry with both a binary and a bucket for BTC
+
+`engine/discover/discover.go` requires a `recurring.priceBinary` **and** a
+`recurring.priceBucket` at one expiry. Testnet carries no price bucket at all, so the live path
+cannot assemble a testnet hedge however deep the books are. An earlier note here said a strike
+ladder "needs no bucket" — true of the evaluator, false of discovery.
+
+Crossing both properties over all 56 structured price markets: **17 lower** to a reference,
+**14 have asks**, **10 do both** — and all 10 are `xyz:XYZ100`/`xyz:AAPL` referenced to Pyth,
+so against a Hyperliquid objective they earn `basis_unbridged`, are worth zero without a
+declared bound, and produce `needs_review`. **The gate acts on `passes` only**, so none of them
+opens it. The one BTC ladder that lowers cleanly — `'the Hyperliquid BTC perp trade'` @90s at
+`20260923-1200`, three strikes, already in the reference map — has 0 bids and 0 asks on all six
+sides.
+
+Those ten also show why a testnet `passes` would prove little about semantics: they read
+`perp:xyz:AAPL|priceDescription:the Pyth US500 index price`, an S&P index settling an Apple
+market at thresholds near 7,600, under `template:binaryPrice6`. Testnet's price catalogue is
+scratch space — other descriptions include `'TWAP stuff'`, `'agent probe'` and `'HAHVD'`.
+
+**What unblocks this is a decision, not a wait:** either widen discovery to the ladder shape
+(a design change), or declare a basis bound for a Pyth-referenced leg (an owner review). Both
+are the owner's.
+
+Whichever way that goes, **re-sweep before acting**: every figure above is a dated observation,
+the instruments expire, and the digest you eventually approve is bound to a capture taken at
+one moment.
 
 ## There is a second path, and it is a different page
 
