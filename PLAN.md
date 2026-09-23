@@ -580,9 +580,15 @@ where the gate is, not only in the runbook:
   three at 81,100 / 81,500 / 81,900, same 90-second TWAP, same `priceDescription`; both
   `xyz:AAPL` and `xyz:XYZ100` at `20260921-1900` have five each. A long position plus YES at
   one strike and NO at another is a hedge this project verifies, and it needs no bucket. So
-  the market SHAPE exists on testnet routinely. What does not exist is depth: both retained
-  testnet books are empty, 0 bids and 0 asks, and a hedge priced by walking displayed asks
-  refuses with `INSUFFICIENT_DEPTH` — correctly. **The blocker is liquidity, not listing.**
+  the market SHAPE exists on testnet routinely. **Re-measured 23 Sep and the blocker moved
+  again:** those two retained instances have EXPIRED (`#204891`, `#203580` return `null`, not
+  an empty book), and a sweep of all 618 outcomes on both sides found **112 of 1,236 books
+  carrying a quote** — so depth now exists. But every quoted book is a World Cup match or the
+  May CPI print, and **not one is a crypto price market.** A sports outcome carries no
+  `priceDescription`, no `perp` and no threshold, so nothing relates it to a perp exposure and
+  lowering refuses it (`CATALOGUE_UNREADABLE`) rather than inventing a series.
+  **The blocker is a quoted PRICE market — narrower than liquidity, and narrower than the
+  "quoted book" this plan said on 22 Sep.**
   Meanwhile every bundle in
   the repository is built from MAINNET books and carries coin `#39710`, asset id
   `100,039,710`; testnet's outcomes are 10217–20497, a disjoint range. **Aiming an
@@ -590,9 +596,11 @@ where the gate is, not only in the runbook:
   there** — and the gate cannot catch it, because the bundle is internally consistent
   and the check is sound. `run.ts` now refuses `--send` without an explicit
   `--bundle-is-for-this-network`, since nothing inside a bundle records its network.
-- Both testnet books were empty besides (0 bids, 0 asks), so **the live run exercises the
-  ORDER PATH, not the hedge check.** A success there is not a checked hedge, and reading
-  it as one is the mistake this row exists to prevent.
+- No quoted testnet market is a price market besides (measured 23 Sep), so **the live run
+  exercises the ORDER PATH, not the hedge check.** A success there is not a checked hedge, and
+  reading it as one is the mistake this row exists to prevent. Sending against a World Cup
+  book would place a real order whose "hedge" verdict this tool refuses to produce, which is
+  the sharpest form of that mistake available today.
 - Everything up to the send is proved offline against a fake exchange: the envelope, the
   msgpack encoding and EIP-712 digest (both derived by hand from their specs and matched
   byte for byte), one send with no retry, and a re-check after a partial fill.
