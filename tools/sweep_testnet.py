@@ -77,6 +77,8 @@ def is_price_market(outcome):
     """
     described = outcome.get("description", "") or ""
     terms = {part.split(":", 1)[0].lower() for part in described.split("|") if ":" in part}
+    # A prose description yields no `key:value` parts, so `terms` is empty and both lookups
+    # fail -- an unstructured market is not a price market, which is the intended answer.
     return all(term in terms for term in PRICE_TERMS)
 
 
