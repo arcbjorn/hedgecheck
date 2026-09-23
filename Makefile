@@ -1,9 +1,9 @@
 # One command runs everything: `make check`. Every target is offline and needs no install step.
 # Requires python3, go, node (>= 23.6, which runs TypeScript natively) and deno (type-check only).
 
-.PHONY: check bundlecheck vectors bundles kernel rejected ircases generated refusals synthesis schema oracle engine checker consumer cross clean
+.PHONY: check bundlecheck vectors bundles kernel rejected ircases generated refusals synthesis schema oracle engine checker consumer onchain cross clean
 
-check: vectors bundlecheck bundles kernel rejected ircases refusals synthesis schema oracle engine checker consumer cross clean
+check: vectors bundlecheck bundles kernel rejected ircases refusals synthesis schema oracle engine checker consumer onchain cross clean
 	@echo "all checks passed"
 
 # Vector files are generated from hand-written cases; a stale file is an error.
@@ -71,6 +71,16 @@ checker: generated
 	@cd checker && node --test "test/*.test.ts" > .test.log 2>&1; status=$$?; grep -E "^(ℹ (tests|pass|fail)|✖)" .test.log; \
 		if [ $$status -eq 0 ]; then rm -f .test.log; else echo "checker: full output kept at checker/.test.log"; fi; exit $$status
 
+# The on-chain gate. Offline: forge builds with a cached solc and the package has no
+# dependencies -- no forge-std, so the tests are plain Solidity. Skipped with a NOTICE rather
+# than a failure when forge is absent, because a toolchain nobody installed is not a regression
+# and `make check` must pass on a clean machine. The gate is not in any evaluation path.
+onchain:
+	@if command -v forge >/dev/null 2>&1; then \
+		cd onchain && test -z "$$(forge fmt --check 2>/dev/null || true)" || { echo "onchain: unformatted"; exit 1; }; \
+		cd onchain 2>/dev/null; forge test --offline 2>&1 | tail -2; \
+	else echo "onchain: forge not installed, skipped (the gate is not in an evaluation path)"; fi
+
 # The approval gate. It runs its own copy of the checker, so it is checked after it.
 #
 # The tests are type-checked too: they are where the guarantees live, and a guard that
@@ -78,6 +88,16 @@ checker: generated
 # `unrepresentable.ts` is excluded because it is DELIBERATELY uncompilable --
 # typegate.test.ts runs deno over it and fails if it SUCCEEDS.
 consumer: generated
+# THE ONE THIRD-PARTY DEPENDENCY MUST BE INSTALLED, and its absence is SAID rather than
+# discovered. A fresh clone has no node_modules, so `@noble/curves` cannot resolve and three
+# test FILES fail to load -- reported by the runner as an unexplained "test failed" with no
+# mention of a missing package. Measured in a clean clone. `npm ci` is not run here: installing
+# from a lockfile reaches the network, and a check target that installs things is a check
+# target that can change what it is checking.
+	@cd consumer && test -d node_modules || { \
+		echo "consumer: node_modules is absent, so @noble/curves cannot resolve."; \
+		echo "consumer: run 'cd consumer && npm ci' (pinned by package-lock.json), then retry."; \
+		exit 1; }
 	@cd consumer && deno check --quiet --node-modules-dir=none src/*.ts
 	@cd consumer && deno check --quiet --node-modules-dir=none $$(ls test/*.ts | grep -v unrepresentable.ts)
 	@cd consumer && node --test "test/*.test.ts" > .test.log 2>&1; status=$$?; grep -E "^(ℹ (tests|pass|fail)|✖)" .test.log; \
