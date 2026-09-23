@@ -44,6 +44,7 @@ const usage = `hedgecheck — check whether a proposed hedge meets an explicit o
   hedgecheck evaluate --lowered L
   hedgecheck check    --proposal P --registry DIR --snapshots DIR
   hedgecheck check --live --underlying BTC --quantity Q --cap C --floor F
+                          (--cap is a POSITIVE magnitude; a proposal min_pnl is negative)
                           --ceiling CE --baseline analysis_time|explicit:P
                           --valuation-time T --store DIR --registry DIR
                           [--network mainnet|testnet]
