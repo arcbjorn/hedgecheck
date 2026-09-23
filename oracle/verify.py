@@ -346,6 +346,7 @@ def main():
     price_touch_bound()
     price_touch_lowering()
     established_failures()
+    runbooks()
     onchain_representable()
     isolated_perp()
     assumption_vocabulary()
@@ -694,6 +695,116 @@ def reference_map():
 def O_terms(outcome):
     """The catalogue's `key:value|...` description, as a dict."""
     return dict(part.split(":", 1) for part in outcome.get("description", "").split("|") if ":" in part)
+
+
+def runbooks():
+    """A runbook's checkable claims are checked, because a runbook is what a human follows.
+
+    `consumer/RUNBOOK.md` carried a superseded blocker for a day: PLAN and EVIDENCE were
+    corrected on 22 Sep -- the live order waits on LIQUIDITY, not on testnet listing a bucket
+    and a binary at one expiry -- and the runbook still said the old thing. Nothing checked it.
+    Of the three documents, the runbook is the one somebody acts on, so it is the worst place
+    for a stale claim and the last place it was noticed.
+
+    Only claims that can be mechanically checked are checked here: signatures the contract
+    really has, numbers that really scale that way, and blockers that really still hold. Prose
+    is not the target; a number or a signature that has moved is.
+    """
+    consumer_book = (PROJECT / "consumer" / "RUNBOOK.md").read_text()
+    onchain_book = (PROJECT / "onchain" / "RUNBOOK.md").read_text()
+
+    # ---- THE BLOCKER IS THE ONE THAT HOLDS
+    #
+    # Both pages must name liquidity, and neither may still say a bucket is required: testnet
+    # lists strike ladders, and long-plus-YES-plus-NO across two strikes is a hedge this tool
+    # verifies. Checked against the retained catalogue by `testnet_shape` above.
+    # THE BLOCKER IS STATED WHERE IT IS ACTED ON. Both pages must say, in the section that
+    # stops an operator, that what is missing is a QUOTED BOOK -- not merely mention liquidity
+    # somewhere in passing, which a page can do while telling someone to wait for the wrong
+    # thing two paragraphs later.
+    for name, book in (("consumer", consumer_book), ("onchain", onchain_book)):
+        check("waits on a quoted book" in book,
+              f"runbook: {name} does not say the live order waits on a QUOTED BOOK")
+        check("0 bids and 0 asks" in book or "0 bids, 0 asks" in book,
+              f"runbook: {name} does not state the retained books are empty")
+    check("waits on testnet listing a bucket and a binary" not in consumer_book,
+          "runbook: consumer still names the superseded blocker")
+
+    # ---- EVERY SIGNATURE THE ON-CHAIN PAGE TELLS AN OPERATOR TO CALL EXISTS
+    #
+    # A runbook is a list of commands somebody pastes. A signature that has drifted is a
+    # command that reverts or, worse, calls something else.
+    artifact = PROJECT / "onchain" / "out" / "ApprovedOrderGate.sol" / "ApprovedOrderGate.json"
+    if artifact.exists():
+        abi = json.loads(artifact.read_text())["abi"]
+        signatures = {
+            f"{entry['name']}({','.join(argument['type'] for argument in entry['inputs'])})"
+            for entry in abi if entry["type"] == "function"
+        }
+        errors = {entry["name"] for entry in abi if entry["type"] == "error"}
+        for quoted in re.findall(r'"(\w+\([^"]*?\))"', onchain_book):
+            stripped = re.sub(r"\)\(.*", ")", quoted)  # cast's "f()(address)" return spec
+            check(stripped in signatures,
+                  f"runbook: the on-chain page calls {stripped}, which the gate does not have")
+        for named in re.findall(r"\| `([A-Z]\w+)` \|", onchain_book):
+            check(named in errors,
+                  f"runbook: the on-chain page tabulates the error {named}, which does not exist")
+    else:
+        # forge has not been run, so there is no ABI to check against. Said out loud rather
+        # than passed silently: a check that cannot run is not a check that passed.
+        check(True, "runbook: no compiled ABI, so the on-chain signatures are unchecked here")
+
+    # ---- THE SCALED NUMBERS ARE THE ENVELOPE'S OWN
+    #
+    # The page works the arithmetic from the retained envelope. Every figure is derived here
+    # from that envelope rather than trusted, because a worked example with a wrong number
+    # teaches the wrong arithmetic.
+    envelope = canon.loads(
+        (PROJECT / "fixtures" / "bundles" / "good-envelope" / "result.json").read_bytes()
+    )["order_envelope"]
+
+    def scaled(text):
+        whole, _, fraction = text.partition(".")
+        return int(whole + fraction.ljust(8, "0"))
+
+    asset = 100_000_000 + int(envelope["coin"][1:])
+    price, size = scaled(envelope["limit_price"]), scaled(envelope["size"])
+    # READ FROM EACH PLACE SEPARATELY, not counted across the page.
+    #
+    # Two weaker spellings were tried and both let a mutation through. "Is the number present"
+    # passes with the pasted command wrong, because the table still carries it. "Is it present
+    # twice" passes with EITHER of the two wrong, because the other still matches -- run as a
+    # mutation, corrupting the `size` row of the table stayed green. So each site is extracted
+    # on its own and compared, and the one an operator pastes is a site.
+    cost = scaled(envelope["max_cost"]) * 10 ** 8
+
+    # The `Scaled` column of the worked table: last cell of each row, in page order.
+    tabulated = re.findall(r"^\| `\w+`[^\n]*\| `([0-9]+)`[^`\n]*\|\s*$", onchain_book, re.M)
+    check(tabulated == [str(value) for value in (asset, price, size, cost)],
+          f"runbook: the worked table scales to {tabulated}, not the envelope's own "
+          f"{[asset, price, size, cost]}")
+
+    # The arguments of each `cast send` an operator pastes, read off the command itself.
+    def arguments(signature):
+        found = re.findall(
+            re.escape(f'"{signature}"') + r'[^\n]*\n\s*<input_digest>((?: [0-9]+)+)', onchain_book)
+        check(len(found) == 1,
+              f"runbook: the on-chain page gives {len(found)} pasteable {signature} commands")
+        return [int(word) for word in found[0].split()] if found else []
+
+    check(arguments("approve(bytes32,uint32,uint64,uint64,uint128)") == [asset, price, size, cost],
+          "runbook: the approve command an operator pastes is not the envelope's own numbers")
+    check(arguments("send(bytes32,uint64,uint64)") == [price, size],
+          "runbook: the send command an operator pastes is not the envelope's own numbers")
+
+    # And the ceiling really is tight at those values: the cost check on chain is
+    # `limitPx * sz <= maxCost`, so a worked example where the product exceeds the ceiling
+    # would teach an operator to approve something that always reverts.
+    check(price * size == cost,
+          f"runbook: {price} * {size} is {price * size}, not the tabulated ceiling {cost}")
+    # And the identity the page asserts: the walk touched the top level, so the bound is tight.
+    check(price * size == scaled(envelope["max_cost"]) * 10 ** 8,
+          "runbook: limitPx * sz is not max_cost at 10^16, so the page's table is wrong")
 
 
 def onchain_representable():
