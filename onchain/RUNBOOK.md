@@ -53,19 +53,20 @@ from MAINNET books and carries coin `#39710` — asset id `100,039,710`. Testnet
 different range. Approving one of those digests and sending it on testnet either bounces or
 buys an unrelated instrument that answers to that id.
 
-Testnet does list the market **shape** — strike ladders at one expiry, verified against the
-retained 21 September catalogue. Those particular instances have since expired (`#204891` and
-`#203580` return `null` as of 23 Sep, not an empty book).
+**Measured 23 Sep: there IS a quoted price ladder, so this no longer blocks.** Run the sweep,
+which is read-only:
 
-**Measured 23 Sep across all 618 outcomes, both sides:** 112 of 1,236 books carry a quote, so
-depth exists on testnet now — but every quoted book is a World Cup match or the May CPI print,
-and **not one is a crypto price market.** A sports outcome has no `priceDescription` and no
-threshold, so nothing relates it to a perp exposure and lowering refuses it rather than
-guessing. **The gate waits on a quoted crypto price ladder**, which is a narrower thing than
-the "quoted book" this page said before. See [`consumer/RUNBOOK.md`](../consumer/RUNBOOK.md)
-for the sweep and the counts.
+    $ python3 tools/sweep_testnet.py
 
-Steps 1 onward are ready for when one appears.
+114 of 1,236 books carry a quote; 56 outcomes are structured price markets and 28 of their
+books are quoted. `xyz:AAPL` at `20260923-1900` has five strikes with asks on both sides at
+several, and `BTC 70000` at `20260930-1200` is quoted on both. The earlier "0 bids and 0 asks"
+on this page was a probe bug — the wrong coin encoding answering `null` — not an empty venue.
+See [`consumer/RUNBOOK.md`](../consumer/RUNBOOK.md) for both corrections.
+
+These are dated instruments and `20260923-1900` expires today, so **re-sweep before you
+approve anything**: the digest you approve is bound to a capture, and a ladder that is quoted
+now may be gone by the time you send.
 
 ## 1. Build and check the gate
 
