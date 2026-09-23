@@ -490,13 +490,20 @@ def price_touch_bound():
 
 
 def testnet_shape():
-    """What blocks the live testnet order is LIQUIDITY, not listing.
+    """What blocks the live testnet order is DISCOVERY, in this repository's own code.
 
-    PLAN's gate section said testnet carries "no expiry carrying both a binary and a bucket",
-    which is true and was the wrong blocker: a bucket is not required. A strike LADDER of
-    binaries at one expiry is a hedge this project verifies -- long the underlying, YES at
-    one strike, NO at another -- and testnet carries those routinely. The real blocker is
-    that the books are empty, which `INSUFFICIENT_DEPTH` refuses correctly.
+    Three wrong answers preceded this one, each recorded in EVIDENCE section 9. It was
+    "testnet lists no bucket" (true, not the blocker), then "the books are empty" (a bug in my
+    probe -- the wrong coin encoding answering `null`), then "no quoted market is a price
+    market" (a filter matching the word "below" in a CPI description). Running the live path
+    settled it: `hedgecheck check --live --network testnet` answers `no expiry with both a
+    binary and a bucket for BTC`, because `engine/discover/discover.go` REQUIRES both and
+    testnet carries no price bucket at all.
+
+    So PLAN's claim that a ladder hedge "needs no bucket" is true of the EVALUATOR and false of
+    DISCOVERY, and the gap between those two is what this guard now pins. A strike ladder is
+    genuinely evaluable -- long the underlying, YES at one strike, NO at another -- but nothing
+    assembles one from a live catalogue today.
 
     Checked against the retained 21 September testnet catalogue so the claim in PLAN is
     re-derived rather than remembered.
@@ -532,6 +539,31 @@ def testnet_shape():
         bids, asks = book["levels"]
         check(bids == [] and asks == [],
               f"testnet: {stem} is no longer empty, so the liquidity blocker may have lifted")
+
+    # THE DISCOVERY REQUIREMENT IS PINNED AGAINST THE GO SOURCE, offline.
+    #
+    # This is the drift that cost three days: PLAN said a ladder hedge needs no bucket, the
+    # code required one, and nothing compared them. Reading `discover.go` is not the same as
+    # asserting what it does -- if the requirement is ever widened to the ladder shape, this
+    # fails and whoever widened it must say so here and in PLAN together.
+    discover = (PROJECT / "engine" / "discover" / "discover.go").read_text()
+    check("no expiry with both a binary and a bucket for " in discover,
+          "discovery: the binary-and-bucket requirement is gone from discover.go; if the "
+          "ladder shape is now supported, PLAN and both runbooks must stop saying it is not")
+    # THE LEG IT BUILDS, not merely a name it mentions. `recurring.priceBucket` appears twice
+    # -- once in a refusal message, once in the leg -- so replacing the first left the second
+    # and a mutation of the name stayed green. The leg is the behaviour; the message is prose.
+    check(re.search(r'ID:\s*"bucket0-yes",\s*Family:\s*"recurring\.priceBucket"', discover),
+          "discovery: discover.go no longer builds a recurring.priceBucket leg, so the "
+          "binary-and-bucket shape has changed and PLAN must be re-read")
+    check(re.search(r'Family:\s*"recurring\.priceBinary"', discover),
+          "discovery: discover.go no longer builds a recurring.priceBinary leg")
+    for document, name in ((PROJECT / "PLAN.md", "PLAN"),
+                           (PROJECT / "consumer" / "RUNBOOK.md", "consumer runbook")):
+        text = document.read_text()
+        check("no expiry with both a binary and a bucket" in text,
+              f"{name} does not quote the live path's own refusal, so a reader cannot tell "
+              f"that the blocker is discovery rather than liquidity")
 
 
 def review_seals():
