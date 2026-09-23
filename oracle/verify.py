@@ -687,6 +687,37 @@ def reference_map():
     check(freed == 42, f"reference map: the Pyth rows cover 42 instances, found {freed}")
     check(all(m["state"] == "interpreted" and m["reference"].startswith("pyth:") for m in pyth),
           "reference map: every Pyth description resolves to a pyth: id, never a Hyperliquid one")
+
+    # EACH ROW'S OWN COUNT, not just their sum.
+    #
+    # The four `why` texts open "15 instances", "9 instances", "9 instances", "9 instances",
+    # and only the TOTAL was ever checked -- so any redistribution summing to 42 passed, and a
+    # count is exactly the kind of number this project has had go stale (EVIDENCE §9 records
+    # this row's total recorded as 15 when it was 42). Prose is not usually the target, but a
+    # number in prose that a reader would rely on is.
+    for m in pyth:
+        stated = re.match(r"(\d+) instances", m["why"])
+        check(stated is not None,
+              f"reference map: the Pyth row {m['price_description']!r} does not open with its count")
+        if stated:
+            actual = counts[(m["venue"], m["price_description"], m["seconds"])]
+            check(int(stated.group(1)) == actual,
+                  f"reference map: {m['price_description']!r} says {stated.group(1)} instances, "
+                  f"the catalogue has {actual}")
+
+    # `confirmed` IS NOT AVAILABLE HERE, and that is the point of the state.
+    #
+    # The schema defines `confirmed` as "the deployer confirmed it in writing, and `sources`
+    # then carries that writing". No deployer has written to this project, so every Pyth row is
+    # the OWNER'S READING and says so in every result that rests on it. Asserted as a guard
+    # because the temptation is to promote a mapping that has held up for a while: holding up
+    # is not confirmation, and a row claiming `confirmed` with nothing in `sources` would be
+    # fabricated evidence that the basis rule then trusts.
+    for m in mappings:
+        if m["state"] == "confirmed":
+            check(m.get("sources"),
+                  f"reference map: {m['price_description']!r} claims confirmed and carries no "
+                  f"written source; confirmation is a deployer's writing, not a judgement")
     check(all(m.get("why") for m in mappings), "reference map: every mapping says why")
     check(all(m.get("reference") for m in mappings if m["state"] != "ambiguous"),
           "reference map: a non-ambiguous mapping names a reference")
@@ -722,13 +753,42 @@ def runbooks():
     # stops an operator, that what is missing is a QUOTED BOOK -- not merely mention liquidity
     # somewhere in passing, which a page can do while telling someone to wait for the wrong
     # thing two paragraphs later.
+    # SUPERSEDED 23 Sep, and the guard is the reason it was caught. Both pages said the order
+    # "waits on a quoted book" and cited two books as 0 bids / 0 asks. Re-measuring found that
+    # those two instances had EXPIRED (null, not empty), and that 112 of 1,236 testnet books do
+    # carry quotes -- all of them World Cup or CPI markets, none a crypto price ladder. So the
+    # blocker is narrower than "a quoted book": it is a quoted PRICE market. Editing the pages
+    # broke this guard, which is what a guard over a claim is for.
     for name, book in (("consumer", consumer_book), ("onchain", onchain_book)):
-        check("waits on a quoted book" in book,
-              f"runbook: {name} does not say the live order waits on a QUOTED BOOK")
-        check("0 bids and 0 asks" in book or "0 bids, 0 asks" in book,
-              f"runbook: {name} does not state the retained books are empty")
-    check("waits on testnet listing a bucket and a binary" not in consumer_book,
-          "runbook: consumer still names the superseded blocker")
+        # Case-insensitive: one page emphasises the phrase in caps and the other does not,
+        # and the CLAIM is what must be there, not a particular shouting of it.
+        check("quoted crypto price" in book.lower(),
+              f"runbook: {name} does not name the blocker as a quoted CRYPTO PRICE market")
+        check("112" in book,
+              f"runbook: {name} does not carry the measured count of quoted books")
+
+    # THE COUNTS MUST ADD UP, not merely appear. A substring test for "112" passed with the
+    # consumer table's own figure corrupted, because the same number appears again in the
+    # prose -- the third time in three days that "is the number present" has let an edit
+    # through (see the two rows in EVIDENCE §9). The arithmetic is the claim: 112 quoted plus
+    # 1,124 empty is 1,236 books, which is 618 outcomes on two sides.
+    # Read the consumer page's sweep TABLE, each row on its own, so a corrupted cell fails
+    # whatever the surrounding prose repeats.
+    swept = [int(cell.replace(",", "").replace("*", ""))
+             for cell in re.findall(r"^\|[^|\n]+\|\s*\**([\d,]+)\**\s*\|\s*$", consumer_book, re.M)]
+    check(len(swept) == 3,
+          f"runbook: consumer's sweep table has {len(swept)} numeric rows, expected 3")
+    if len(swept) == 3:
+        total, quoted, empty = swept
+        check(quoted + empty == total,
+              f"runbook: the sweep table does not add up: {quoted} quoted + {empty} empty "
+              f"!= {total} books")
+        check(total % 2 == 0 and f"{total // 2}" in consumer_book,
+              f"runbook: {total} books is not two sides of a stated outcome count")
+    for stale, what in (("waits on testnet listing a bucket and a binary", "the bucket blocker"),
+                        ("waits on a quoted book", "the undifferentiated-depth blocker")):
+        check(stale not in consumer_book, f"runbook: consumer still names {what}")
+        check(stale not in onchain_book, f"runbook: onchain still names {what}")
 
     # ---- EVERY SIGNATURE THE ON-CHAIN PAGE TELLS AN OPERATOR TO CALL EXISTS
     #
