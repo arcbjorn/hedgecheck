@@ -115,7 +115,17 @@ def main():
           f"   ask={bucket_ask}")
 
     if shared and (out_of_money or real_bucket):
-        print("\nHEDGEABLE: run `hedgecheck check --live --network mainnet ...`")
+        # --cap IS A POSITIVE MAGNITUDE. A negative one used to double-negate into a sell-down
+        # larger than the holding and a positive "loss" cap; it is refused now, but the command
+        # is spelled out here so the right sign is what gets copied.
+        print("\nHEDGEABLE. From the engine directory:\n")
+        print("  go run ./cmd/hedgecheck check --live --network mainnet \\")
+        print(f"    --underlying {underlying} --quantity 0.1 --cap 2000 \\")
+        print("    --floor 60000 --ceiling 110000 --baseline analysis_time \\")
+        print(f"    --valuation-time {bucket_terms['expiry'][:4]}-{bucket_terms['expiry'][4:6]}"
+              f"-{bucket_terms['expiry'][6:8]}T{bucket_terms['expiry'][9:11]}:"
+              f"{bucket_terms['expiry'][11:]}:00Z \\")
+        print("    --store ~/.hedgecheck/store --registry ../registry")
         return 0
     print("\nNOT HEDGEABLE TODAY. A refusal from the live check would be correct, not a bug.")
     return 1
