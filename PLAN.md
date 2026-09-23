@@ -580,15 +580,16 @@ where the gate is, not only in the runbook:
   three at 81,100 / 81,500 / 81,900, same 90-second TWAP, same `priceDescription`; both
   `xyz:AAPL` and `xyz:XYZ100` at `20260921-1900` have five each. A long position plus YES at
   one strike and NO at another is a hedge this project verifies, and it needs no bucket. So
-  the market SHAPE exists on testnet routinely. **Re-measured 23 Sep and the blocker moved
-  again:** those two retained instances have EXPIRED (`#204891`, `#203580` return `null`, not
-  an empty book), and a sweep of all 618 outcomes on both sides found **112 of 1,236 books
-  carrying a quote** — so depth now exists. But every quoted book is a World Cup match or the
-  May CPI print, and **not one is a crypto price market.** A sports outcome carries no
-  `priceDescription`, no `perp` and no threshold, so nothing relates it to a perp exposure and
-  lowering refuses it (`CATALOGUE_UNREADABLE`) rather than inventing a series.
-  **The blocker is a quoted PRICE market — narrower than liquidity, and narrower than the
-  "quoted book" this plan said on 22 Sep.**
+  the market SHAPE exists on testnet routinely. **Re-measured 23 Sep: THE BLOCKER IS GONE, and
+  the 22 Sep claim was a measurement bug of mine, not a fact about the venue.** The probe asked
+  for `#10218` — the raw outcome id — where the coin is `'#' + (10*outcome + side)`; a wrong
+  coin answers `null`, which the probe reported as an empty book. `discover.go` had the rule
+  right. Swept properly (`tools/sweep_testnet.py`, all 618 outcomes, both sides): **114 of
+  1,236 books quoted, 56 structured price markets, 28 of their books quoted.** `xyz:AAPL` at
+  `20260923-1900` has five strikes with asks on both sides at several; `BTC 70000` at
+  `20260930-1200` is quoted on both. The two retained instances have separately EXPIRED
+  (`null`, not empty — different facts). The remaining quoted depth is World Cup and CPI
+  markets, which lowering refuses as price legs rather than inventing a series for.
   Meanwhile every bundle in
   the repository is built from MAINNET books and carries coin `#39710`, asset id
   `100,039,710`; testnet's outcomes are 10217–20497, a disjoint range. **Aiming an
@@ -596,11 +597,13 @@ where the gate is, not only in the runbook:
   there** — and the gate cannot catch it, because the bundle is internally consistent
   and the check is sound. `run.ts` now refuses `--send` without an explicit
   `--bundle-is-for-this-network`, since nothing inside a bundle records its network.
-- No quoted testnet market is a price market besides (measured 23 Sep), so **the live run
-  exercises the ORDER PATH, not the hedge check.** A success there is not a checked hedge, and
-  reading it as one is the mistake this row exists to prevent. Sending against a World Cup
-  book would place a real order whose "hedge" verdict this tool refuses to produce, which is
-  the sharpest form of that mistake available today.
+- A quoted price ladder now exists (23 Sep), so a live run can exercise **both** the order path
+  and a real hedge check — which the 22 Sep note said it could not. Two cautions survive. The
+  instruments are DATED: `20260923-1900` expires the day it was measured, so the proposal must
+  be built from a CURRENT capture and the digest approved against that capture, never from a
+  bundle in this repository. And sending against a World Cup book would place a real order
+  whose hedge verdict this tool refuses to produce — the sharpest form of "a success is not a
+  checked hedge" still available.
 - Everything up to the send is proved offline against a fake exchange: the envelope, the
   msgpack encoding and EIP-712 digest (both derived by hand from their specs and matched
   byte for byte), one send with no retry, and a re-check after a partial fill.
