@@ -23,19 +23,47 @@ choose**.
         --bundle fixtures/bundles/good-envelope --network testnet
     APPROVED {"coin":"#39710", ...}        <-- a MAINNET instrument
 
-**A testnet bundle cannot be built today either.** The canonical check needs one expiry
-carrying both a binary and a bucket, and testnet has none (verified 21 Sep: 5 recurring
-binaries at `expiry:20260922-0300`, 1 bucket at `expiry:20260921-0600`). The tool says
-so itself and spends one request:
+**A testnet bundle cannot be built today either — and the reason is LIQUIDITY, not
+listing.** Corrected 22 Sep; the earlier wording on this page said testnet lists no expiry
+carrying both a binary and a bucket, which is true and was the wrong blocker.
+
+**A bucket is not required.** Long the underlying, YES at one strike and NO at another is a
+hedge this tool verifies, and testnet lists those ladders routinely — verified against the
+retained 21 September catalogue:
+
+| Underlying | Expiry | Strikes at that expiry |
+|---|---|---|
+| `xyz:XYZ100` | `20260921-1900` | 29,100 · 29,300 · 29,500 · 29,700 · 29,900 |
+| `xyz:AAPL` | `20260921-1900` | 7,600 · 7,650 · 7,700 · 7,750 · 7,800 |
+| `BTC` | `20260921-1200` | 81,100 · 81,500 · 81,900 |
+
+(Testnet carries no price bucket at all — the only `*Bucket` outcomes are
+`policyRateBucket`, on Fed rates. That is why waiting for one was waiting for the wrong
+thing.)
+
+**What is missing is depth.** Both retained testnet books are empty — 0 bids and 0 asks —
+so a cost bound walked from displayed asks prices nothing and lowering refuses with
+`INSUFFICIENT_DEPTH`, correctly.
 
     $ hedgecheck check --live --network testnet
-    no expiry with both a binary and a bucket for BTC
+    INSUFFICIENT_DEPTH: <leg>: displayed asks do not cover <size> contracts
 
-Both books were empty besides (0 bids, 0 asks), so even with a shared expiry a depth
-walk would price nothing.
+**So the live order waits on a quoted book, not on a listing.** Re-read a ladder's books
+before trying again; §0 onwards is ready for when one has depth. The shape is already there,
+which widens what counts as unblocked: any ladder with two quoted strikes at one expiry will
+do.
 
-**So the live order waits on testnet listing a bucket and a binary at one expiry, with
-depth.** Re-read the catalogue before trying again; §0 onwards is ready for when it does.
+## There is a second path, and it is a different page
+
+This page is the OFF-CHAIN order: the gate in `consumer/` decides, signs, and sends to the
+exchange endpoint. There is also an on-chain path — `onchain/ApprovedOrderGate.sol`, sending
+through CoreWriter — with its own runbook at [`onchain/RUNBOOK.md`](../onchain/RUNBOOK.md).
+
+They bound different things. Here the gate runs the checker itself, so the decision and the
+send are one step. On chain the contract cannot verify a certificate at all — the evidence a
+cost bound rests on is not visible to a contract — so you check it off chain and approve its
+digest, and the gate holds the order to what you approved. Read that page's STOP section before
+using it.
 
 ## What this run will establish, and what it will not
 
