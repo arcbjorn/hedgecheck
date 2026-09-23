@@ -175,3 +175,36 @@ test("the bounded cost is the product, in the scaled domain", () => {
   // And that really is 160.76676, the retained envelope's own max_cost, at 10^16.
   assert.equal(boundedCost(order), 16_076_676n * 10n ** 11n);
 });
+
+// THE SOLIDITY GATE PRODUCES THE SAME BYTES.
+//
+// `onchain/src/ApprovedOrderGate.sol` encodes the same action independently -- Solidity's own
+// `abi.encode` of the seven fields, with the four-byte header written literally. Two
+// implementations of one layout agree, and that is checked here rather than assumed, because
+// a gate that encoded differently from the sender would place a different order.
+//
+// The expected value is the bytes forge printed from the contract, pasted once. That is the
+// same discipline as the golden table: a constant somebody else's code produced, not a
+// re-derivation by the code under test. If either side changes, this fails.
+test("the solidity gate and this encoder agree byte for byte", () => {
+  const bytes = encodeLimitOrder({
+    asset: 100_039_710,
+    isBuy: true,
+    limitPx: 17_399_000n,
+    sz: 92_400_000_000n,
+    reduceOnly: false,
+    encodedTif: TIF.Ioc,
+    cloid: 0n,
+  });
+  const fromSolidity =
+    "01000001" +
+    "0000000000000000000000000000000000000000000000000000000005f67c1e" +
+    "0000000000000000000000000000000000000000000000000000000000000001" +
+    "0000000000000000000000000000000000000000000000000000000001097cd8" +
+    "0000000000000000000000000000000000000000000000000000001583781c00" +
+    "0000000000000000000000000000000000000000000000000000000000000000" +
+    "0000000000000000000000000000000000000000000000000000000000000003" +
+    "0000000000000000000000000000000000000000000000000000000000000000";
+  assert.equal(hex(bytes), fromSolidity);
+  assert.equal(bytes.length, 4 + 32 * 7, "four header bytes and seven static words");
+});
