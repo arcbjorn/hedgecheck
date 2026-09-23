@@ -54,10 +54,18 @@ different range. Approving one of those digests and sending it on testnet either
 buys an unrelated instrument that answers to that id.
 
 Testnet does list the market **shape** — strike ladders at one expiry, verified against the
-retained 21 September catalogue — but both retained books are empty, 0 bids and 0 asks. A cost
-bound walked from displayed asks prices nothing. **The gate waits on a quoted book.**
+retained 21 September catalogue. Those particular instances have since expired (`#204891` and
+`#203580` return `null` as of 23 Sep, not an empty book).
 
-Steps 1 onward are ready for when one has depth.
+**Measured 23 Sep across all 618 outcomes, both sides:** 112 of 1,236 books carry a quote, so
+depth exists on testnet now — but every quoted book is a World Cup match or the May CPI print,
+and **not one is a crypto price market.** A sports outcome has no `priceDescription` and no
+threshold, so nothing relates it to a perp exposure and lowering refuses it rather than
+guessing. **The gate waits on a quoted crypto price ladder**, which is a narrower thing than
+the "quoted book" this page said before. See [`consumer/RUNBOOK.md`](../consumer/RUNBOOK.md)
+for the sweep and the counts.
+
+Steps 1 onward are ready for when one appears.
 
 ## 1. Build and check the gate
 
