@@ -597,13 +597,18 @@ where the gate is, not only in the runbook:
   there** — and the gate cannot catch it, because the bundle is internally consistent
   and the check is sound. `run.ts` now refuses `--send` without an explicit
   `--bundle-is-for-this-network`, since nothing inside a bundle records its network.
-- A quoted price ladder now exists (23 Sep), so a live run can exercise **both** the order path
-  and a real hedge check — which the 22 Sep note said it could not. Two cautions survive. The
-  instruments are DATED: `20260923-1900` expires the day it was measured, so the proposal must
-  be built from a CURRENT capture and the digest approved against that capture, never from a
-  bundle in this repository. And sending against a World Cup book would place a real order
-  whose hedge verdict this tool refuses to produce — the sharpest form of "a success is not a
-  checked hedge" still available.
+- **The blocker is discovery, not liquidity — found 23 Sep by RUNNING the live path.**
+  `hedgecheck check --live --network testnet` refuses with
+  `no expiry with both a binary and a bucket for BTC`,
+  because `engine/discover/discover.go` requires both and testnet carries no price bucket at
+  all. The sentence above — that a ladder hedge "needs no bucket" — is true of
+  the EVALUATOR and false of DISCOVERY, and three days of liquidity claims were aimed at the
+  wrong thing. Measured exhaustively: of 56 structured price markets, 17 lower, 14 have asks,
+  10 do both, and all 10 are `xyz:*` referenced to Pyth — so they earn `basis_unbridged`,
+  yield `needs_review`, and the gate refuses them. The one BTC ladder that lowers cleanly
+  (`'the Hyperliquid BTC perp trade'` @90s, `20260923-1200`, three strikes, already mapped) has
+  0 bids and 0 asks on all six sides. **Supporting the ladder shape in discovery is a design
+  change and the owner's call; it is not a fix to make quietly.**
 - Everything up to the send is proved offline against a fake exchange: the envelope, the
   msgpack encoding and EIP-712 digest (both derived by hand from their specs and matched
   byte for byte), one send with no retry, and a re-check after a partial fill.
