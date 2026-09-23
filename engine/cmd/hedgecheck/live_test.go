@@ -153,3 +153,34 @@ func TestLiveNumbersAreExact(t *testing.T) {
 		}
 	}
 }
+
+// A NEGATIVE --cap IS REFUSED, because accepting one produced a wrong answer silently.
+//
+// Found 23 September, on live mainnet data. `smallestReduction` computes keep = -cap/span and
+// its caller in run.go already passes `cap.Neg()`, so the two negations cancel for a POSITIVE
+// cap and compound for a negative one: `--cap -2000` gave a negative keep, a sell-down row of
+// 0.182 BTC against a 0.1 holding -- selling more than is held -- and a worst case printed as
+// +2000 where a loss cap is -2000.
+//
+// Every existing test passed throughout, because every one of them supplies a positive cap
+// (this file's own validFlags uses "1000"), so the double negation cancels in the tests and
+// only bites a real caller. The schema's min_pnl is negative and this flag is positive, which
+// is exactly the confusion that produced it.
+func TestRefusesANegativeOrZeroCap(t *testing.T) {
+	for _, bad := range []string{"-2000", "-0.01", "0"} {
+		flags := validFlags()
+		flags.capAmount = bad
+		_, ok, message := parseFor(t, flags)
+		if ok {
+			t.Fatalf("--cap %s was accepted; a negative cap double-negates into a negative keep", bad)
+		}
+		if !strings.Contains(message, "--cap") {
+			t.Errorf("--cap %s refused without naming the flag: %q", bad, message)
+		}
+	}
+	// And the positive form still works, so the rule refuses the wrong input rather than every
+	// input -- the failure mode a sign check invites.
+	if _, ok, message := parseFor(t, validFlags()); !ok {
+		t.Fatalf("a positive --cap was refused: %q", message)
+	}
+}
