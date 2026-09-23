@@ -760,12 +760,14 @@ def runbooks():
     # blocker is narrower than "a quoted book": it is a quoted PRICE market. Editing the pages
     # broke this guard, which is what a guard over a claim is for.
     for name, book in (("consumer", consumer_book), ("onchain", onchain_book)):
-        # Case-insensitive: one page emphasises the phrase in caps and the other does not,
-        # and the CLAIM is what must be there, not a particular shouting of it.
-        check("quoted crypto price" in book.lower(),
-              f"runbook: {name} does not name the blocker as a quoted CRYPTO PRICE market")
-        check("112" in book,
-              f"runbook: {name} does not carry the measured count of quoted books")
+        # BOTH PAGES POINT AT THE SWEEP rather than restating a measurement. The blocker claim
+        # changed three times in two days -- listing, then depth, then a quoted price market,
+        # then nothing -- and each restatement went stale. A command the reader RUNS cannot.
+        check("tools/sweep_testnet.py" in book,
+              f"runbook: {name} does not tell the reader to run the sweep")
+        # The instruments are DATED, so the page must say the measurement expires.
+        check("re-sweep" in book.lower() or "Re-run the sweep" in book,
+              f"runbook: {name} does not tell the reader to re-sweep before acting")
 
     # THE COUNTS MUST ADD UP, not merely appear. A substring test for "112" passed with the
     # consumer table's own figure corrupted, because the same number appears again in the
@@ -785,6 +787,19 @@ def runbooks():
               f"!= {total} books")
         check(total % 2 == 0 and f"{total // 2}" in consumer_book,
               f"runbook: {total} books is not two sides of a stated outcome count")
+    # THE PRICE-MARKET COUNT IS NOT GUARDED HERE, DELIBERATELY.
+    #
+    # It was, briefly, as `hedgeable <= 2*markets` and `hedgeable <= quoted`. A mutation raising
+    # the market count 56 -> 96 stayed GREEN, and no internal relation can catch it: 96 is
+    # arithmetically consistent with 618 outcomes, 114 quoted books and 28 quoted price books.
+    # The figure is a live MEASUREMENT, and `make check` is offline by design, so the only
+    # honest guard is to require the page to send the reader to the sweep -- which the two
+    # checks above do -- rather than to pin a number here that a passing expiry invalidates.
+    # Writing a checkable-looking assertion around an uncheckable number is worse than
+    # admitting the gap: it reads as verified.
+    check("Read the count from the sweep" in consumer_book,
+          "runbook: consumer states a live price-market count without sending the reader "
+          "to the sweep for the current one")
     for stale, what in (("waits on testnet listing a bucket and a binary", "the bucket blocker"),
                         ("waits on a quoted book", "the undifferentiated-depth blocker")):
         check(stale not in consumer_book, f"runbook: consumer still names {what}")
