@@ -53,20 +53,22 @@ from MAINNET books and carries coin `#39710` — asset id `100,039,710`. Testnet
 different range. Approving one of those digests and sending it on testnet either bounces or
 buys an unrelated instrument that answers to that id.
 
-**Measured 23 Sep: there IS a quoted price ladder, so this no longer blocks.** Run the sweep,
-which is read-only:
+**Measured 23 Sep: depth exists, but this still blocks — on DISCOVERY, not liquidity.** The
+sweep is read-only and is the check:
 
     $ python3 tools/sweep_testnet.py
 
-114 of 1,236 books carry a quote; 56 outcomes are structured price markets and 28 of their
-books are quoted. `xyz:AAPL` at `20260923-1900` has five strikes with asks on both sides at
-several, and `BTC 70000` at `20260930-1200` is quoted on both. The earlier "0 bids and 0 asks"
-on this page was a probe bug — the wrong coin encoding answering `null` — not an empty venue.
-See [`consumer/RUNBOOK.md`](../consumer/RUNBOOK.md) for both corrections.
+114 of 1,236 books carry a quote, so the earlier "0 bids and 0 asks" on this page was a probe
+bug (the wrong coin encoding answering `null`) and not an empty venue. But the live path still
+refuses: `engine/discover/discover.go` needs a binary **and** a bucket at one expiry, and
+testnet has no price bucket. And of the 10 markets that both lower and are quoted, every one is
+Pyth-referenced, so it yields `needs_review` — which **this gate refuses by design.** See
+[`consumer/RUNBOOK.md`](../consumer/RUNBOOK.md) for the full cross and the numbers.
 
-These are dated instruments and `20260923-1900` expires today, so **re-sweep before you
-approve anything**: the digest you approve is bound to a capture, and a ladder that is quoted
-now may be gone by the time you send.
+So there is still nothing to approve today. Steps 1 onward are correct and tested; they wait on
+a decision about discovery or a declared basis bound, both of which are the owner's. **Re-sweep
+before you approve anything** regardless: these are dated instruments and the digest you
+approve is bound to a capture.
 
 ## 1. Build and check the gate
 
