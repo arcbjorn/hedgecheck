@@ -41,17 +41,31 @@ retained 21 September catalogue:
 `policyRateBucket`, on Fed rates. That is why waiting for one was waiting for the wrong
 thing.)
 
-**What is missing is depth.** Both retained testnet books are empty — 0 bids and 0 asks —
-so a cost bound walked from displayed asks prices nothing and lowering refuses with
-`INSUFFICIENT_DEPTH`, correctly.
+**Measured again on 23 Sep, and the blocker has MOVED.** The two retained instances above are
+dated `20260921` and have expired: `#204891` and `#203580` both return `null`, not an empty
+book. So "0 bids and 0 asks" is no longer a claim about anything live, and quoting it would be
+quoting a market that no longer exists.
 
-    $ hedgecheck check --live --network testnet
-    INSUFFICIENT_DEPTH: <leg>: displayed asks do not cover <size> contracts
+What the catalogue holds today, swept over all 618 outcomes, both sides, 1,236 books:
 
-**So the live order waits on a quoted book, not on a listing.** Re-read a ladder's books
-before trying again; §0 onwards is ready for when one has depth. The shape is already there,
-which widens what counts as unblocked: any ladder with two quoted strikes at one expiry will
-do.
+| | count |
+|---|---|
+| books returning a book | 1,236 |
+| **carrying at least one quote** | **112** |
+| empty (0 bids, 0 asks) | 1,124 |
+
+So depth EXISTS now. But **none of it is on a price market.** Every one of the 112 quoted
+books is a World Cup match or the May CPI print — `q823` 2026 World Cup champion, `q844`
+Saudi Arabia vs Uruguay, `q820` May CPI year-over-year, and so on. A sports outcome carries
+no `priceDescription`, no `perp`, no threshold and no TWAP window, so there is no price series
+to relate it to a perp exposure, and this tool refuses it rather than inventing one:
+
+    REFUSED CATALOGUE_UNREADABLE: description part '' is not key:value
+
+**So the live order now waits on a quoted CRYPTO PRICE ladder** — not on listing, and no
+longer on depth in general. Re-sweep before trying again; the sweep is the check, because
+the two facts move independently and the earlier page conflated them. §0 onwards is ready
+for any price ladder with two quoted strikes at one expiry.
 
 ## There is a second path, and it is a different page
 
