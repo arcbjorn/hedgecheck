@@ -41,31 +41,49 @@ retained 21 September catalogue:
 `policyRateBucket`, on Fed rates. That is why waiting for one was waiting for the wrong
 thing.)
 
-**Measured again on 23 Sep, and the blocker has MOVED.** The two retained instances above are
-dated `20260921` and have expired: `#204891` and `#203580` both return `null`, not an empty
-book. So "0 bids and 0 asks" is no longer a claim about anything live, and quoting it would be
-quoting a market that no longer exists.
+**Measured 23 Sep, and THE BLOCKER IS GONE.** Run the sweep yourself — it is the check, and it
+is read-only:
 
-What the catalogue holds today, swept over all 618 outcomes, both sides, 1,236 books:
+    $ python3 tools/sweep_testnet.py
+
+Two corrections to what this page said on 22 Sep, both of them errors in the earlier probe and
+not in the venue:
+
+- The two retained instances are dated `20260921` and have **expired**: `#204891` and
+  `#203580` return `null`, not an empty book. Those are different facts, and reporting the
+  first as the second claims something false about a market that is not there.
+- **"0 bids and 0 asks" was a measurement bug.** The earlier probe asked for `#10218` — the
+  raw outcome id — where the venue's coin is `'#' + (10*outcome + side)`, yes=0 no=1, so
+  outcome 10218 YES is `#102180`. A wrong coin answers `null`, which the probe read as an
+  empty book. `engine/discover/discover.go` had the rule right all along.
+
+Swept properly over all 618 outcomes, both sides:
 
 | | count |
 |---|---|
 | books returning a book | 1,236 |
-| **carrying at least one quote** | **112** |
-| empty (0 bids, 0 asks) | 1,124 |
+| carrying at least one quote | 114 |
+| empty (0 bids, 0 asks) | 1,122 |
 
-So depth EXISTS now. But **none of it is on a price market.** Every one of the 112 quoted
-books is a World Cup match or the May CPI print — `q823` 2026 World Cup champion, `q844`
-Saudi Arabia vs Uruguay, `q820` May CPI year-over-year, and so on. A sports outcome carries
-no `priceDescription`, no `perp`, no threshold and no TWAP window, so there is no price series
-to relate it to a perp exposure, and this tool refuses it rather than inventing one:
+Of those, some are **structured price markets** — carrying `perp`, `priceDescription`,
+`seconds` and `threshold`, the template fields a price leg is built from — and the sweep prints
+how many, and how many of their books are quoted, under `quoted AND a price market`. On 23 Sep
+it was 56 markets and 28 quoted books. **Read the count from the sweep, not from this line:**
+these are dated instruments, `make check` is offline and cannot verify a live number, and a
+figure written here is stale the moment an expiry passes. The rest of the quoted depth is
+World Cup and CPI markets, which this tool refuses as price legs rather than inventing a
+series for.
 
-    REFUSED CATALOGUE_UNREADABLE: description part '' is not key:value
+**A hedgeable ladder exists today.** `xyz:AAPL` at `20260923-1900` carries five strikes —
+7,600 · 7,650 · 7,700 · 7,750 · 7,800 — with asks on both YES and NO at several of them, and
+`xyz:XYZ100` at the same expiry carries five more. `BTC` has `70000` at `20260930-1200` quoted
+on both sides. A long position plus YES at one strike and NO at another is the shape this
+project verifies.
 
-**So the live order now waits on a quoted CRYPTO PRICE ladder** — not on listing, and no
-longer on depth in general. Re-sweep before trying again; the sweep is the check, because
-the two facts move independently and the earlier page conflated them. §0 onwards is ready
-for any price ladder with two quoted strikes at one expiry.
+**So step 0 no longer blocks.** Re-run the sweep first anyway: these are dated instruments and
+`20260923-1900` expires today, so the ladder that unblocks you this hour may be gone the next.
+Build the proposal from a CURRENT capture, never from a bundle in this repository — see the
+mainnet warning above.
 
 ## There is a second path, and it is a different page
 
