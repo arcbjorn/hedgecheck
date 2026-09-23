@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	"hedgecheck/engine/adapter/hyperliquid"
 	"hedgecheck/engine/doc"
@@ -107,6 +108,29 @@ func parseLiveOptions(flags options, errOut *os.File) (liveOptions, bool) {
 			fmt.Fprintf(errOut, "%s %q is not in the number grammar\n", field.named, field.text)
 			return out, false
 		}
+	}
+
+	// --cap IS A POSITIVE MAGNITUDE, and a negative one is refused rather than accepted.
+	//
+	// `smallestReduction` computes keep = -cap/span and the caller already passes `cap.Neg()`,
+	// so the two negations cancel only when --cap is positive. Given `--cap -2000` they
+	// compound: keep comes out NEGATIVE, the sell-down row printed 0.182 BTC of a 0.1 holding
+	// -- selling more than is held -- and the worst case printed +2000 where a loss cap is
+	// -2000. No test caught it because every test supplies a positive cap, so the double
+	// negation cancels there too. Measured on live mainnet data, 23 Sep.
+	//
+	// The schema's `min_pnl` is negative and this flag is positive, which is a real trap for
+	// anyone moving between them; saying so is cheaper than a silently wrong answer.
+	if out.cap.Sign() < 0 {
+		fmt.Fprintf(errOut,
+			"--cap %s is negative; pass the loss as a POSITIVE magnitude -- you most likely "+
+				"want --cap %s. (A proposal's own min_pnl is written negative; this flag is "+
+				"not.)\n", flags.capAmount, strings.TrimPrefix(flags.capAmount, "-"))
+		return out, false
+	}
+	if out.cap.Sign() == 0 {
+		fmt.Fprintf(errOut, "--cap 0 permits no loss at all, which no hedge can meet\n")
+		return out, false
 	}
 
 	if flags.valuationTime != NextExpiry && !valuationTimePattern.MatchString(flags.valuationTime) {
