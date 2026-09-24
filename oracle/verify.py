@@ -505,6 +505,13 @@ def testnet_shape():
     genuinely evaluable -- long the underlying, YES at one strike, NO at another -- but nothing
     assembles one from a live catalogue today.
 
+    THAT IS A FACT ABOUT TESTNET ONLY, and stating it without the next sentence misled this
+    project for a day. MAINNET pairs a binary and a bucket at one expiry routinely, so the live
+    path runs end to end there with no code change and the ladder was never needed. The
+    pairing is re-derived below from every retained mainnet catalogue rather than asserted,
+    because "the venue carries the shape" is exactly the kind of claim that was wrong four
+    times running when it rested on one reading.
+
     Checked against the retained 21 September testnet catalogue so the claim in PLAN is
     re-derived rather than remembered.
     """
@@ -564,6 +571,52 @@ def testnet_shape():
         check("no expiry with both a binary and a bucket" in text,
               f"{name} does not quote the live path's own refusal, so a reader cannot tell "
               f"that the blocker is discovery rather than liquidity")
+
+    # MAINNET SATISFIES THE REQUIREMENT TESTNET FAILS, in every retained catalogue.
+    #
+    # This is the fact that made the ladder unnecessary, so it is pinned rather than
+    # remembered: the reasoning above is only sound while mainnet really does pair the two
+    # families at a shared expiry. Re-derived from the retained captures with the same
+    # `name == "Recurring"` and `class:` filters `discover.go` uses -- filtering on a field
+    # the code does not use is what produced two wrong population claims on 23 Sep.
+    for day in ("2026-09-18", "2026-09-19", "2026-09-20"):
+        folder = FIXTURES / "replay" / day
+        catalogue = json.loads((folder / ("catalogue.json" if (folder / "catalogue.json").exists()
+                                         else "outcome-meta.json")).read_text())
+        binary_expiries, bucket_expiries = set(), set()
+        for outcome in catalogue.get("outcomes", []):
+            if outcome.get("name") != "Recurring":
+                continue
+            terms = O_terms(outcome)
+            if terms.get("class") == "priceBinary" and terms.get("underlying") == "BTC":
+                binary_expiries.add(terms.get("expiry"))
+        for question in catalogue.get("questions", []):
+            if question.get("name") != "Recurring":
+                continue
+            terms = O_terms(question)
+            if terms.get("class") == "priceBucket" and terms.get("underlying") == "BTC":
+                bucket_expiries.add(terms.get("expiry"))
+        check(binary_expiries & bucket_expiries,
+              f"mainnet {day}: no expiry carries both a BTC binary and a BTC bucket, so the "
+              f"reason PLAN gives for dropping the ladder -- that mainnet already pairs them "
+              f"-- does not hold in the retained captures and must be re-read")
+
+    # THE DOWNSIDE LEG IS INDEX 0, by the registry's own payoff definition.
+    #
+    # On 24 Sep a genuinely quoted bucket index 1 (ask 0.036, where index 0 was a 0.99998
+    # placeholder) looked briefly like an opportunity discovery was missing. It pays on a
+    # RISE into the band, so buying it as downside protection would be wrong and
+    # `named[0]` is right. Cheapness that comes from a payoff being unlikely is not a
+    # bargain, and this pins the direction so the same mistake cannot be made twice.
+    bucket_entry = json.loads((PROJECT / "registry" / "recurring.priceBucket.json").read_text())
+    index0_yes = [payoff for payoff in bucket_entry["payoffs"]
+                  if payoff["select"] == {"side": "yes", "index": "0"}]
+    check(len(index0_yes) == 1, "registry: expected exactly one yes/index-0 bucket payoff")
+    if index0_yes:
+        pays_on = index0_yes[0]["pays"][0]["pays_on"]
+        check("lower" not in pays_on and pays_on.get("upper", {}).get("at") == "0",
+              "registry: bucket index 0 YES no longer pays strictly below thresholds[0], so it "
+              "is not the downside leg and discover.go taking named[0] must be re-justified")
 
 
 def review_seals():
@@ -912,6 +965,102 @@ def runbooks():
     # And the identity the page asserts: the walk touched the top level, so the bound is tight.
     check(price * size == scaled(envelope["max_cost"]) * 10 ** 8,
           "runbook: limitPx * sz is not max_cost at 10^16, so the page's table is wrong")
+
+    # ---- NO PAGE OFFERS THE LADDER AS THE WAY THROUGH
+    #
+    # `consumer/RUNBOOK.md` told an operator for a day that what unblocked them was "widen
+    # discovery to the ladder shape, or declare a basis bound -- both are the owner's". Both
+    # were wrong: mainnet already pairs the two families, so nothing needed widening, and the
+    # remaining obstacle is a market price no decision reaches. That is the second time this
+    # page has carried a superseded blocker, and a runbook is the document somebody ACTS on.
+    # The historical record in PLAN may discuss the ladder; a page that stops an operator may
+    # not offer it as an action.
+    #
+    # A BARE SUBSTRING CANNOT DO THIS, found by the guard's own control failing 24 Sep: the
+    # corrected page NAMES the dropped advice in order to retract it, so "widen discovery to
+    # the ladder shape" not in book fails on the very text that fixes the problem. Prohibiting
+    # a phrase forbids quoting it, which is the opposite of a page that explains itself. What
+    # distinguishes them is the RETRACTION, so that is what is checked: any page mentioning the
+    # ladder as a way through must also say it was dropped, and must send the reader to the
+    # command that decides today.
+    for name, book in (("consumer", consumer_book), ("onchain", onchain_book)):
+        offers = re.search(r"widen discovery to the ladder shape", book)
+        if offers:
+            check(re.search(r"ladder is not being built|ladder was dropped", book),
+                  f"{name} runbook names widening discovery to the ladder shape without saying "
+                  f"it was dropped, so an operator reads a superseded action as the way through")
+    check("hedgeable_today.py" in consumer_book,
+          "consumer runbook does not point at tools/hedgeable_today.py, so an operator has no "
+          "command that says whether today's market can produce a hedge")
+
+    # ---- DEMO.md IS A RUNBOOK TOO, and its numbers come from the retained bundle
+    #
+    # The page shows three verdicts and two premiums as output "not illustrative". Those are
+    # exactly the claims that go stale, and a demo that prints a different number from the one
+    # on the page is worse than no page -- it is read aloud in front of an audience. Checked
+    # against the retained 18 September capture rather than against the engine, so the page and
+    # the bundle cannot drift apart silently.
+    demo = (PROJECT / "DEMO.md").read_text()
+    base = FIXTURES / "replay" / "2026-09-18"
+
+    # The premium for the smallest passing size, walked over the retained ask levels by hand.
+    # Costs are money and the page quotes them to five decimals, so Fraction, never float.
+    def premium_for(stem, size):
+        levels = json.loads((base / f"{stem}.json").read_text())["levels"][1]
+        remaining, spend = size, F(0)
+        for level in levels:
+            take = min(remaining, int(F(level["sz"])))
+            spend += F(level["px"]) * take
+            remaining -= take
+            if remaining == 0:
+                break
+        check(remaining == 0,
+              f"demo: the retained {stem} book cannot fill {size}, so the page's premium is "
+              f"not a number this capture supports")
+        return spend
+
+    for stem, size, shown in (("book-bucket0-3971-yes", 924, "160.76676"),
+                              ("book-3965-no", 1409, "645.76904")):
+        walked = premium_for(stem, size)
+        check(walked == F(shown),
+              f"demo: DEMO.md shows {shown} for {size} of {stem}, the retained book walks to "
+              f"{walked} -- the page and the capture disagree")
+        check(shown in demo,
+              f"demo: DEMO.md no longer shows the premium {shown}, so its comparison table has "
+              f"moved away from the retained capture")
+
+    # THE SIZES THE PREMIUMS ARE FOR, which the page states in prose.
+    #
+    # Caught by mutation 24 Sep: changing "924 bucket contracts" to 999 stayed green, because
+    # only the premium strings were pinned and the size sat in a sentence. The size is what the
+    # premium is computed FOR, so a reader who re-walks the book with the wrong size gets a
+    # different number and concludes the page is wrong. The size is also the engine's own
+    # `smallest` in `size_windows`, so it is checked against the result rather than a literal.
+    # The sizes are HAND-PINNED, not read back from the engine. Running the engine here would
+    # break the oracle's purity (no I/O, no subprocess) and, worse, would take the expected
+    # value from the code under test -- so a wrong size would agree with itself. 924 and 1,409
+    # are the values whose premiums are walked over the retained books above, and that walk is
+    # the independent check: if a size were wrong the premium would not match the page.
+    check("(924 bucket contracts, 1,409 binary)" in demo,
+          "demo: DEMO.md does not state the sizes 924 and 1,409 that its hand-walk depends on, "
+          "so a reader re-walking the book would use a different size and get a different total")
+
+    # The ranking claim, which is the page's punchline: the bucket is the cheaper hedge.
+    check(F("160.76676") < F("645.76904"),
+          "demo: the two premiums no longer rank bucket0 below binary")
+    check("ranking : ['bucket0', 'binary']" in demo,
+          "demo: DEMO.md does not show the ranking it claims compare produces")
+
+    # And the third proposal must still be the one that FAILS. A demo whose point is that the
+    # tool refuses an expired hedge stops making it the moment that proposal passes.
+    check("bucket0-horizon -> exit=1" in demo,
+          "demo: DEMO.md no longer shows bucket0-horizon failing, which is the exhibit that "
+          "shows a reduction refusing a hedge rather than a hedge being approved")
+    for stem in ("bucket0", "binary"):
+        check(f"{stem}" in demo and (base / f"{stem}.proposal.json").exists(),
+              f"demo: DEMO.md names {stem} but the retained proposal is gone")
+    check((base / "bucket0-horizon.proposal.json").exists(),
+          "demo: the bucket0-horizon proposal DEMO.md runs is missing from the capture")
 
 
 def onchain_representable():
