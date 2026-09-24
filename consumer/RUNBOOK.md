@@ -98,9 +98,24 @@ Those ten also show why a testnet `passes` would prove little about semantics: t
 market at thresholds near 7,600, under `template:binaryPrice6`. Testnet's price catalogue is
 scratch space — other descriptions include `'TWAP stuff'`, `'agent probe'` and `'HAHVD'`.
 
-**What unblocks this is a decision, not a wait:** either widen discovery to the ladder shape
-(a design change), or declare a basis bound for a Pyth-referenced leg (an owner review). Both
-are the owner's.
+**Corrected 24 Sep: neither decision was the answer, and the ladder is not being built.** This
+page previously said the way through was to widen discovery to the ladder shape or declare a
+basis bound. The ladder existed only to route around discovery's binary-and-bucket requirement
+on testnet, and **mainnet satisfies that requirement every day** — the BTC binary and bucket
+share one expiry in all three retained catalogues and live — so the pipeline already runs end to
+end on mainnet, read-only. On testnet the two sit 21 hours apart, both `period=1d`, so they can
+never pair there. Testnet was the one venue where the shape does not line up.
+
+**What remains is a market condition, and no decision reaches it.** A useful daily hedge needs
+the binary's target BELOW spot, so the NO leg that pays on a fall is out of the money and cheap.
+Run `python3 tools/hedgeable_today.py`: it names the failing precondition and exits 1, or exits 0
+and prints the live command. Do not switch underlying looking for a way round — BTC is the only
+one carrying a bucket at all — and do not read a cheap bucket ask as an opening: bucket index 1
+pays on a RISE into the band, so it is not downside protection, and `named[0]` is the correct
+leg.
+
+For a demonstration that needs no market at all, use [`DEMO.md`](../DEMO.md), which replays the
+retained 18 September capture offline.
 
 Whichever way that goes, **re-sweep before acting**: every figure above is a dated observation,
 the instruments expire, and the digest you eventually approve is bound to a capture taken at
