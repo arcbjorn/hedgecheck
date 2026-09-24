@@ -609,6 +609,24 @@ where the gate is, not only in the runbook:
   (`'the Hyperliquid BTC perp trade'` @90s, `20260923-1200`, three strikes, already mapped) has
   0 bids and 0 asks on all six sides. **Supporting the ladder shape in discovery is a design
   change and the owner's call; it is not a fix to make quietly.**
+- **The ladder is not being built, decided 24 Sep, and the reason is that it was scoped
+  against a premise that turned out false.** It was proposed to route around discovery's
+  binary-and-bucket requirement on testnet. But **mainnet pairs a binary and a bucket at one
+  expiry every day** — `20260919-0600`, `20260920-0600`, `20260921-0600` in the three retained
+  catalogues and `20260924-0600` live — so the full pipeline already runs end to end on mainnet,
+  read-only, with no code change. The road the ladder was a detour around is open. Scope was
+  also understated when it was proposed: `discover.Candidates` returns two *alternatives* and
+  `run.go` builds one SINGLE-LEG proposal from each, so a ladder is a multi-leg proposal
+  builder plus a screen change plus new lowering paths, in all three implementations or the
+  conformance guarantee breaks — the most exactness-critical code in the project. And it would
+  not have helped today regardless: the current refusal is about PRICE, not shape. Every
+  recurring binary NO across BTC, ETH, SOL and HYPE is in the money at 0.98–0.99999, and the
+  only genuinely quoted BTC bucket side is index 1, which pays when price RISES into
+  84,823–88,286 — the wrong direction for a long holder, and cheap precisely because it
+  probably will not pay. `discover.go` taking `named[0]` is correct: index 0 is the leg that
+  pays on a fall. A ladder over those same books inherits the same prices and the same
+  refusal. If a real use case appears it should be re-scoped from scratch, because this
+  scoping was wrong.
 - Everything up to the send is proved offline against a fake exchange: the envelope, the
   msgpack encoding and EIP-712 digest (both derived by hand from their specs and matched
   byte for byte), one send with no retry, and a re-check after a partial fill.
