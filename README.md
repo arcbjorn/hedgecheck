@@ -20,6 +20,8 @@ in what order.
 - **[PLAN.md](./PLAN.md)** — authoritative for what is built, why, and in what order.
 - **[EVIDENCE.md](./EVIDENCE.md)** — every fact the plan depends on, labeled verified / third-party / unverified, with source and date.
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** — how it is built, and which test holds each boundary.
+- **[DEMO.md](./DEMO.md)** — the demo, offline: one retained capture, three questions, three
+  different verdicts, and the premiums re-derivable by hand. Needs no market and no key.
 
 ## Check the tree
 
