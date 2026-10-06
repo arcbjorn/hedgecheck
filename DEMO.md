@@ -100,6 +100,50 @@ smallest passing size in `size_windows` (924 bucket contracts, 1,409 binary) and
 out to the last digit. Nothing rounds, because nothing is a float — Python `fractions`, Go
 `math/big`, TypeScript `BigInt`.
 
+## And one live pass, from mainnet, retained
+
+The replay above is the capture the project was built on. On **5 October** the live path
+returned its first passing verdict from a book nobody had seen before:
+
+```
+leg            verdict        size         premium        worst case
+binary-no      passes         987          350.3793       -1999.3793
+bucket0-yes    no size on the displayed book meets the cap
+sell-down      no premium     159/6590     0              -2000
+```
+
+Spot was 86,360 against a target of 85,749 — the NO leg out of the money, asking **0.3547**.
+For the eleven days before this it asked 0.99999, and every cap was correctly refused.
+
+The worst case is derivable by hand, which is the point:
+
+| | |
+|---|---|
+| spot loss at the floor, `0.1 × (60,000 − 86,360)` | −2,636 |
+| the NO leg pays in full, `987 × 1` | +987 |
+| premium | −350.3793 |
+| **worst case** | **−1,999.3793** — inside a −2,000 cap by 62 cents |
+
+And the *other* candidate for the worst case, just above the target where the NO pays nothing,
+is `0.1 × (85,749 − 86,360) − 350.3793 = −411.4793` — better. So the floor is the binding price
+and the bound is attained there, which the result states as `"attained": true`.
+
+That run is retained, and replays offline with no network:
+
+```
+python3 tools/replay_live.py fixtures/live/2026-10-05
+```
+
+```
+4 snapshot digests re-derived from the retained bytes
+replay of c8390a8c99a160cb (binary-no): byte-identical
+verdict passes, cost 350.3793
+```
+
+Each snapshot's digest is `sha256` of the venue's bytes exactly as they arrived, so editing one
+price by a single digit — or even adding a space — makes the bundle fail before it replays.
+`make check` holds the figures above against those bytes and against the hand arithmetic.
+
 ## The same result from three independent implementations
 
 ```
