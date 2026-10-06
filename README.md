@@ -7,13 +7,25 @@ for Hyperliquid HIP-4 outcome markets.
 > *Do these exact terms, costs and holdings satisfy my objective — and what does
 > satisfying it cost me, against what else I could do?*
 
-**Status: T1 closed, 19 September.** One complete check runs on real data, on the
-Python oracle: it discovers the live instruments without being told their ids,
-lowers a proposal from retained bytes, and returns a verdict with its cost, the
-sizes that would have met the objective, the alternatives, and a witness per
-failing interval. The schemas are frozen at v1. **The Go engine and the
-TypeScript checker do not exist yet** — T2 and T3 build them, and the plan says
-in what order.
+**Status: T0–T7 closed except the live testnet order, 5 October.** All three
+implementations exist and must agree: the Python oracle (the reference), the Go
+engine (which answers), and the TypeScript checker (which verifies). `make check`
+fails if any two of them differ. The schemas are frozen at v1.
+
+The whole pipeline runs live on mainnet, read-only, and on 5 October it returned
+its first live **passing** verdict — 987 contracts against a 2,000 loss cap, worst
+case −1,999.3793 attained at the floor. That run is retained in
+`fixtures/live/2026-10-05/` and replays byte-identically offline:
+
+```
+python3 tools/replay_live.py fixtures/live/2026-10-05
+```
+
+**What is not done:** the one live testnet order. Testnet lists the daily binary and
+the daily bucket at expiries three hours apart, so discovery finds no shared expiry
+there and cannot build a proposal — and a mainnet bundle must never be aimed at
+testnet, because it names mainnet asset ids. The order is run by the owner, by hand,
+from `consumer/RUNBOOK.md`. No agent signs or sends anything in this project.
 
 ## Read these three
 
@@ -113,7 +125,7 @@ catalogue — so `085ccfb` is the only copy.
 | Path | Contents |
 |---|---|
 | `schema/` | 11 draft JSON Schemas: proposal, lowered proposal, result, comparison, synthesis, registry entry, reference map, snapshot record, certificate bundle manifest, refusal classes, shared definitions |
-| `fixtures/` | `golden/` a lowered proposal and its generated result · `vectors/` numbers and canonical JSON · `replay/` retained responses and the real proposals lowered from them · `bundles/` certificate bundles, seven good and seventeen corrupted · `kernel/` the oracle's exact answers to 400 kernel queries, which the Go engine must reproduce · `rejected/` documents every schema must refuse, shared by all three implementations · `generated/` 320 lowered proposals with the oracle results the Go engine must reproduce · `refusals/` one proposal per refusal code lowering can raise · `synthesis/` the oracle's synthesis answers and one corruption per refusal class, which the TypeScript checker judges · `testnet/` a read-only testnet catalogue and its two empty books, retained as the evidence for EVIDENCE section 4 |
+| `fixtures/` | `golden/` a lowered proposal and its generated result · `vectors/` numbers and canonical JSON · `replay/` retained responses and the real proposals lowered from them · `bundles/` certificate bundles, seven good and seventeen corrupted · `kernel/` the oracle's exact answers to 400 kernel queries, which the Go engine must reproduce · `rejected/` documents every schema must refuse, shared by all three implementations · `generated/` 320 lowered proposals with the oracle results the Go engine must reproduce · `refusals/` one proposal per refusal code lowering can raise · `synthesis/` the oracle's synthesis answers and one corruption per refusal class, which the TypeScript checker judges · `testnet/` a read-only testnet catalogue and its two empty books, retained as the evidence for EVIDENCE section 4 · `live/` a retained live mainnet run whose four snapshot digests re-derive from its own bytes; `python3 tools/replay_live.py fixtures/live/2026-10-05` rebuilds a store from them and replays it offline |
 | `registry/` | Contract semantics as data: one reviewed reading of each family's payoff |
 | `references/` | What a venue's free-text price description denotes, versioned separately from a payoff reading |
 | `oracle/` | Python. Exact numbers, canonical JSON, the kernel, lowering, the reference refuser, the verifier. **Not the product engine** |
