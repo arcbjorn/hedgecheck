@@ -358,6 +358,7 @@ def main():
     testnet_shape()
     basis_band()
     replay()
+    live_bundle()
 
     print(f"{CHECKS} checks passed; vectors, golden table, the PLAN.md example and the 18 September replay all agree.")
 
@@ -2418,6 +2419,180 @@ def replay():
     state = "reviewed" if on_disk_reviewed else "drafts"
     print(f"replay: {len(proposals)} real proposals against {state} on disk; "
           f"draft and reviewed arithmetic both pinned against in-memory copies")
+
+
+def live_bundle():
+    """The 5 October live mainnet pass, held against bytes and against hand arithmetic.
+
+    This is the first PASSING answer this project produced from a live book rather than a
+    retained one, and the first where the market cooperated: for eleven days every daily
+    binary sat ~3% out of the money, so the NO leg that pays on a fall asked 0.99999 and no
+    size met any cap. On 5 October spot 86,360 sat ABOVE the target 85,749, the NO leg asked
+    0.3547, and 987 contracts met a 2,000 cap.
+
+    THE WORST CASE IS DERIVED HERE, not read from the run document. The engine's own number is
+    the thing under test, so taking the expectation from it would check the arithmetic against
+    itself:
+
+        spot loss at the floor  0.1 * (60,000 - 86,360)  = -2,636
+        the NO leg pays in full 987 * 1                  =   +987
+        premium paid                                     =   -350.3793
+                                                           -----------
+                                                            -1,999.3793   <= the -2,000 cap
+
+    And the other candidate for the worst case is just ABOVE the target, where the NO pays
+    nothing: 0.1 * (85,749 - 86,360) - 350.3793 = -411.4793, which is better. So the binding
+    price is the floor, the bound is attained there, and the cap is met by 62 cents. A hedge
+    is only interesting when the binding case is identified correctly, which is why both are
+    computed rather than the one that happens to be worse.
+
+    The bytes are digested AS RETAINED -- plain sha256, no canonicalisation -- because a
+    venue response is full of JSON numbers that `canon` deliberately refuses, and because the
+    digest should say what arrived rather than what we made of it.
+    """
+    bundle = PROJECT / "fixtures" / "live" / "2026-10-05"
+    runs = sorted(bundle.glob("*.run.json"))
+    check(len(runs) == 1, f"live bundle: expected one run document, found {len(runs)}")
+    if not runs:
+        return
+    run = json.loads(runs[0].read_text())
+
+    # ---- EVERY RETAINED BYTE HASHES TO THE DIGEST THE RUN DOCUMENT NAMES
+    for name, filename in (("binary-no", "binary-no.json"),
+                           ("bucket0-yes", "bucket0-yes.json"),
+                           ("catalogue", "catalogue.json"),
+                           ("contexts", "contexts.json")):
+        path = bundle / filename
+        check(path.exists(), f"live bundle: {filename} is missing")
+        if path.exists():
+            found = sha256(path.read_bytes()).hexdigest()
+            check(found == run["digests"][name],
+                  f"live bundle: {filename} hashes to {found[:16]}, the run document names "
+                  f"{run['digests'][name][:16]} -- the bundle has been edited")
+    # A one-digit price edit must be detected, same as the 18 September guard above.
+    tampered = (bundle / "binary-no.json").read_bytes().replace(b'"0.3547"', b'"0.3548"', 1)
+    check(sha256(tampered).hexdigest() != run["digests"]["binary-no"],
+          "live bundle: a one-digit price change in a retained book is detected")
+
+    # ---- THE OPTIONS ARE THE ONES THE PAGES QUOTE
+    options = run["options"]
+    check(options["cap"] == "2000",
+          f"live bundle: the cap is {options['cap']}, and --cap is a POSITIVE magnitude")
+    check((options["quantity"], options["floor"], options["ceiling"]) == ("0.1", "60000", "110000"),
+          f"live bundle: the exposure or domain has changed: {options}")
+    check(options["baseline"] == "86360",
+          f"live bundle: the baseline is {options['baseline']}, not the retained 86360")
+
+    # ---- THE ARITHMETIC, hand-derived above and recomputed in exact rationals here
+    quantity, baseline, floor = F("0.1"), F(86360), F(60000)
+    size, premium, target = 987, F("350.3793"), F(85749)
+    at_floor = quantity * (floor - baseline) + size - premium
+    just_above_target = quantity * (target - baseline) - premium
+    check(at_floor == F("-1999.3793"),
+          f"live bundle: the worst case at the floor is {at_floor}, not -1999.3793")
+    check(just_above_target == F("-411.4793"),
+          f"live bundle: just above the target is {just_above_target}, not -411.4793")
+    check(at_floor < just_above_target,
+          "live bundle: the floor is no longer the binding price, so the worst case this "
+          "bundle reports is about a different state than the one derived")
+    check(at_floor >= F(-2000),
+          f"live bundle: {at_floor} does not meet the -2000 cap, so this bundle does not pass")
+
+    # ---- AND THE RESULT THE ENGINE WROTE AGREES WITH THAT DERIVATION
+    result = run["results"]["binary-no"]
+    check(result["model_result"] == "passes",
+          f"live bundle: the retained verdict is {result['model_result']}, not passes")
+    check(F(result["worst_case"]["pnl"]) == at_floor,
+          f"live bundle: the retained worst case {result['worst_case']['pnl']} is not the "
+          f"hand-derived {at_floor}")
+    check(F(result["worst_case"]["price"]) == floor,
+          "live bundle: the retained worst case is not attained at the floor")
+    check(result["worst_case"]["attained"] is True,
+          "live bundle: the retained worst case is a bound rather than an attained value")
+    check(F(result["cost"]["premium"]) == premium,
+          f"live bundle: the retained premium is {result['cost']['premium']}, not {premium}")
+    check(result["reason_codes"] == [],
+          f"live bundle: a passing result carries reason codes {result['reason_codes']}")
+    check(result["failing_intervals"] == [],
+          "live bundle: a passing result carries failing intervals")
+
+    # THE SKEW BOUND HELD, which is what makes two books comparable at all. `run["skew"]` is
+    # per leg; `run["capture"]` carries the one the result was judged against, so BOTH are
+    # checked -- a capture summary inside the bound while an individual leg sat outside it
+    # would be a bound that means nothing.
+    bound = int(run["capture"]["max_skew_ms"])
+    check(abs(int(run["capture"]["skew_ms"])) <= bound,
+          f"live bundle: the capture skew {run['capture']['skew_ms']} ms exceeds its own bound")
+    for leg, measured in run["skew"].items():
+        check(abs(int(measured["skew_ms"])) <= bound,
+              f"live bundle: leg {leg} was captured {measured['skew_ms']} ms out, beyond the "
+              f"{bound} ms bound, so the two books are not comparable")
+    check(F(run["sizes"]["binary-no"]) == size,
+          f"live bundle: the retained size is {run['sizes']['binary-no']}, not {size}")
+
+    # ---- README'S STATUS CLAIM MATCHES THIS BUNDLE
+    #
+    # The status line said "T1 closed, 19 September. The Go engine and the TypeScript checker
+    # do not exist yet" until 5 October, by which time all three had existed for a fortnight
+    # and conformance was the project's main claim. Nothing checked it, so it rotted quietly
+    # in the first paragraph a reader sees -- the single worst place for a stale claim. What
+    # is pinned is only what this bundle can settle: the figures, and the directory that
+    # backs them. Whether a tier is "closed" is the owner's judgement and not checkable here.
+    readme = (PROJECT / "README.md").read_text()
+    check("do not exist yet" not in readme,
+          "README still says an implementation does not exist; all three are built and "
+          "make check holds them to the same answers")
+    # PROSE SPELLS NUMBERS LIKE PROSE, found by this guard's own control failing: the page
+    # writes "−1,999.3793" with a typographic minus and a thousands comma, while the engine
+    # emits "-1999.3793". Demanding the machine spelling would force the prose to be ugly to
+    # satisfy a check, so the page is normalised before comparing instead. The figure still
+    # has to be the retained one; only its typography is free.
+    plain = readme.replace("−", "-").replace("–", "-").replace(",", "")
+    for figure in (str(size), result["worst_case"]["pnl"], "fixtures/live/2026-10-05"):
+        check(figure in plain,
+              f"README's status paragraph does not carry {figure!r}, so its account of the "
+              f"live pass has drifted from the retained bundle")
+    check("tools/replay_live.py" in readme,
+          "README states a live pass without the command that reproduces it offline")
+
+    # ---- AND DEMO.md's LIVE SECTION CARRIES THE SAME FIGURES
+    #
+    # The page is read aloud, so a figure there that disagrees with the bundle is the worst
+    # kind of stale. Normalised the same way, for the same reason as the README.
+    demo_plain = (PROJECT / "DEMO.md").read_text().replace("−", "-").replace(",", "")
+    # EVERY OCCURRENCE, not merely one. Mutation 24 Sep and again 5 October: the size and the
+    # worst case each appear TWICE on the page -- once in the output block, once in the
+    # derivation -- so corrupting one left the other satisfying an `in` test and the edit
+    # escaped. This is the same escape as the runbook's `"112" in book`, now the third time a
+    # presence test has passed with a figure wrong. The count is what the page promises: the
+    # two statements of a number must agree with each other as well as with the bundle.
+    for figure, occurrences in ((str(size), 3),
+                                (result["cost"]["premium"], 4),
+                                (result["worst_case"]["pnl"], 2),
+                                ("tools/replay_live.py fixtures/live/2026-10-05", 1)):
+        found = demo_plain.count(figure)
+        check(found == occurrences,
+              f"DEMO.md carries {figure!r} {found} times, expected {occurrences}: the output "
+              f"block and the hand-derivation must state the same number, so corrupting one "
+              f"of them cannot pass")
+    # THE HAND-DERIVATION THE PAGE SHOWS, as arithmetic rather than as text. The three rows
+    # must sum to the worst case, or the table teaches a reader a derivation that does not
+    # reach the number beside it.
+    spot_loss = quantity * (floor - baseline)
+    check(spot_loss == F(-2636), f"the spot loss at the floor is {spot_loss}, not -2636")
+    check(spot_loss + size - premium == at_floor,
+          "the three rows DEMO.md tabulates do not sum to the worst case it reports")
+    # A Fraction prints as `3503793/10000`, which no page would ever write, so the rows are
+    # compared against the DECIMAL spelling the documents use -- the retained strings, whose
+    # equality to these exact values was checked above.
+    for row in ("2636", str(size), result["cost"]["premium"]):
+        check(row in demo_plain,
+              f"DEMO.md's derivation table does not show {row!r}, so a reader cannot "
+              f"re-add the rows to the worst case")
+
+    print(f"live bundle: 2026-10-05 mainnet passes, {size} contracts, premium "
+          f"{result['cost']['premium']}, worst case {result['worst_case']['pnl']} against a "
+          f"-2000 cap, all four digests re-derived")
 
 
 def bundles():
