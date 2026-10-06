@@ -1,0 +1,14 @@
+{
+  "endpoint": "https://api.hyperliquid.xyz/info",
+  "http_status": 200,
+  "method": "POST",
+  "network": "mainnet",
+  "request_body": {
+    "type": "outcomeMeta"
+  },
+  "requested_at": "2026-10-05T07:43:38.906370+00:00",
+  "response_file": "6d899f9317c92f6a243c4e91f49760ebb3aa9c8d62fd1683825020eab93d9c15.json",
+  "response_sha256": "6d899f9317c92f6a243c4e91f49760ebb3aa9c8d62fd1683825020eab93d9c15",
+  "retrieved_at": "2026-10-05T07:43:40.168365+00:00",
+  "server_date": "Mon, 05 Oct 2026 07:43:40 GMT"
+}
