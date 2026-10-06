@@ -609,6 +609,18 @@ where the gate is, not only in the runbook:
   (`'the Hyperliquid BTC perp trade'` @90s, `20260923-1200`, three strikes, already mapped) has
   0 bids and 0 asks on all six sides. **Supporting the ladder shape in discovery is a design
   change and the owner's call; it is not a fix to make quietly.**
+- **The live path returned its first PASSING verdict on 5 October, and it is retained.**
+  `check --live --network mainnet` on BTC at a 2,000 cap: **987 contracts, premium 350.3793,
+  worst case −1,999.3793** attained at the floor, inside the cap by 62 cents. Spot 86,360 sat
+  ABOVE the target 85,749, so the NO leg was out of the money and asked **0.3547** — against
+  0.99999 for the eleven preceding days, when every cap was correctly refused. The bundle is
+  `fixtures/live/2026-10-05/`, each snapshot digested as `sha256` of the venue's bytes exactly
+  as they arrived, and `python3 tools/replay_live.py fixtures/live/2026-10-05` rebuilds a store
+  from those bytes and replays byte-identically with no network. `make check` holds the figures
+  against the bytes AND against the hand arithmetic, both candidate worst cases derived
+  separately so the binding price is identified rather than assumed. **This does not close the
+  T7 criterion**, which asks for an order ACCEPTED on testnet; it settles everything up to the
+  send, on a book nobody had seen before.
 - **The ladder is not being built, decided 24 Sep, and the reason is that it was scoped
   against a premise that turned out false.** It was proposed to route around discovery's
   binary-and-bucket requirement on testnet. But **mainnet pairs a binary and a bucket at one
