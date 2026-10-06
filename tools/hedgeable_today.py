@@ -128,6 +128,17 @@ def main():
         print("    --store ~/.hedgecheck/store --registry ../registry")
         return 0
     print("\nNOT HEDGEABLE TODAY. A refusal from the live check would be correct, not a bug.")
+    # WHAT IS BEING WAITED FOR, stated without overclaiming. On 24 Sep all four live binaries
+    # sat ~3% out (BTC +3.15, ETH +3.16, SOL +3.33, HYPE +6.10), so the NO leg is in the money
+    # on any flat or falling day and "wait for a rally in BTC" misdescribes the wait. The one
+    # retained day with both numbers (18 Sep: target 77,457, baseline 77,631.4) had the target
+    # just BELOW spot. One comparison is not a trend, so no claim is made about why.
+    if not out_of_money and target > price:
+        print(f"  The target is {(target / price - 1) * 100:.2f}% above spot. Every live binary "
+              f"sits out by a similar margin,")
+        print("  so this is not one underlying having a bad day -- do not switch underlying "
+              "looking for a way round.")
+    print("  For a demo that needs no market at all, see DEMO.md (offline replay).")
     return 1
 
 
