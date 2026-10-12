@@ -1,0 +1,15 @@
+{
+  "endpoint": "https://api.hyperliquid.xyz/info",
+  "http_status": 200,
+  "method": "POST",
+  "network": "mainnet",
+  "request_body": {
+    "coin": "#113821",
+    "type": "l2Book"
+  },
+  "requested_at": "2026-10-12T14:47:33.740437+00:00",
+  "response_file": "173b87f6a56b0d76f57c45cad54f912a6c4ab93f76fe79589f8fffc3b8ab4b98.json",
+  "response_sha256": "173b87f6a56b0d76f57c45cad54f912a6c4ab93f76fe79589f8fffc3b8ab4b98",
+  "retrieved_at": "2026-10-12T14:47:34.682762+00:00",
+  "server_date": "Mon, 12 Oct 2026 14:47:34 GMT"
+}
