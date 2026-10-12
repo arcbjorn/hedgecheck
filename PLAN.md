@@ -572,73 +572,47 @@ order. It is the one step no agent performs, and `consumer/RUNBOOK.md` is writte
 human to follow with a key in their environment. Two things about it are worth stating
 where the gate is, not only in the runbook:
 
-- **It cannot be run today, and the binding reason is liquidity after all.** Corrected
-  22 Sep. What was written here — "no expiry carrying both a binary and a bucket" — is true
-  but was the wrong blocker, because **a bucket is not required.** Testnet carries no price
-  bucket of any kind (the only `*Bucket` outcomes are `policyRateBucket`, on Fed rates), but
-  it does carry **strike ladders of binaries at one expiry**: `BTC` at `20260921-1200` has
-  three at 81,100 / 81,500 / 81,900, same 90-second TWAP, same `priceDescription`; both
-  `xyz:AAPL` and `xyz:XYZ100` at `20260921-1900` have five each. A long position plus YES at
-  one strike and NO at another is a hedge this project verifies, and it needs no bucket. So
-  the market SHAPE exists on testnet routinely. **Re-measured 23 Sep: THE BLOCKER IS GONE, and
-  the 22 Sep claim was a measurement bug of mine, not a fact about the venue.** The probe asked
-  for `#10218` — the raw outcome id — where the coin is `'#' + (10*outcome + side)`; a wrong
-  coin answers `null`, which the probe reported as an empty book. `discover.go` had the rule
-  right. Swept properly (`tools/sweep_testnet.py`, all 618 outcomes, both sides): **114 of
-  1,236 books quoted, 56 structured price markets, 28 of their books quoted.** `xyz:AAPL` at
-  `20260923-1900` has five strikes with asks on both sides at several; `BTC 70000` at
-  `20260930-1200` is quoted on both. The two retained instances have separately EXPIRED
-  (`null`, not empty — different facts). The remaining quoted depth is World Cup and CPI
-  markets, which lowering refuses as price legs rather than inventing a series for.
-  Meanwhile every bundle in
-  the repository is built from MAINNET books and carries coin `#39710`, asset id
-  `100,039,710`; testnet's outcomes are 10217–20497, a disjoint range. **Aiming an
-  existing bundle at testnet would sign an order for an instrument that does not exist
-  there** — and the gate cannot catch it, because the bundle is internally consistent
-  and the check is sound. `run.ts` now refuses `--send` without an explicit
+- **It cannot be run on testnet, and the obstacle is the venue.** Measured 12 October. Two
+  conditions each block it independently. First, discovery finds no pair: `discover.go`
+  requires a `recurring.priceBinary` and a `recurring.priceBucket` at one expiry, and on
+  testnet the daily binary expires at `-0300` while the daily bucket expires at `-0600`, a
+  fixed three-hour offset observed on 24 September, 5 October and 12 October, so
+  `SoonestExpiry` returns `no expiry with both a binary and a bucket for BTC`. Second, there is
+  no depth to buy, which blocks a hand-written single-leg proposal as well: all sixteen
+  Recurring books on testnet are empty on both sides, and none returned `null`, so the coin
+  encoding resolved and these are genuinely empty books. Testnet's wider price catalogue does
+  not help, because the markets there that both lower and carry asks are `xyz:*` referenced to
+  Pyth, earning `basis_unbridged` and yielding `needs_review`, which the gate refuses. The
+  sweep is the check rather than this paragraph: `tools/sweep_testnet.py`, read-only.
+- **A mainnet bundle cannot substitute for it.** Every bundle in the repository is built from
+  mainnet books and carries coin `#39710`, asset id `100,039,710`; testnet's outcomes are a
+  disjoint range. Aiming one at testnet would sign an order for an instrument that does not
+  exist there, and the gate cannot catch it, because the bundle is internally consistent and
+  the check is sound. `run.ts` refuses `--send` without an explicit
   `--bundle-is-for-this-network`, since nothing inside a bundle records its network.
-- **The blocker is discovery, not liquidity — found 23 Sep by RUNNING the live path.**
-  `hedgecheck check --live --network testnet` refuses with
-  `no expiry with both a binary and a bucket for BTC`,
-  because `engine/discover/discover.go` requires both and testnet carries no price bucket at
-  all. The sentence above — that a ladder hedge "needs no bucket" — is true of
-  the EVALUATOR and false of DISCOVERY, and three days of liquidity claims were aimed at the
-  wrong thing. Measured exhaustively: of 56 structured price markets, 17 lower, 14 have asks,
-  10 do both, and all 10 are `xyz:*` referenced to Pyth — so they earn `basis_unbridged`,
-  yield `needs_review`, and the gate refuses them. The one BTC ladder that lowers cleanly
-  (`'the Hyperliquid BTC perp trade'` @90s, `20260923-1200`, three strikes, already mapped) has
-  0 bids and 0 asks on all six sides. **Supporting the ladder shape in discovery is a design
-  change and the owner's call; it is not a fix to make quietly.**
-- **The live path returned its first PASSING verdict on 5 October, and it is retained.**
-  `check --live --network mainnet` on BTC at a 2,000 cap: **987 contracts, premium 350.3793,
-  worst case −1,999.3793** attained at the floor, inside the cap by 62 cents. Spot 86,360 sat
-  ABOVE the target 85,749, so the NO leg was out of the money and asked **0.3547** — against
-  0.99999 for the eleven preceding days, when every cap was correctly refused. The bundle is
-  `fixtures/live/2026-10-05/`, each snapshot digested as `sha256` of the venue's bytes exactly
-  as they arrived, and `python3 tools/replay_live.py fixtures/live/2026-10-05` rebuilds a store
-  from those bytes and replays byte-identically with no network. `make check` holds the figures
-  against the bytes AND against the hand arithmetic, both candidate worst cases derived
-  separately so the binding price is identified rather than assumed. **This does not close the
-  T7 criterion**, which asks for an order ACCEPTED on testnet; it settles everything up to the
-  send, on a book nobody had seen before.
-- **The ladder is not being built, decided 24 Sep, and the reason is that it was scoped
-  against a premise that turned out false.** It was proposed to route around discovery's
-  binary-and-bucket requirement on testnet. But **mainnet pairs a binary and a bucket at one
-  expiry every day** — `20260919-0600`, `20260920-0600`, `20260921-0600` in the three retained
-  catalogues and `20260924-0600` live — so the full pipeline already runs end to end on mainnet,
-  read-only, with no code change. The road the ladder was a detour around is open. Scope was
-  also understated when it was proposed: `discover.Candidates` returns two *alternatives* and
-  `run.go` builds one SINGLE-LEG proposal from each, so a ladder is a multi-leg proposal
-  builder plus a screen change plus new lowering paths, in all three implementations or the
-  conformance guarantee breaks — the most exactness-critical code in the project. And it would
-  not have helped today regardless: the current refusal is about PRICE, not shape. Every
-  recurring binary NO across BTC, ETH, SOL and HYPE is in the money at 0.98–0.99999, and the
-  only genuinely quoted BTC bucket side is index 1, which pays when price RISES into
-  84,823–88,286 — the wrong direction for a long holder, and cheap precisely because it
-  probably will not pay. `discover.go` taking `named[0]` is correct: index 0 is the leg that
-  pays on a fall. A ladder over those same books inherits the same prices and the same
-  refusal. If a real use case appears it should be re-scoped from scratch, because this
-  scoping was wrong.
+- **The live path has returned passing verdicts on mainnet, and they are retained.**
+  `check --live --network mainnet` on BTC at a 2,000 cap, read-only: 5 October on the binary
+  leg, 987 contracts at a premium of 350.3793 and a worst case of −1,999.3793; 12 October on
+  the bucket leg, 542 contracts at 286.71258 and −1,999.61258. Both worst cases are attained
+  at the floor, and both candidate worst cases were derived by hand before the engine's number
+  was read, so the binding price is identified rather than assumed. Each bundle under
+  `fixtures/live/` digests every snapshot as `sha256` of the venue's bytes exactly as they
+  arrived, and `tools/replay_live.py` rebuilds a store from them and replays byte-identically
+  with no network. `make check` holds the figures against the bytes and against the
+  arithmetic. **This does not close the T7 criterion**, which asks for an order accepted on
+  testnet; it settles everything up to the send, on books the project had not seen.
+- **The strike-ladder shape is not being built.** It was proposed to route around
+  discovery's binary-and-bucket requirement on testnet, and that requirement is not the
+  obstacle: mainnet pairs the two families at one expiry daily — `20260919-0600`,
+  `20260920-0600` and `20260921-0600` in the retained catalogues, and live since — so the
+  pipeline already runs end to end there. The scope is also larger than a discovery filter:
+  `discover.Candidates` returns two alternatives and `run.go` builds one single-leg proposal
+  from each, so a ladder is a multi-leg proposal builder plus a screen change plus new
+  lowering paths, in all three implementations or the conformance guarantee breaks. It would
+  not reach the testnet obstacle either, which is depth rather than shape. A cheap bucket ask
+  is not an opening: index 1 pays on a rise into the band, so it is not downside protection,
+  and `discover.go` taking `named[0]` is correct because index 0 is the leg that pays on a
+  fall. If a use case appears, it should be scoped from scratch.
 - Everything up to the send is proved offline against a fake exchange: the envelope, the
   msgpack encoding and EIP-712 digest (both derived by hand from their specs and matched
   byte for byte), one send with no retry, and a re-check after a partial fill.
@@ -705,28 +679,28 @@ teams, checks per month, conversion and retention.
 
 ---
 
-## 10. Demo and interview
+## 10. What the project does and does not establish
 
-Lead with the decision, not the settlement history: the proposal about to be
-approved (instance discovered live, timestamped, baseline shown) → the objective
-in full → the verdict and its witness → **the same objective through the binary,
-the bucket and selling the BTC, side by side** → whether resizing helps, naming
-the binding constraint → the consumer refusing to sign. **Then** 3061 and 3253, to
-explain why outcomes prove nothing.
+Stated as claims and their artifacts, so each can be checked rather than taken. The right
+order to read them in is the order a decision is made: the proposal, with the instance
+discovered live and the baseline shown; the objective in full; the verdict and its witness;
+the same objective through the binary, the bucket and selling the underlying, side by side;
+whether resizing helps, with the binding constraint named; and the consumer refusing to sign
+anything that is not a passing, depth-priced answer.
 
-Two labeled modes, never mixed: explained fixture, and current-contract
-inspection. Record a day with a non-empty window and a day with an empty one.
-
-| Interview question | Honest answer, and the artifact |
+| Claim | What establishes it, and what it does not cover |
 |---|---|
-| Which rule, and did you verify it? | The contract specifications page. Verified: twenty reported fractions agree with twenty reported prices. **Not** verified: inclusivity — none settled at its target — nor interpolation |
-| Why not deployer markets? | Four different reference strings for one asset, **42 of 78** settling on Pyth while the template restricts the SUBJECT to a Hyperliquid perp; the registry, the reference map and the `priceTouch` bound |
-| What happens at the threshold? | 999.90 for one dollar; endpoint ownership in the certificate |
-| Can size fix it? | `D + p·A` against the cap; the window with its binding constraints; the certificate when it is empty |
-| Is a passing hedge a good one? | No — the comparison table |
-| Can anyone audit the settlement price? | Not from the public API; node data not examined. Say exactly that |
-| What did you build during the event? | The commit history; research dated 14–18 Sep disclosed |
-| Who used it? | Whatever §8 has produced, and nothing more |
+| The settlement rule is as the registry reads it | The venue's contract specifications page. Verified: twenty reported fractions agree with twenty reported prices. **Not** verified: inclusivity at the target — no retained instance settled exactly there — nor interpolation |
+| Deployer markets are not treated as canonical | Four different reference strings for one asset, and 42 of 78 instances settling on Pyth while the template restricts the SUBJECT to a Hyperliquid perp. The registry, the reference map and the `priceTouch` bound carry the distinction |
+| Behaviour at a threshold is exact | 999.90 for one dollar; endpoint ownership is stated in the certificate rather than assumed |
+| Resizing is answered, not guessed | `D + p·A` against the cap, the size window with its binding constraints, and an infeasibility certificate when the window is empty |
+| A passing hedge is not necessarily a good one | The comparison table ranks passing candidates by the cost of the smallest size that met the objective |
+| The settlement price is not independently auditable | Not available from the public API; node data was not examined. The limitation is stated rather than worked around |
+| Outcomes alone prove nothing | Instances 3061 and 3253: a settled outcome is consistent with several readings, which is why the registry pins a reading and a review seals it |
+
+Two modes are kept separate and never mixed: an explained fixture, reproducible offline, and
+inspection of a current contract. Both a day with a non-empty size window and a day with an
+empty one are retained, because a tool that only ever passes has not been shown to work.
 
 ---
 
