@@ -178,7 +178,7 @@ def main():
               f"sits out by a similar margin,")
         print("  so this is not one underlying having a bad day -- do not switch underlying "
               "looking for a way round.")
-    print("  For a demo that needs no market at all, see DEMO.md (offline replay).")
+    print("  Results reproducible without the market: see README, Verifying the results.")
     return 1
 
 
