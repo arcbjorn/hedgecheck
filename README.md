@@ -7,33 +7,124 @@ for Hyperliquid HIP-4 outcome markets.
 > *Do these exact terms, costs and holdings satisfy my objective — and what does
 > satisfying it cost me, against what else I could do?*
 
-**Status: T0–T7 closed except the live testnet order, 5 October.** All three
-implementations exist and must agree: the Python oracle (the reference), the Go
-engine (which answers), and the TypeScript checker (which verifies). `make check`
-fails if any two of them differ. The schemas are frozen at v1.
+## Status
 
-The whole pipeline runs live on mainnet, read-only, and on 5 October it returned
-its first live **passing** verdict — 987 contracts against a 2,000 loss cap, worst
-case −1,999.3793 attained at the floor. That run is retained in
-`fixtures/live/2026-10-05/` and replays byte-identically offline:
+T0–T7 are closed except the live testnet order. All three implementations exist
+and must agree: the Python oracle (the reference), the Go engine (which answers),
+and the TypeScript checker (which verifies). `make check` fails if any two of them
+differ. The schemas are frozen at v1.
 
-```
-python3 tools/replay_live.py fixtures/live/2026-10-05
-```
+The pipeline runs live on mainnet, read-only — capture, skew check, discovery,
+lowering, evaluation and the result screen. It stops before anything that signs.
 
-**What is not done:** the one live testnet order. Testnet lists the daily binary and
-the daily bucket at expiries three hours apart, so discovery finds no shared expiry
-there and cannot build a proposal — and a mainnet bundle must never be aimed at
-testnet, because it names mainnet asset ids. The order is run by the owner, by hand,
-from `consumer/RUNBOOK.md`. No agent signs or sends anything in this project.
+**Outstanding: the live testnet order.** Testnet cannot currently produce one. The
+daily binary and the daily bucket expire three hours apart, so discovery finds no
+shared expiry, and all sixteen Recurring books there are empty on both sides
+(measured 12 October). A mainnet bundle cannot substitute, because it names mainnet
+asset ids. The order is run by the owner, by hand, from `consumer/RUNBOOK.md`.
+No agent in this project signs or sends anything.
 
-## Read these three
+## Documents
 
 - **[PLAN.md](./PLAN.md)** — authoritative for what is built, why, and in what order.
 - **[EVIDENCE.md](./EVIDENCE.md)** — every fact the plan depends on, labeled verified / third-party / unverified, with source and date.
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** — how it is built, and which test holds each boundary.
-- **[DEMO.md](./DEMO.md)** — the demo, offline: one retained capture, three questions, three
-  different verdicts, and the premiums re-derivable by hand. Needs no market and no key.
+
+## Verifying the results
+
+Every figure in this section is reproducible offline from retained captures. No
+network, no key, no clock. `make check` holds each of them against the retained
+bytes and against hand-derived arithmetic, so a figure here cannot drift from the
+capture it came from.
+
+### Three questions against one capture
+
+`fixtures/replay/2026-09-18/` holds the BTC perp mark and the books for a binary
+and a bucket expiring `2026-09-19T06:00:00Z`, at a baseline of 77,631.4. The
+objective is the same in all three: hold 0.1 BTC, lose at most 1,000 anywhere in
+60,000–110,000.
+
+```sh
+cd engine
+for p in bucket0 binary bucket0-horizon; do
+  go run ./cmd/hedgecheck check \
+    --proposal ../fixtures/replay/2026-09-18/$p.proposal.json \
+    --registry ../registry \
+    --snapshots ../fixtures/replay/2026-09-18 > /dev/null 2>&1
+  echo "$p -> exit=$?"
+done
+```
+
+```text
+bucket0         -> exit=0     passes
+binary          -> exit=0     passes
+bucket0-horizon -> exit=1     fails
+```
+
+`bucket0-horizon` is the same bucket leg against a valuation time one day later
+than the leg's own expiry. The engine does not guess what happens in between: it
+applies the `horizon_mismatch` reduction, worst-cases the leg to zero, and reports
+`tight: true` with a witness naming the adverse state. Its worst case is −1,923.91
+against an unhedged −1,763.14, so the position is worse than no hedge — premium
+spent on protection that has expired.
+
+Ranking the two that pass, by the cost of the smallest size that met the objective:
+
+```text
+ranked_by: cost_of_smallest_passing_size
+ranking : ['bucket0', 'binary']
+  binary     passes   cost=645.76904
+  bucket0    passes   cost=160.76676
+```
+
+Both meet the cap; the bucket does it for a quarter of the premium. Both figures
+are re-derivable by hand — walk the retained ask levels for the smallest passing
+size in `size_windows` (924 bucket contracts, 1,409 binary) and the totals agree
+to the last digit. Nothing rounds, because nothing is a float.
+
+### Two live mainnet passes
+
+Both were captured from books the project had not seen, and both replay
+byte-identically:
+
+```sh
+python3 tools/replay_live.py fixtures/live/2026-10-05
+python3 tools/replay_live.py fixtures/live/2026-10-12
+```
+
+| capture | leg | size | premium | worst case |
+|---|---|---|---|---|
+| 5 October | `binary-no` | 987 | 350.3793 | −1,999.3793 |
+| 12 October | `bucket0-yes` | 542 | 286.71258 | −1,999.61258 |
+
+Each is derivable from the capture without the engine. For 5 October, at a
+baseline of 86,360: the spot loss at the floor is `0.1 × (60,000 − 86,360)` =
+−2,636, the leg pays `987 × 1` = +987, and the premium is −350.3793, giving
+−1,999.3793 against a 2,000 cap. The other candidate worst case — just above the
+target, where the leg pays nothing — is −411.4793, so the floor is the binding
+price and the bound is attained there.
+
+Each snapshot digest is `sha256` over the venue's bytes exactly as they arrived.
+Editing one price by a single digit, or adding one space, makes a bundle fail
+before it replays.
+
+### Whether today's market can produce a hedge
+
+```sh
+python3 tools/hedgeable_today.py
+```
+
+Exit 0 prints the live command; exit 1 names the precondition that failed. It
+decides by arithmetic rather than by a threshold: a leg costing `ask` and paying 1
+nets `1 − ask` where it pays, so covering a shortfall needs a premium that may
+itself breach the cap long before depth becomes the constraint.
+
+`--cap` takes a positive magnitude, while a proposal's own `min_pnl` is negative.
+A negative `--cap` is refused.
+
+Retained bundles are built from mainnet books and carry mainnet asset ids, so a
+bundle must never be aimed at a network it was not captured from; `run.ts` refuses
+`--send` without an explicit `--bundle-is-for-this-network`.
 
 ## Check the tree
 
