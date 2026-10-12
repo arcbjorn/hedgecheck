@@ -856,37 +856,43 @@ def runbooks():
         check("re-sweep" in book.lower() or "Re-run the sweep" in book,
               f"runbook: {name} does not tell the reader to re-sweep before acting")
 
-    # THE COUNTS MUST ADD UP, not merely appear. A substring test for "112" passed with the
-    # consumer table's own figure corrupted, because the same number appears again in the
-    # prose -- the third time in three days that "is the number present" has let an edit
-    # through (see the two rows in EVIDENCE §9). The arithmetic is the claim: 112 quoted plus
-    # 1,124 empty is 1,236 books, which is 618 outcomes on two sides.
-    # Read the consumer page's sweep TABLE, each row on its own, so a corrupted cell fails
-    # whatever the surrounding prose repeats.
-    swept = [int(cell.replace(",", "").replace("*", ""))
-             for cell in re.findall(r"^\|[^|\n]+\|\s*\**([\d,]+)\**\s*\|\s*$", consumer_book, re.M)]
-    check(len(swept) == 3,
-          f"runbook: consumer's sweep table has {len(swept)} numeric rows, expected 3")
-    if len(swept) == 3:
-        total, quoted, empty = swept
-        check(quoted + empty == total,
-              f"runbook: the sweep table does not add up: {quoted} quoted + {empty} empty "
-              f"!= {total} books")
-        check(total % 2 == 0 and f"{total // 2}" in consumer_book,
-              f"runbook: {total} books is not two sides of a stated outcome count")
+    # THE SWEEP TABLE WAS REMOVED ON 12 OCTOBER, and with it the arithmetic guard over it.
+    #
+    # That guard parsed three numeric rows and required `quoted + empty == total`, with total
+    # two sides of a stated outcome count. It existed because a substring test for "112" had
+    # passed with the table's own cell corrupted (EVIDENCE section 9), and the arithmetic was
+    # the only internally checkable claim about a set of LIVE figures.
+    #
+    # The page no longer tabulates them. The counts were dated measurements of instruments that
+    # expire, `make check` is offline by design, and the guard's own reasoning -- recorded below
+    # and still holding for the price-market count -- is that the honest check is to send the
+    # reader to the sweep rather than to pin a number here that a passing expiry invalidates.
+    # Having made that argument about one figure it was inconsistent to keep tabulating the
+    # others, so the table went and this guard went with it. What remains is the requirement
+    # that the page name the sweep and tell the reader to re-run it, which the two checks above
+    # enforce, and which is the part an operator actually acts on.
+    #
     # THE PRICE-MARKET COUNT IS NOT GUARDED HERE, DELIBERATELY.
     #
     # It was, briefly, as `hedgeable <= 2*markets` and `hedgeable <= quoted`. A mutation raising
     # the market count 56 -> 96 stayed GREEN, and no internal relation can catch it: 96 is
     # arithmetically consistent with 618 outcomes, 114 quoted books and 28 quoted price books.
-    # The figure is a live MEASUREMENT, and `make check` is offline by design, so the only
-    # honest guard is to require the page to send the reader to the sweep -- which the two
-    # checks above do -- rather than to pin a number here that a passing expiry invalidates.
-    # Writing a checkable-looking assertion around an uncheckable number is worse than
-    # admitting the gap: it reads as verified.
-    check("Read the count from the sweep" in consumer_book,
-          "runbook: consumer states a live price-market count without sending the reader "
-          "to the sweep for the current one")
+    # The figure is a live MEASUREMENT, and `make check` is offline by design. Writing a
+    # checkable-looking assertion around an uncheckable number is worse than admitting the gap:
+    # it reads as verified.
+    #
+    # WHAT *IS* CHECKABLE is that the page does not STATE such a count as fact. Caught by
+    # mutation 12 October: after the table was removed, replacing the old "read the count from
+    # the sweep" instruction with "the count is 56" escaped, because the check that had enforced
+    # the instruction was removed with the table and nothing replaced it. A guard whose subject
+    # no longer exists on the page is vacuous, which is worse than absent -- it still counts
+    # toward a green. The page may describe the sweep's categories; it may not publish a tally.
+    for tally in re.findall(r"(?:^|[^\d])(\d{2,4}) (?:structured price markets|quoted books|"
+                            r"markets and \d+ quoted)", consumer_book):
+        check(False,
+              f"runbook: consumer publishes a live sweep tally ({tally}); these are dated "
+              f"instruments and make check is offline, so the page must send the reader to "
+              f"tools/sweep_testnet.py for the current figure instead of stating one")
     for stale, what in (("waits on testnet listing a bucket and a binary", "the bucket blocker"),
                         ("waits on a quoted book", "the undifferentiated-depth blocker")):
         check(stale not in consumer_book, f"runbook: consumer still names {what}")
@@ -995,14 +1001,15 @@ def runbooks():
           "consumer runbook does not point at tools/hedgeable_today.py, so an operator has no "
           "command that says whether today's market can produce a hedge")
 
-    # ---- DEMO.md IS A RUNBOOK TOO, and its numbers come from the retained bundle
+    # ---- README'S VERIFICATION SECTION IS HELD TO THE RETAINED CAPTURE
     #
-    # The page shows three verdicts and two premiums as output "not illustrative". Those are
-    # exactly the claims that go stale, and a demo that prints a different number from the one
-    # on the page is worse than no page -- it is read aloud in front of an audience. Checked
-    # against the retained 18 September capture rather than against the engine, so the page and
-    # the bundle cannot drift apart silently.
-    demo = (PROJECT / "DEMO.md").read_text()
+    # The section states three verdicts and two premiums as reproducible output. Those are
+    # exactly the figures that go stale, and a published number that disagrees with the capture
+    # it claims to come from is worse than no number. Checked against the retained 18 September
+    # bytes rather than against the engine, so the page and the capture cannot drift apart
+    # silently. (These guards covered DEMO.md until 12 October, when that page was folded into
+    # README; the figures and the reasoning are unchanged.)
+    demo = (PROJECT / "README.md").read_text()
     base = FIXTURES / "replay" / "2026-09-18"
 
     # The premium for the smallest passing size, walked over the retained ask levels by hand.
@@ -1017,7 +1024,7 @@ def runbooks():
             if remaining == 0:
                 break
         check(remaining == 0,
-              f"demo: the retained {stem} book cannot fill {size}, so the page's premium is "
+              f"README: the retained {stem} book cannot fill {size}, so the stated premium is "
               f"not a number this capture supports")
         return spend
 
@@ -1025,11 +1032,11 @@ def runbooks():
                               ("book-3965-no", 1409, "645.76904")):
         walked = premium_for(stem, size)
         check(walked == F(shown),
-              f"demo: DEMO.md shows {shown} for {size} of {stem}, the retained book walks to "
+              f"README states {shown} for {size} of {stem}, the retained book walks to "
               f"{walked} -- the page and the capture disagree")
         check(shown in demo,
-              f"demo: DEMO.md no longer shows the premium {shown}, so its comparison table has "
-              f"moved away from the retained capture")
+              f"README no longer shows the premium {shown}, so its ranking table has moved "
+              f"away from the retained capture")
 
     # THE SIZES THE PREMIUMS ARE FOR, which the page states in prose.
     #
@@ -1044,25 +1051,25 @@ def runbooks():
     # are the values whose premiums are walked over the retained books above, and that walk is
     # the independent check: if a size were wrong the premium would not match the page.
     check("(924 bucket contracts, 1,409 binary)" in demo,
-          "demo: DEMO.md does not state the sizes 924 and 1,409 that its hand-walk depends on, "
-          "so a reader re-walking the book would use a different size and get a different total")
+          "README does not state the sizes 924 and 1,409 that its hand-walk depends on, so a "
+          "reader re-walking the book would use a different size and get a different total")
 
     # The ranking claim, which is the page's punchline: the bucket is the cheaper hedge.
     check(F("160.76676") < F("645.76904"),
-          "demo: the two premiums no longer rank bucket0 below binary")
+          "the two premiums no longer rank bucket0 below binary")
     check("ranking : ['bucket0', 'binary']" in demo,
-          "demo: DEMO.md does not show the ranking it claims compare produces")
+          "README does not show the ranking it states compare produces")
 
     # And the third proposal must still be the one that FAILS. A demo whose point is that the
     # tool refuses an expired hedge stops making it the moment that proposal passes.
     check("bucket0-horizon -> exit=1" in demo,
-          "demo: DEMO.md no longer shows bucket0-horizon failing, which is the exhibit that "
-          "shows a reduction refusing a hedge rather than a hedge being approved")
+          "README no longer shows bucket0-horizon failing, which is the case that shows a "
+          "reduction refusing a hedge rather than a hedge being approved")
     for stem in ("bucket0", "binary"):
         check(f"{stem}" in demo and (base / f"{stem}.proposal.json").exists(),
-              f"demo: DEMO.md names {stem} but the retained proposal is gone")
+              f"README names {stem} but the retained proposal is gone")
     check((base / "bucket0-horizon.proposal.json").exists(),
-          "demo: the bucket0-horizon proposal DEMO.md runs is missing from the capture")
+          "the bucket0-horizon proposal README runs is missing from the capture")
 
 
 def onchain_representable():
@@ -2556,40 +2563,39 @@ def live_bundle():
     check("tools/replay_live.py" in readme,
           "README states a live pass without the command that reproduces it offline")
 
-    # ---- AND DEMO.md's LIVE SECTION CARRIES THE SAME FIGURES
+    # ---- AND README'S LIVE TABLE CARRIES THE SAME FIGURES
     #
-    # The page is read aloud, so a figure there that disagrees with the bundle is the worst
-    # kind of stale. Normalised the same way, for the same reason as the README.
-    demo_plain = (PROJECT / "DEMO.md").read_text().replace("−", "-").replace(",", "")
-    # EVERY OCCURRENCE, not merely one. Mutation 24 Sep and again 5 October: the size and the
-    # worst case each appear TWICE on the page -- once in the output block, once in the
-    # derivation -- so corrupting one left the other satisfying an `in` test and the edit
-    # escaped. This is the same escape as the runbook's `"112" in book`, now the third time a
-    # presence test has passed with a figure wrong. The count is what the page promises: the
-    # two statements of a number must agree with each other as well as with the bundle.
+    # EVERY OCCURRENCE, not merely one. Mutation 24 Sep and again 5 October: a figure appears
+    # more than once on the page -- in the table and again in the derivation -- so corrupting
+    # one left the other satisfying an `in` test and the edit escaped. That is the same escape
+    # as the runbook's `"112" in book`, the third time a presence test passed with a figure
+    # wrong. The count is what the page promises: the two statements of a number must agree
+    # with each other as well as with the bundle.
+    readme_plain = readme.replace("\u2212", "-").replace(",", "")
     for figure, occurrences in ((str(size), 3),
-                                (result["cost"]["premium"], 4),
+                                (result["cost"]["premium"], 2),
                                 (result["worst_case"]["pnl"], 2),
-                                ("tools/replay_live.py fixtures/live/2026-10-05", 1)):
-        found = demo_plain.count(figure)
+                                ("tools/replay_live.py fixtures/live/2026-10-05", 2)):
+        found = readme_plain.count(figure)
         check(found == occurrences,
-              f"DEMO.md carries {figure!r} {found} times, expected {occurrences}: the output "
-              f"block and the hand-derivation must state the same number, so corrupting one "
-              f"of them cannot pass")
-    # THE HAND-DERIVATION THE PAGE SHOWS, as arithmetic rather than as text. The three rows
-    # must sum to the worst case, or the table teaches a reader a derivation that does not
-    # reach the number beside it.
+              f"README carries {figure!r} {found} times, expected {occurrences}: the table and "
+              f"the hand-derivation must state the same number, so corrupting one of them "
+              f"cannot pass")
+
+    # THE HAND-DERIVATION THE PAGE SHOWS, as arithmetic rather than as text. The three terms
+    # must sum to the worst case, or the page teaches a derivation that does not reach the
+    # number beside it.
     spot_loss = quantity * (floor - baseline)
     check(spot_loss == F(-2636), f"the spot loss at the floor is {spot_loss}, not -2636")
     check(spot_loss + size - premium == at_floor,
-          "the three rows DEMO.md tabulates do not sum to the worst case it reports")
-    # A Fraction prints as `3503793/10000`, which no page would ever write, so the rows are
+          "the three terms README tabulates do not sum to the worst case it reports")
+    # A Fraction prints as `3503793/10000`, which no page would write, so the terms are
     # compared against the DECIMAL spelling the documents use -- the retained strings, whose
     # equality to these exact values was checked above.
     for row in ("2636", str(size), result["cost"]["premium"]):
-        check(row in demo_plain,
-              f"DEMO.md's derivation table does not show {row!r}, so a reader cannot "
-              f"re-add the rows to the worst case")
+        check(row in readme_plain,
+              f"README's derivation does not show {row!r}, so a reader cannot re-add the "
+              f"terms to the worst case")
 
     print(f"live bundle: 2026-10-05 mainnet passes, {size} contracts, premium "
           f"{result['cost']['premium']}, worst case {result['worst_case']['pnl']} against a "
@@ -2671,6 +2677,14 @@ def live_bucket_bundle():
           f"live bucket bundle: the retained size is {run['sizes']['bucket0-yes']}")
     check(result["reason_codes"] == [] and result["failing_intervals"] == [],
           "live bucket bundle: a passing result carries reason codes or failing intervals")
+
+    # README'S LIVE TABLE CARRIES THIS CAPTURE TOO. Both rows of that table are retained
+    # bundles, so both are held to their own bytes rather than one standing in for the other.
+    readme_plain = (PROJECT / "README.md").read_text().replace("−", "-").replace(",", "")
+    for figure in (str(size), result["cost"]["premium"], result["worst_case"]["pnl"],
+                   "fixtures/live/2026-10-12"):
+        check(figure in readme_plain,
+              f"README's live table does not carry {figure!r} from the 12 October capture")
 
     # THE SCREENING TOOL NO LONGER GUESSES AT A THRESHOLD. The bug above was a hardcoded
     # 0.999; if one reappears, the tool can disagree with the engine again.
