@@ -2257,6 +2257,7 @@ function evaluateAndCompare(evidence, rebuilt) {
   compareReductions(evidence, rebuilt);
   const mine = profile(lowerFn, rebuilt.domainLower, rebuilt.domainUpper);
   compareProfile(mine, list(result["profile"], "$result.profile"), "$result.profile");
+  compareWorstCase(evidence, rebuilt, lowerFn);
   compareVerdict(evidence, rebuilt, lowerFn, upperFn);
   compareCost(evidence, rebuilt, lowerFn);
   compareSizeWindows(evidence, rebuilt);
@@ -2457,6 +2458,31 @@ function compareReductions(evidence, rebuilt) {
     }
     if (typeof claimed["reason_code"] !== "string" || claimed["reason_code"] === "") {
       refuse2("REDUCTION_UNDECLARED", where, "the reduction states no reason code");
+    }
+  }
+}
+function compareWorstCase(evidence, rebuilt, lowerFn) {
+  const stated = object(evidence.result["worst_case"], "$result.worst_case");
+  const mine = infimum(lowerFn, rebuilt.domainLower, rebuilt.domainUpper);
+  const claimedPnl = number(stated["pnl"], "$result.worst_case.pnl");
+  if (!equals(claimedPnl, mine.value)) {
+    refuse2("PROFILE_VALUE", "$result.worst_case.pnl", `the result says ${format(claimedPnl)}, the payoff's infimum is ${format(mine.value)}`);
+  }
+  const claimedAttained = stated["attained"];
+  if (typeof claimedAttained !== "boolean") {
+    refuse2("ENGINE_DISAGREES", "$result.worst_case.attained", "expected a boolean");
+  }
+  if (claimedAttained !== mine.attained) {
+    refuse2("PROFILE_VALUE", "$result.worst_case.attained", `the result says ${String(claimedAttained)}, the infimum is ${mine.attained ? "attained" : "only approached"}`);
+  }
+  const claimedPrice = number(stated["price"], "$result.worst_case.price");
+  if (lt(claimedPrice, rebuilt.domainLower) || lt(rebuilt.domainUpper, claimedPrice)) {
+    refuse2("PROFILE_VALUE", "$result.worst_case.price", `${format(claimedPrice)} is outside the domain`);
+  }
+  if (claimedAttained === true) {
+    const there = evaluate(lowerFn, claimedPrice);
+    if (!equals(there, mine.value)) {
+      refuse2("PROFILE_VALUE", "$result.worst_case.price", `the payoff at ${format(claimedPrice)} is ${format(there)}, not the claimed ${format(mine.value)}`);
     }
   }
 }

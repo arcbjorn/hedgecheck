@@ -23,6 +23,7 @@ import {
   bandInfimumFn,
   below,
   cash,
+  evaluate,
   finite,
   type Fn,
   indicator,
@@ -885,6 +886,9 @@ function evaluateAndCompare(evidence: Evidence, rebuilt: Rebuilt): void {
   const mine = profile(lowerFn, rebuilt.domainLower, rebuilt.domainUpper);
   compareProfile(mine, list(result["profile"], "$result.profile"), "$result.profile");
 
+  // The worst case, which is the infimum of the profile just compared.
+  compareWorstCase(evidence, rebuilt, lowerFn);
+
   // The verdict, re-derived under the tight and loose rules.
   compareVerdict(evidence, rebuilt, lowerFn, upperFn);
 
@@ -1255,6 +1259,78 @@ function compareReductions(evidence: Evidence, rebuilt: Rebuilt): void {
     // A declared reduction without its reason code cannot be read back by anyone.
     if (typeof claimed["reason_code"] !== "string" || claimed["reason_code"] === "") {
       refuse("REDUCTION_UNDECLARED", where, "the reduction states no reason code");
+    }
+  }
+}
+
+function compareWorstCase(evidence: Evidence, rebuilt: Rebuilt, lowerFn: Fn): void {
+  // THE SUMMARY THE READER ACTS ON, which nothing re-derived until 12 October.
+  //
+  // `worst_case` is schema-required and is the number a result screen puts in front of
+  // someone deciding whether to trade. It was not checked here at all: mutation showed
+  // that editing `pnl` from -999.90676 to -500.00000, or to -50000.0, or flipping
+  // `attained` from true to false, was ACCEPTED. The profile was compared, so a
+  // falsified summary could sit on top of a correct payoff and this checker would not
+  // look -- the one disagreement a reader would most obviously rely on.
+  //
+  // It is the infimum of the LOWER profile, the same function whose pieces are compared
+  // above, so no new arithmetic is introduced: the kernel already computes this, and
+  // `attained` is part of its answer rather than a flag beside it.
+  const stated = object(evidence.result["worst_case"], "$result.worst_case");
+  const mine = infimum(lowerFn, rebuilt.domainLower, rebuilt.domainUpper);
+
+  const claimedPnl = number(stated["pnl"], "$result.worst_case.pnl");
+  if (!equals(claimedPnl, mine.value)) {
+    refuse(
+      "PROFILE_VALUE",
+      "$result.worst_case.pnl",
+      `the result says ${format(claimedPnl)}, the payoff's infimum is ${format(mine.value)}`,
+    );
+  }
+
+  // ATTAINED IS A CLAIM ABOUT MEMBERSHIP, not a decoration. True says the payoff reaches
+  // this value at a price inside the domain; false says it is only approached. Reporting
+  // a limit point as attained hands a reader a price where the payoff is strictly higher
+  // than the value beside it, so the two fields are checked together or neither means
+  // anything.
+  const claimedAttained = stated["attained"];
+  if (typeof claimedAttained !== "boolean") {
+    refuse("ENGINE_DISAGREES", "$result.worst_case.attained", "expected a boolean");
+  }
+  if (claimedAttained !== mine.attained) {
+    refuse(
+      "PROFILE_VALUE",
+      "$result.worst_case.attained",
+      `the result says ${String(claimedAttained)}, the infimum is ${
+        mine.attained ? "attained" : "only approached"
+      }`,
+    );
+  }
+
+  // THE PRICE IS CHECKED BY VALUE, NOT BY EQUALITY, and that is deliberate. A flat run
+  // attains its infimum at every price in it, so two correct implementations can name
+  // different prices and both be right -- the oracle takes the smallest such price, or
+  // the midpoint of the first attaining open piece, and demanding that exact choice here
+  // would test the tie-break rule rather than the arithmetic. What must hold is that the
+  // price the result names actually produces the value it claims, and lies in the domain.
+  const claimedPrice = number(stated["price"], "$result.worst_case.price");
+  if (lt(claimedPrice, rebuilt.domainLower) || lt(rebuilt.domainUpper, claimedPrice)) {
+    refuse(
+      "PROFILE_VALUE",
+      "$result.worst_case.price",
+      `${format(claimedPrice)} is outside the domain`,
+    );
+  }
+  if (claimedAttained === true) {
+    const there = evaluate(lowerFn, claimedPrice);
+    if (!equals(there, mine.value)) {
+      refuse(
+        "PROFILE_VALUE",
+        "$result.worst_case.price",
+        `the payoff at ${format(claimedPrice)} is ${format(there)}, not the claimed ${
+          format(mine.value)
+        }`,
+      );
     }
   }
 }
