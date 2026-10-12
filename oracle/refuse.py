@@ -238,6 +238,48 @@ def _check_profile(bundle, lowered):
 # --------------------------------------------------------------------------- verdict and witnesses
 
 
+def _check_worst_case(bundle, lowered):
+    """The summary a reader acts on, re-derived from the payoff rather than taken.
+
+    Nothing checked this until 12 October, in EITHER this refuser or the TypeScript
+    checker: raising the claimed worst case by 0.00001, or flipping `attained`, was
+    accepted by both. The profile was compared, so a falsified summary could sit on top
+    of a correct payoff -- and that number is the one a result screen puts in front of
+    someone deciding whether to trade.
+
+    It is the infimum of the same payoff whose pieces `_check_profile` compares, so no
+    new arithmetic enters: `O.infimum` already answers all three fields together.
+    """
+    stated = bundle["result"]["worst_case"]
+    lower = exact.parse(lowered["domain"]["lower"])
+    upper = exact.parse(lowered["domain"]["upper"])
+    worst, attained, _where = O.infimum(_payoff(lowered, False), lower, upper)
+
+    if exact.parse(stated["pnl"]) != worst:
+        _refuse("PROFILE_VALUE",
+                f"the result says the worst case is {stated['pnl']}, the payoff's infimum "
+                f"is {exact.format(worst)}", "worst_case.pnl")
+    if bool(stated["attained"]) != attained:
+        _refuse("PROFILE_VALUE",
+                f"the result says attained={stated['attained']}, the infimum is "
+                f"{'attained' if attained else 'only approached'}", "worst_case.attained")
+
+    # THE PRICE IS CHECKED BY VALUE, NOT BY EQUALITY. A flat run attains its infimum at
+    # every price in it, so two correct implementations may name different prices and both
+    # be right; demanding one would test the tie-break rule rather than the arithmetic.
+    # What must hold is that the named price is in the domain and really produces the value.
+    price = exact.parse(stated["price"])
+    if price < lower or price > upper:
+        _refuse("PROFILE_VALUE",
+                f"the worst case names {stated['price']}, which is outside the domain",
+                "worst_case.price")
+    if attained and _payoff(lowered, False)(price) != worst:
+        _refuse("PROFILE_VALUE",
+                f"the payoff at {stated['price']} is "
+                f"{exact.format(_payoff(lowered, False)(price))}, not the claimed "
+                f"{exact.format(worst)}", "worst_case.price")
+
+
 def _check_reductions(bundle, lowered):
     """Each reduction is declared with its reason code, and is sound as claimed."""
     claimed = bundle["result"].get("reductions", [])
@@ -467,6 +509,7 @@ def refuse(bundle):
         result = O.evaluate(lowered)
         _check_reductions(bundle, lowered)
         _check_profile(bundle, lowered)
+        _check_worst_case(bundle, lowered)
         _check_verdict(bundle, result)
         _check_intervals(bundle, result)
         _check_witnesses(bundle, lowered)
