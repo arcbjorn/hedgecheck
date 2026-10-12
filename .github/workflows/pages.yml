@@ -1,0 +1,38 @@
+# Publish site/ to GitHub Pages.
+#
+# The site is static and committed, so this uploads it rather than building it. The
+# in-browser verifier needs `site/vendor/checker.js` and `site/bundle/` to be the same
+# bytes the repository holds, which is why nothing here regenerates them: a page that
+# verified a bundle this workflow had rebuilt would be checking the workflow, not the
+# project. `make check` is what holds those files honest, in the normal test run.
+name: pages
+
+on:
+  push:
+    branches: [master]
+    paths: ['site/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
