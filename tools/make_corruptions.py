@@ -223,6 +223,34 @@ def premium_altered(parts):
     return out, {"of": "lowered", "change": "the walked total is altered by 0.00001", "target": "legs[0].premium.total"}
 
 
+def worst_case_raised(parts):
+    """Claim a better worst case than the payoff has, by the smallest visible amount.
+
+    The summary a reader acts on. Until 12 October nothing re-derived it: the checker
+    compared the profile and then took `worst_case` on trust, so a falsified summary could
+    sit on top of a correct payoff and be accepted. 0.00001 is below any rounding and above
+    exact equality, so this fails only because the value is re-derived.
+    """
+    out = copy.deepcopy(parts)
+    before = exact.parse(out["result"]["worst_case"]["pnl"])
+    out["result"]["worst_case"]["pnl"] = exact.format(before + exact.parse("0.00001"))
+    return out, {"of": "result", "change": "the claimed worst case is raised by 0.00001",
+                 "target": "worst_case.pnl"}
+
+
+def worst_case_not_attained(parts):
+    """Flip `attained` to false where the payoff does reach its infimum.
+
+    Not a decoration: true says the value is reached at a price IN the domain, false says it
+    is only approached. Reporting a limit point as attained hands a reader a price where the
+    payoff is strictly higher than the number beside it, so the flag is part of the claim.
+    """
+    out = copy.deepcopy(parts)
+    out["result"]["worst_case"]["attained"] = not out["result"]["worst_case"]["attained"]
+    return out, {"of": "result", "change": "the attained flag is flipped",
+                 "target": "worst_case.attained"}
+
+
 def objective_changed(parts):
     """Loosen the cap in the lowered proposal, leaving the proposal's own intact.
 
@@ -438,6 +466,8 @@ GROUPED_BASES = {"good-basis-grouped"}
 CORRUPTIONS = [
     ("strike-piece-removed", "good", "PROFILE_COVERAGE", strike_piece_removed),
     ("premium-altered", "good", "COST_MISMATCH", premium_altered),
+    ("worst-case-raised", "good", "PROFILE_VALUE", worst_case_raised),
+    ("worst-case-not-attained", "good", "PROFILE_VALUE", worst_case_not_attained),
     ("objective-changed", "good", "OBJECTIVE_MISMATCH", objective_changed),
     ("endpoint-ownership-swapped", "good", "ENDPOINT_OWNERSHIP", endpoint_ownership_swapped),
     ("book-byte-changed", "good", "SNAPSHOT_BYTES", book_byte_changed),
