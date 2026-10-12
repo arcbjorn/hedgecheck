@@ -23,123 +23,56 @@ choose**.
         --bundle fixtures/bundles/good-envelope --network testnet
     APPROVED {"coin":"#39710", ...}        <-- a MAINNET instrument
 
-**A testnet bundle cannot be built today either — and the reason is LIQUIDITY, not
-listing.** Corrected 22 Sep; the earlier wording on this page said testnet lists no expiry
-carrying both a binary and a bucket, which is true and was the wrong blocker.
+**A testnet bundle cannot be built today, and the obstacle is the venue.** Measured
+12 October; re-measure before acting, because every figure here is a dated observation.
 
-**A bucket is not required.** Long the underlying, YES at one strike and NO at another is a
-hedge this tool verifies, and testnet lists those ladders routinely — verified against the
-retained 21 September catalogue:
+Two independent conditions each block it on their own:
 
-| Underlying | Expiry | Strikes at that expiry |
-|---|---|---|
-| `xyz:XYZ100` | `20260921-1900` | 29,100 · 29,300 · 29,500 · 29,700 · 29,900 |
-| `xyz:AAPL` | `20260921-1900` | 7,600 · 7,650 · 7,700 · 7,750 · 7,800 |
-| `BTC` | `20260921-1200` | 81,100 · 81,500 · 81,900 |
+1. **Discovery finds no pair.** `engine/discover/discover.go` requires a
+   `recurring.priceBinary` and a `recurring.priceBucket` at one expiry. On testnet the daily
+   binary expires at `-0300` and the daily bucket at `-0600`, a fixed three-hour offset
+   observed on 24 September, 5 October and 12 October, so `SoonestExpiry` returns nothing:
 
-(Testnet carries no price bucket at all — the only `*Bucket` outcomes are
-`policyRateBucket`, on Fed rates. That is why waiting for one was waiting for the wrong
-thing.)
+       $ hedgecheck check --live --network testnet --underlying BTC ...
+       no expiry with both a binary and a bucket for BTC
 
-**Measured 23 Sep, and THE BLOCKER IS GONE.** Run the sweep yourself — it is the check, and it
-is read-only:
+2. **There is no depth to buy**, which blocks a hand-written single-leg proposal as well. All
+   sixteen Recurring books on testnet are empty: every binary YES and NO across BTC, ETH, SOL,
+   HYPE and ZEC, and all three bucket outcomes, both sides, 0 bids and 0 asks. None returned
+   `null`, so the coin encoding (`'#' + (10 * outcome + side)`, yes=0, no=1) resolved on every
+   one and these are genuinely empty books.
+
+Verify both with the read-only sweep rather than trusting this page, and **re-sweep before
+acting**: these are dated instruments, they expire, and the digest you eventually approve is
+bound to a capture taken at one moment.
 
     $ python3 tools/sweep_testnet.py
 
-Two corrections to what this page said on 22 Sep, both of them errors in the earlier probe and
-not in the venue:
-
-- The two retained instances are dated `20260921` and have **expired**: `#204891` and
-  `#203580` return `null`, not an empty book. Those are different facts, and reporting the
-  first as the second claims something false about a market that is not there.
-- **"0 bids and 0 asks" was a measurement bug.** The earlier probe asked for `#10218` — the
-  raw outcome id — where the venue's coin is `'#' + (10*outcome + side)`, yes=0 no=1, so
-  outcome 10218 YES is `#102180`. A wrong coin answers `null`, which the probe read as an
-  empty book. `engine/discover/discover.go` had the rule right all along.
-
-Swept properly over all 618 outcomes, both sides:
-
-| | count |
-|---|---|
-| books returning a book | 1,236 |
-| carrying at least one quote | 114 |
-| empty (0 bids, 0 asks) | 1,122 |
-
-Of those, some are **structured price markets** — carrying `perp`, `priceDescription`,
-`seconds` and `threshold`, the template fields a price leg is built from — and the sweep prints
-how many, and how many of their books are quoted, under `quoted AND a price market`. On 23 Sep
-it was 56 markets and 28 quoted books. **Read the count from the sweep, not from this line:**
-these are dated instruments, `make check` is offline and cannot verify a live number, and a
-figure written here is stale the moment an expiry passes. The rest of the quoted depth is
-World Cup and CPI markets, which this tool refuses as price legs rather than inventing a
-series for.
-
-**STEP 0 STILL BLOCKS, and not on depth.** Measured 23 Sep by running the live path rather
-than reasoning about the catalogue:
-
-    $ hedgecheck check --live --network testnet --underlying BTC ...
-    no expiry with both a binary and a bucket for BTC
-
-`engine/discover/discover.go` requires a `recurring.priceBinary` **and** a
-`recurring.priceBucket` at one expiry. Testnet carries no price bucket at all, so the live path
-cannot assemble a testnet hedge however deep the books are. An earlier note here said a strike
-ladder "needs no bucket" — true of the evaluator, false of discovery.
-
-Crossing both properties over all 56 structured price markets: **17 lower** to a reference,
-**14 have asks**, **10 do both** — and all 10 are `xyz:XYZ100`/`xyz:AAPL` referenced to Pyth,
-so against a Hyperliquid objective they earn `basis_unbridged`, are worth zero without a
-declared bound, and produce `needs_review`. **The gate acts on `passes` only**, so none of them
-opens it. The one BTC ladder that lowers cleanly — `'the Hyperliquid BTC perp trade'` @90s at
-`20260923-1200`, three strikes, already in the reference map — has 0 bids and 0 asks on all six
-sides.
-
-Those ten also show why a testnet `passes` would prove little about semantics: they read
+Testnet's wider price catalogue does not help either. Of its structured price markets, the
+ones that both lower to a reference and carry asks are all `xyz:XYZ100` or `xyz:AAPL`
+referenced to Pyth, so against a Hyperliquid objective they earn `basis_unbridged`, are worth
+zero without a declared bound, and produce `needs_review` — and **the gate acts on `passes`
+only**. Several also pair a mapped description with a different subject, reading
 `perp:xyz:AAPL|priceDescription:the Pyth US500 index price`, an S&P index settling an Apple
-market at thresholds near 7,600, under `template:binaryPrice6`. Testnet's price catalogue is
-scratch space — other descriptions include `'TWAP stuff'`, `'agent probe'` and `'HAHVD'`.
+market. A testnet `passes` built on those would prove little about mainnet semantics.
 
-**Corrected 24 Sep: neither decision was the answer, and the ladder is not being built.** This
-page previously said the way through was to widen discovery to the ladder shape or declare a
-basis bound. The ladder existed only to route around discovery's binary-and-bucket requirement
-on testnet, and **mainnet satisfies that requirement every day** — the BTC binary and bucket
-share one expiry in all three retained catalogues and live — so the pipeline already runs end to
-end on mainnet, read-only. On testnet the two sit 21 hours apart, both `period=1d`, so they can
-never pair there. Testnet was the one venue where the shape does not line up.
+**Do not look for a way around this.** Widening discovery to a strike ladder does not help:
+mainnet already pairs the two families daily, and the obstacle here is depth rather than
+shape. Switching underlying does not help: BTC is the only one carrying a bucket at all. A
+cheap bucket ask is not an opening: index 1 pays on a rise into the band, so it is not
+downside protection, and `named[0]` is the correct leg. And a mainnet bundle must never be
+aimed at testnet — see the STOP section above.
 
-**Two different things were being waited for, and only one of them resolved.**
+**The mainnet path is a separate matter and it works.** `check --live --network mainnet` runs
+read-only and has returned passing verdicts from live books: 5 October on the binary leg, 12
+October on the bucket leg, both retained under `fixtures/live/` and replayable offline. Use
+`python3 tools/hedgeable_today.py` to see whether today's market can produce one — exit 0
+prints the command, exit 1 names the precondition that failed. That path stops before
+anything that signs.
 
-**The MAINNET price condition resolved on 5 October.** A useful daily hedge needs the binary's
-target BELOW spot, so the NO leg that pays on a fall is out of the money and cheap. That held:
-spot 86,360 against a target of 85,749, the NO leg asking 0.3547, and `check --live` returned
-**passes** — 987 contracts, worst case −1,999.3793 against a 2,000 cap. It is retained in
-`fixtures/live/2026-10-05/` and replays offline. Use `python3 tools/hedgeable_today.py` to see
-whether today is another such day: exit 0 prints the live command, exit 1 names what failed.
+Results reproducible without any market are in [README](../README.md), "Verifying the
+results".
 
-**The TESTNET order is a different blocker and it has NOT resolved.** Re-measured 12 October,
-and there are two independent walls:
-
-1. **Discovery.** The daily binary expires `-0300` and the daily bucket `-0600`, a fixed
-   3-hour offset seen on 24 Sep, 5 Oct and 12 Oct. `SoonestExpiry` finds no shared expiry, so
-   nothing is built.
-2. **Depth**, which is the wall a hand-written single-leg proposal would hit anyway: **all 16
-   Recurring books on testnet are empty.** Every binary YES/NO across BTC, ETH, SOL, HYPE and
-   ZEC, and all three bucket outcomes, both sides: 0 bids, 0 asks. None answered `null`, so the
-   coin encoding resolved and these are genuinely empty books rather than wrong coins.
-
-There is nothing to buy there at any price. **No step on this page reaches it**, and that is a
-fact about the venue rather than about this project. Do not aim a mainnet bundle at testnet to
-get around it — see the STOP section above.
-
-Do not switch underlying looking for a way round — BTC is the only one carrying a bucket at
-all — and do not read a cheap bucket ask as an opening: bucket index 1 pays on a RISE into the
-band, so it is not downside protection, and `named[0]` is the correct leg.
-
-For a demonstration that needs no market at all, use [`DEMO.md`](../DEMO.md), which pairs the
-retained 18 September replay with the 5 October live pass.
-
-Whichever way that goes, **re-sweep before acting**: every figure above is a dated observation,
-the instruments expire, and the digest you eventually approve is bound to a capture taken at
-one moment.
 
 ## There is a second path, and it is a different page
 
