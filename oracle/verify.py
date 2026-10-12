@@ -359,6 +359,7 @@ def main():
     basis_band()
     replay()
     live_bundle()
+    live_bucket_bundle()
 
     print(f"{CHECKS} checks passed; vectors, golden table, the PLAN.md example and the 18 September replay all agree.")
 
@@ -2593,6 +2594,100 @@ def live_bundle():
     print(f"live bundle: 2026-10-05 mainnet passes, {size} contracts, premium "
           f"{result['cost']['premium']}, worst case {result['worst_case']['pnl']} against a "
           f"-2000 cap, all four digests re-derived")
+
+
+def live_bucket_bundle():
+    """The 12 October live pass, which is the BUCKET leg -- a different leg from 5 October.
+
+    Worth a second guard rather than a loop over bundles, because the arithmetic is genuinely
+    different: bucket0 YES pays 1 strictly BELOW thresholds[0], so the state that kills it is
+    just above that threshold rather than just above a binary target, and the hand derivation
+    has to use the threshold the venue published.
+
+    DERIVED HERE, not read from the run document:
+
+        spot loss at the floor  0.1 * (60,000 - 82,549)  = -2,254.90
+        bucket0 YES pays        542 * 1                  =   +542
+        premium                                          =   -286.71258
+                                                           -------------
+                                                            -1,999.61258   <= the -2,000 cap
+
+    And just above the low threshold 82,308, where the leg pays nothing:
+    0.1 * (82,308 - 82,549) - 286.71258 = -310.81258, which is better. So the floor binds.
+
+    THIS BUNDLE EXISTS BECAUSE A BUG WAS FOUND BY DISAGREEMENT. On 12 October
+    `tools/hedgeable_today.py` printed HEDGEABLE while `check --live` refused the same book:
+    the tool screened on `ask < 0.999` and the bucket asked 0.99666, which is under that
+    threshold and still costs 99.7% of the payoff. The live check was right, the screening
+    tool was wrong, and the threshold was replaced by the arithmetic in `viable()`. Within the
+    hour the bucket tightened to 0.52899 and both agreed on `passes` -- so the fix was
+    confirmed by the two tools AGREEING on a book neither had seen, not merely by one of them
+    going quiet.
+    """
+    bundle = PROJECT / "fixtures" / "live" / "2026-10-12"
+    runs = sorted(bundle.glob("*.run.json"))
+    check(len(runs) == 1, f"live bucket bundle: expected one run document, found {len(runs)}")
+    if not runs:
+        return
+    run = json.loads(runs[0].read_text())
+    check(run["leg"] == "bucket0-yes",
+          f"live bucket bundle: the retained leg is {run['leg']}, not bucket0-yes -- this "
+          f"guard's arithmetic is about the bucket and does not describe another leg")
+
+    for name, filename in (("binary-no", "binary-no.json"),
+                           ("bucket0-yes", "bucket0-yes.json"),
+                           ("catalogue", "catalogue.json"),
+                           ("contexts", "contexts.json")):
+        path = bundle / filename
+        check(path.exists(), f"live bucket bundle: {filename} is missing")
+        if path.exists():
+            found = sha256(path.read_bytes()).hexdigest()
+            check(found == run["digests"][name],
+                  f"live bucket bundle: {filename} hashes to {found[:16]}, the run document "
+                  f"names {run['digests'][name][:16]} -- the bundle has been edited")
+
+    quantity, baseline, floor = F("0.1"), F(82549), F(60000)
+    size, premium, low = 542, F("286.71258"), F(82308)
+    at_floor = quantity * (floor - baseline) + size - premium
+    above_low = quantity * (low - baseline) - premium
+    check(at_floor == F("-1999.61258"),
+          f"live bucket bundle: the worst case at the floor is {at_floor}, not -1999.61258")
+    check(above_low == F("-310.81258"),
+          f"live bucket bundle: just above the low threshold is {above_low}, not -310.81258")
+    check(at_floor < above_low,
+          "live bucket bundle: the floor is no longer the binding price")
+    check(at_floor >= F(-2000),
+          f"live bucket bundle: {at_floor} does not meet the -2000 cap")
+
+    result = run["results"]["bucket0-yes"]
+    check(result["model_result"] == "passes",
+          f"live bucket bundle: the retained verdict is {result['model_result']}")
+    check(F(result["worst_case"]["pnl"]) == at_floor,
+          f"live bucket bundle: the retained worst case {result['worst_case']['pnl']} is not "
+          f"the hand-derived {at_floor}")
+    check(F(result["cost"]["premium"]) == premium,
+          f"live bucket bundle: the retained premium is {result['cost']['premium']}")
+    check(F(run["sizes"]["bucket0-yes"]) == size,
+          f"live bucket bundle: the retained size is {run['sizes']['bucket0-yes']}")
+    check(result["reason_codes"] == [] and result["failing_intervals"] == [],
+          "live bucket bundle: a passing result carries reason codes or failing intervals")
+
+    # THE SCREENING TOOL NO LONGER GUESSES AT A THRESHOLD. The bug above was a hardcoded
+    # 0.999; if one reappears, the tool can disagree with the engine again.
+    # A BARE SUBSTRING WOULD BAN THE EXPLANATION, which this guard hit on its own first run:
+    # the file NAMES `PLACEHOLDER_ASK` in the comment recording why it was removed, and the
+    # comment is the most useful part. What must not come back is the ASSIGNMENT, so that is
+    # what is matched -- the same distinction the consumer runbook's guard needed.
+    tool = (PROJECT / "tools" / "hedgeable_today.py").read_text()
+    check(not re.search(r"^PLACEHOLDER_ASK\s*=", tool, re.M),
+          "hedgeable_today.py defines a placeholder-ask threshold again; on 12 Oct that made "
+          "it print HEDGEABLE on a 0.99666 book the live check correctly refused")
+    check("def viable(" in tool,
+          "hedgeable_today.py no longer derives whether an ask can meet the cap, so it is "
+          "back to guessing what a real quote looks like")
+
+    print(f"live bundle: 2026-10-12 mainnet bucket0-yes passes, {size} contracts, premium "
+          f"{result['cost']['premium']}, worst case {result['worst_case']['pnl']}")
 
 
 def bundles():
