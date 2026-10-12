@@ -137,7 +137,7 @@ It regenerates and compares the conformance vectors and the certificate bundles,
 validates every contract document against the frozen schemas, runs the oracle's
 verifier — which also fails if the example result printed in `PLAN.md` drifts
 from the generated fixture, and which accepts two certificate bundles while
-refusing twelve corrupted ones by class — replays the retained live capture byte
+refusing 19 corrupted ones by class — replays the retained live capture byte
 for byte, and runs the Go and TypeScript suites, architecture tests included.
 
 A schema file cannot change unless [schema/CHANGES.md](./schema/CHANGES.md)
@@ -216,7 +216,7 @@ catalogue — so `085ccfb` is the only copy.
 | Path | Contents |
 |---|---|
 | `schema/` | 11 draft JSON Schemas: proposal, lowered proposal, result, comparison, synthesis, registry entry, reference map, snapshot record, certificate bundle manifest, refusal classes, shared definitions |
-| `fixtures/` | `golden/` a lowered proposal and its generated result · `vectors/` numbers and canonical JSON · `replay/` retained responses and the real proposals lowered from them · `bundles/` certificate bundles, seven good and seventeen corrupted · `kernel/` the oracle's exact answers to 400 kernel queries, which the Go engine must reproduce · `rejected/` documents every schema must refuse, shared by all three implementations · `generated/` 320 lowered proposals with the oracle results the Go engine must reproduce · `refusals/` one proposal per refusal code lowering can raise · `synthesis/` the oracle's synthesis answers and one corruption per refusal class, which the TypeScript checker judges · `testnet/` a read-only testnet catalogue and its two empty books, retained as the evidence for EVIDENCE section 4 · `live/` two retained live mainnet passes -- the binary leg (5 Oct) and the bucket leg (12 Oct) -- each with four snapshot digests that re-derive from its own bytes; `python3 tools/replay_live.py fixtures/live/2026-10-05` rebuilds a store from them and replays it offline |
+| `fixtures/` | `golden/` a lowered proposal and its generated result · `vectors/` numbers and canonical JSON · `replay/` retained responses and the real proposals lowered from them · `bundles/` certificate bundles, 8 good and 19 corrupted · `kernel/` the oracle's exact answers to 400 kernel queries, which the Go engine must reproduce · `rejected/` documents every schema must refuse, shared by all three implementations · `generated/` 320 lowered proposals with the oracle results the Go engine must reproduce · `refusals/` one proposal per refusal code lowering can raise · `synthesis/` the oracle's synthesis answers and one corruption per refusal class, which the TypeScript checker judges · `testnet/` a read-only testnet catalogue and its two empty books, retained as the evidence for EVIDENCE section 4 · `live/` two retained live mainnet passes -- the binary leg (5 Oct) and the bucket leg (12 Oct) -- each with four snapshot digests that re-derive from its own bytes; `python3 tools/replay_live.py fixtures/live/2026-10-05` rebuilds a store from them and replays it offline |
 | `registry/` | Contract semantics as data: one reviewed reading of each family's payoff |
 | `references/` | What a venue's free-text price description denotes, versioned separately from a payoff reading |
 | `oracle/` | Python. Exact numbers, canonical JSON, the kernel, lowering, the reference refuser, the verifier. **Not the product engine** |
@@ -224,6 +224,7 @@ catalogue — so `085ccfb` is the only copy.
 | `checker/` | TypeScript, no dependencies. So far the conformance spine and the architecture test |
 | `consumer/` | TypeScript. The approval gate: one function that runs its own copy of the checker and places an order only for an accepted `passes` carrying the order envelope its cost bound assumes. The clock is injected; `place` is a parameter and this tier ships only a recording fake. No keys, no network, no signing |
 | `onchain/` | Solidity. `ApprovedOrderGate`: sends a CoreWriter limit order only when it is the order an owner-approved certificate digest authorised, at no worse a price, no larger a size, and no more than the approved cost. It does NOT verify certificates — that needs the payoff kernel, and the evidence a cost bound rests on cannot be established on chain at all, since the read precompiles expose positions and balances but no order book. No dependencies: `forge-std` is not used, so the tests are plain Solidity. Skipped with a notice when `forge` is absent |
+| `site/` | A static page: what the project does, the published results, and an in-browser verifier that runs the shipped TypeScript checker over a retained bundle. No server, no network call at view time |
 | `tools/` | The vector generator, the corruption generator and the schema validator |
 | `research/` | Evidence packages and verifiers. **Restore from `085ccfb`** (above) |
 
