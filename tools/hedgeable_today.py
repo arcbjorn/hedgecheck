@@ -21,13 +21,40 @@ below are what actually decide it, and both are one request away:
 Neither is a defect in this project, and neither is something it controls.
 """
 
+from fractions import Fraction
 import json
 import sys
 import urllib.request
 
 HOST = "https://api.hyperliquid.xyz/info"
-# A book quoting the extremes with nothing between is a placeholder, not a market.
-PLACEHOLDER_ASK = 0.999
+
+# WHY THERE IS NO PLACEHOLDER THRESHOLD ANY MORE.
+#
+# This read `PLACEHOLDER_ASK = 0.999` until 12 October, on the theory that a book quoting the
+# extremes is a placeholder and anything tighter is a market. On 12 October the BTC bucket
+# asked **0.99666** -- under that threshold, so the tool reported "genuinely quoted: yes" and
+# printed HEDGEABLE, while `check --live` refused the same book. The live check was right.
+#
+# The threshold was the wrong KIND of test. What matters is not whether an ask looks like a
+# placeholder but whether a leg at that price can meet the cap at all, and that is arithmetic,
+# not a guess: a contract costing `ask` and paying 1 nets `1 - ask` where it pays, so covering
+# a shortfall S needs `S / (1 - ask)` contracts and costs `ask * S / (1 - ask)` -- and that
+# premium is spent in EVERY state, including the ones where the leg pays nothing. At 0.99666
+# a 2,000 cap on 0.1 BTC needed 79,192 contracts for 78,927, breaching the cap 39 times over
+# in the state just above the threshold. The premium alone decides it long before depth does.
+#
+# So the test is: is the premium the cap's own shortfall would require still inside the cap?
+def viable(ask, shortfall, cap):
+    """Can a leg asking `ask` cover `shortfall` without the premium itself breaching `cap`?
+
+    Exact, in Fractions: this is a screening decision about money and a float here would put
+    the tool and the engine on different sides of a boundary for no reason.
+    """
+    ask = Fraction(str(ask))
+    if ask >= 1:
+        return False
+    contracts = shortfall / (1 - ask)
+    return contracts * ask <= cap
 
 
 def info(body, timeout=25):
@@ -110,11 +137,24 @@ def main():
 
     named = question.get("namedOutcomes", [])
     bucket_ask = best_ask(side_coin(named[0], "yes")) if named else None
-    real_bucket = bucket_ask is not None and bucket_ask < PLACEHOLDER_ASK
-    print(f"  bucket genuinely quoted: {'yes' if real_bucket else 'NO -- placeholder spread'}"
-          f"   ask={bucket_ask}")
 
-    if shared and (out_of_money or real_bucket):
+    # THE SHORTFALL A HEDGE HAS TO COVER, from the same 0.1 BTC and 2,000 cap the printed
+    # command uses. Unhedged, the worst case at the floor is qty * (floor - spot); whatever is
+    # worse than -cap is what a leg must make up.
+    quantity, cap, floor = Fraction(1, 10), Fraction(2000), Fraction(60000)
+    unhedged = quantity * (floor - Fraction(str(price)))
+    shortfall = max(Fraction(0), -cap - unhedged)
+
+    binary_viable = binary_ask is not None and viable(binary_ask, shortfall, cap)
+    bucket_viable = bucket_ask is not None and viable(bucket_ask, shortfall, cap)
+    print(f"  bucket ask usable:    {'yes' if bucket_viable else 'NO -- premium alone would '
+                                     'breach the cap'}   ask={bucket_ask}")
+    print(f"  binary ask usable:    {'yes' if binary_viable else 'NO -- premium alone would '
+                                     'breach the cap'}   ask={binary_ask}")
+    print(f"  (shortfall to cover {float(shortfall):,.2f} on an unhedged "
+          f"{float(unhedged):,.2f})")
+
+    if shared and (binary_viable or bucket_viable):
         # --cap IS A POSITIVE MAGNITUDE. A negative one used to double-negate into a sell-down
         # larger than the holding and a positive "loss" cap; it is refused now, but the command
         # is spelled out here so the right sign is what gets copied.
