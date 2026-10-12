@@ -225,6 +225,7 @@ catalogue — so `085ccfb` is the only copy.
 | `consumer/` | TypeScript. The approval gate: one function that runs its own copy of the checker and places an order only for an accepted `passes` carrying the order envelope its cost bound assumes. The clock is injected; `place` is a parameter and this tier ships only a recording fake. No keys, no network, no signing |
 | `onchain/` | Solidity. `ApprovedOrderGate`: sends a CoreWriter limit order only when it is the order an owner-approved certificate digest authorised, at no worse a price, no larger a size, and no more than the approved cost. It does NOT verify certificates — that needs the payoff kernel, and the evidence a cost bound rests on cannot be established on chain at all, since the read precompiles expose positions and balances but no order book. No dependencies: `forge-std` is not used, so the tests are plain Solidity. Skipped with a notice when `forge` is absent |
 | `site/` | A static page: what the project does, the published results, and an in-browser verifier that runs the shipped TypeScript checker over a retained bundle. No server, no network call at view time |
+| `submission/` | Recording scripts for the two submission videos: every command in them was run and its output pasted back, so nothing is improvised on camera |
 | `tools/` | The vector generator, the corruption generator and the schema validator |
 | `research/` | Evidence packages and verifiers. **Restore from `085ccfb`** (above) |
 
