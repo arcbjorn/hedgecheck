@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HedgeCheck</title>
+<meta name="description" content="Pre-trade verification of whether a proposed hedge satisfies an explicit protection objective, for Hyperliquid HIP-4 outcome markets.">
+<style>
+  :root {
+    --bg: #ffffff; --fg: #14161a; --muted: #5a616b; --rule: #e2e5ea;
+    --panel: #f7f8fa; --accent: #1b4f9c; --ok: #10683c; --bad: #9c1b1b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101216; --fg: #e8eaee; --muted: #9aa2ad; --rule: #272b32;
+      --panel: #171a1f; --accent: #7fb0ef; --ok: #5cc98d; --bad: #ef8d8d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101216; --fg: #e8eaee; --muted: #9aa2ad; --rule: #272b32;
+    --panel: #171a1f; --accent: #7fb0ef; --ok: #5cc98d; --bad: #ef8d8d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 50rem; margin: 0 auto; padding: 0 16px 5rem; }
+  header { border-bottom: 1px solid var(--rule); padding: 3.5rem 0 2rem; margin-bottom: 2.5rem; }
+  h1 { font-size: 1.9rem; letter-spacing: -0.015em; margin: 0 0 .5rem; }
+  h2 {
+    font-size: .8rem; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--muted); margin: 3rem 0 1rem; font-weight: 600;
+  }
+  h3 { font-size: 1.02rem; margin: 1.75rem 0 .5rem; }
+  p { margin: 0 0 1rem; }
+  .lede { font-size: 1.12rem; color: var(--fg); margin-bottom: 1rem; }
+  .sub { color: var(--muted); font-size: .95rem; }
+  a { color: var(--accent); }
+  code, pre, .num { font-family: var(--mono); }
+  code { font-size: .88em; background: var(--panel); padding: .1em .35em; border-radius: 3px; }
+  pre {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 6px;
+    padding: .9rem 1rem; overflow-x: auto; font-size: .83rem; line-height: 1.5; margin: 0 0 1rem;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 1rem; font-size: .9rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--rule); }
+  th { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-size: .86rem; white-space: nowrap; }
+  .panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 1.1rem 1.25rem; margin: 0 0 1.25rem; }
+  .verdict { font-weight: 600; }
+  .verdict.ok { color: var(--ok); }
+  .verdict.bad { color: var(--bad); }
+  ul { margin: 0 0 1rem; padding-left: 1.3rem; }
+  li { margin-bottom: .4rem; }
+  button {
+    font: inherit; font-size: .92rem; padding: .55rem 1.1rem; border-radius: 6px;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer;
+  }
+  button:disabled { opacity: .55; cursor: default; }
+  #log {
+    font-family: var(--mono); font-size: .8rem; line-height: 1.65; white-space: pre-wrap;
+    margin-top: 1rem; color: var(--muted);
+  }
+  #log b { color: var(--fg); font-weight: 600; }
+  #log .ok { color: var(--ok); }
+  #log .bad { color: var(--bad); }
+  footer { border-top: 1px solid var(--rule); margin-top: 3.5rem; padding-top: 1.5rem; color: var(--muted); font-size: .88rem; }
+  .caveat { border-left: 3px solid var(--rule); padding-left: 1rem; color: var(--muted); font-size: .92rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>HedgeCheck</h1>
+  <p class="lede">Pre-trade verification of whether a proposed hedge satisfies an
+  explicit protection objective, what satisfying it costs, and what the
+  alternatives are &mdash; for Hyperliquid HIP-4 outcome markets.</p>
+  <p class="sub">Do these exact terms, costs and holdings satisfy a stated
+  objective &mdash; and what does satisfying it cost, against the
+  alternatives?</p>
+</header>
+
+<h2>The question it answers</h2>
+
+<p>A trader holding an exposure and wanting a bound on their loss can read a
+payoff diagram, but a diagram does not answer whether a <em>specific</em>
+proposed position meets a <em>specific</em> stated objective, nor what that
+costs relative to the alternatives. HedgeCheck takes the objective as an input
+and returns a verdict with its evidence.</p>
+
+<p>Three answers are possible, and they are different: <code>passes</code>,
+<code>fails</code> with a witness naming the adverse state, and
+<code>needs_review</code> where a bound is too loose to decide. A refusal is a
+fourth thing and not a verdict &mdash; a proposal that cannot be lowered has no
+result, so the tool declines rather than guessing.</p>
+
+<h2>How it is built</h2>
+
+<p>Three independent implementations of one specification, which must agree:</p>
+
+<ul>
+  <li><strong>Python oracle</strong> &mdash; the reference. Exact rationals via <code>fractions</code>.</li>
+  <li><strong>Go engine</strong> &mdash; answers. Exact rationals via <code>math/big</code>.</li>
+  <li><strong>TypeScript checker</strong> &mdash; verifies, independently. <code>BigInt</code>, no dependencies.</li>
+</ul>
+
+<p>No floating point anywhere on an evaluation path. A disagreement between any
+two of them fails the build, so a verdict is a claim three separately written
+programs reached from the same bytes. Contract semantics are data rather than
+code: a registry entry states one family's payoff reading, and a proposal pins
+the digest of the reading it was evaluated against, so a later edit to that
+reading cannot silently change an old answer.</p>
+
+<h2>Verify a result in this browser</h2>
+
+<p>The checker below is the same TypeScript implementation the project ships. It
+runs here, hashes every file it reads, and re-derives the payoff profile, the
+premium, the reductions, the verdict and the worst case from the proposal and
+the retained market snapshots. Each of these refuses a specific falsification:</p>
+
+<table>
+  <thead><tr><th>Alter this</th><th>And it refuses with</th></tr></thead>
+  <tbody>
+    <tr><td>one character of a retained snapshot</td><td>a hash that does not match the digest the proposal cites</td></tr>
+    <tr><td>the stated premium</td><td><code>COST_MISMATCH</code></td></tr>
+    <tr><td>the worst case, by 0.00001</td><td><code>PROFILE_VALUE</code></td></tr>
+    <tr><td>the <code>attained</code> flag</td><td><code>PROFILE_VALUE</code></td></tr>
+    <tr><td>the price the worst case names</td><td><code>PROFILE_VALUE</code></td></tr>
+  </tbody>
+</table>
+
+<p>The worst-case checks exist because building this page exposed their absence.
+Both the checker and the Python refuser compared the payoff profile and then took
+the <code>worst_case</code> summary on trust, so a falsified number could sit on
+top of a correct payoff &mdash; and that summary is exactly what a reader acts
+on. Each of the five rows above was watched failing before being trusted, and two
+corruption fixtures hold them permanently.</p>
+
+<p>One deliberate looseness: the price is checked by <em>value</em> rather than by
+equality. A flat run attains its infimum at every price in it, so two correct
+implementations may name different prices and both be right. What must hold is
+that the named price lies in the domain and really produces the value claimed
+beside it.</p>
+
+<div class="panel">
+  <p style="margin-bottom:.9rem"><strong>Retained capture, 18 September 2026.</strong>
+  Hold 0.1&nbsp;BTC; lose at most 1,000 anywhere in 60,000&ndash;110,000. Hedged
+  with YES on the lowest bucket of a BTC outcome market expiring
+  2026-09-19T06:00:00Z.</p>
+  <button id="run">Run the checker</button>
+  <div id="log">Idle. The bundle is eleven files: the proposal, its lowered form, the result, a manifest, three market snapshots and four registry entries.</div>
+</div>
+
+<h2>Results</h2>
+
+<p>Every figure here is reproducible offline from retained captures, and is held
+against those bytes by the project's own test suite &mdash; a published number
+cannot drift from the capture it came from.</p>
+
+<h3>Three questions against one capture</h3>
+
+<p>The same objective, the same baseline of 77,631.4, three different proposals:</p>
+
+<table>
+  <thead><tr><th>Proposal</th><th>Verdict</th><th class="num">Premium</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><code>bucket0</code></td><td><span class="verdict ok">passes</span></td><td class="num">160.76676</td><td>Meets the cap, and cheaply</td></tr>
+    <tr><td><code>binary</code></td><td><span class="verdict ok">passes</span></td><td class="num">645.76904</td><td>Also meets it, at four times the premium</td></tr>
+    <tr><td><code>bucket0-horizon</code></td><td><span class="verdict bad">fails</span></td><td class="num">&mdash;</td><td>The leg expires before the objective is valued</td></tr>
+  </tbody>
+</table>
+
+<p>The third is the informative one. Its hedge leg is observed a day before the
+objective's valuation time, so the engine does not guess what happens in
+between: it applies a <code>horizon_mismatch</code> reduction, worst-cases the
+leg to zero, and reports a bound that is <em>attained</em> rather than estimated.
+The resulting worst case is &minus;1,923.91 against an unhedged
+&minus;1,763.14 &mdash; premium spent on protection that has expired, so the
+position is worse than no hedge at all. A tool that passed it would be
+dangerous.</p>
+
+<p>Ranking the two that pass, by the cost of the smallest size that met the
+objective, is the answer a payoff diagram cannot give: not <em>is this hedge
+sound</em> but <em>which sound hedge is cheapest</em>.</p>
+
+<h3>Two live mainnet passes</h3>
+
+<p>Both were read from books the project had not seen before. Each is retained
+and replays byte-for-byte.</p>
+
+<table>
+  <thead><tr><th>Capture</th><th>Leg</th><th class="num">Size</th><th class="num">Premium</th><th class="num">Worst case</th></tr></thead>
+  <tbody>
+    <tr><td>5 October 2026</td><td><code>binary-no</code></td><td class="num">987</td><td class="num">350.3793</td><td class="num">&minus;1,999.3793</td></tr>
+    <tr><td>12 October 2026</td><td><code>bucket0-yes</code></td><td class="num">542</td><td class="num">286.71258</td><td class="num">&minus;1,999.61258</td></tr>
+  </tbody>
+</table>
+
+<p>Each is derivable from its capture without the engine. For 5 October, at a
+baseline of 86,360: the spot loss at the floor is
+<code>0.1 &times; (60,000 &minus; 86,360)</code> = &minus;2,636, the hedge leg
+pays <code>987 &times; 1</code> = +987, and the premium is &minus;350.3793,
+giving &minus;1,999.3793 against a 2,000 cap. The other candidate for the worst
+case &mdash; just above the target, where the leg pays nothing &mdash; is
+&minus;411.4793, so the floor is the binding price and the bound is attained
+there. Both candidates are derived before the engine's own number is read, so
+the binding state is identified rather than assumed.</p>
+
+<p>For the eleven days before 5 October the tool refused every cap, because
+protection cost essentially its full payoff. Those refusals are part of the
+evidence rather than a gap in it: a tool that only ever passes has not been
+shown to work.</p>
+
+<h2>Reproducing it</h2>
+
+<pre><code>git clone https://github.com/arcbjorn/hedgecheck
+cd hedgecheck
+make check</code></pre>
+
+<p>Offline, no install step; needs <code>python3</code>, <code>go</code>,
+<code>node</code> 23.6 or later, and <code>deno</code>. It regenerates and
+compares the conformance vectors, validates every contract document against the
+frozen schemas, replays the retained live captures byte for byte, and runs the
+Go, TypeScript and Solidity suites.</p>
+
+<pre><code>python3 tools/replay_live.py fixtures/live/2026-10-05
+python3 tools/replay_live.py fixtures/live/2026-10-12</code></pre>
+
+<p>Each snapshot digest is SHA-256 over the venue's bytes exactly as they
+arrived. Editing one price by a single digit, or adding one space, makes a
+bundle fail before it replays.</p>
+
+<h2>What it does not establish</h2>
+
+<div class="caveat">
+<p>Stated here because a verification tool that overstates its own scope is the
+failure mode that matters most.</p>
+<ul>
+  <li><strong>Nothing about the path to settlement</strong>, including margin
+  along the way. The model is terminal.</li>
+  <li><strong>Not that these prices can still be traded.</strong> A book was
+  read, not acted on; a later book may differ.</li>
+  <li><strong>Not the settlement price itself</strong>, which is not
+  independently auditable from the public API. Node data was not examined.</li>
+  <li><strong>Not a recommendation.</strong> The tool answers a stated
+  objective and says nothing about any other objective, including whether the
+  stated one was the right one to hold.</li>
+  <li><strong>One criterion is outstanding:</strong> a live order accepted on
+  testnet. Testnet currently lists the daily binary and bucket at expiries
+  three hours apart, so discovery finds no pair, and all sixteen of its
+  recurring books are empty on both sides. Everything up to the send is
+  proven; the send itself waits on the venue.</li>
+</ul>
+</div>
+
+<h2>Proposed, not built</h2>
+
+<p>A hosted service that takes a position and a cap and answers from live books
+is a natural next step and is <em>not</em> part of this submission. It would
+need a server making venue calls on a visitor's behalf, with the rate limiting
+and abuse surface that implies, and presenting it as working would break the
+discipline the rest of the project follows. The verifier above is the honest
+static equivalent: it runs the real checker against a real retained result, in
+the reader's own browser, with no server at all.</p>
+
+<footer>
+  <p><a href="https://github.com/arcbjorn/hedgecheck">Source, evidence and
+  verifiers on GitHub</a>. Market snapshots are historical observations, not
+  prices to trade on. This page is not financial advice.</p>
+</footer>
+
+</div>
+
+<script type="module">
+// Re-derive a retained result in the reader's own browser.
+//
+// Every file is fetched separately and hashed HERE. The manifest says which bytes it
+// holds; this page does not take its word for it. On static hosting the bundle is just
+// files beside the page, so there is no server whose honesty matters -- which is the
+// point of running the checker client side rather than printing a verdict into the HTML.
+import { verify } from "./vendor/checker.js";
+
+const log = document.getElementById("log");
+const button = document.getElementById("run");
+
+const line = (text, cls) => {
+  const span = document.createElement("span");
+  if (cls) span.className = cls;
+  span.textContent = text + "\n";
+  log.append(span);
+};
+
+const sha256 = async (bytes) => {
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
+};
+
+const fetchBytes = async (path) => {
+  const response = await fetch(path);
+  if (!response.ok) throw new Error(path + ": HTTP " + response.status);
+  return new Uint8Array(await response.arrayBuffer());
+};
+
+button.addEventListener("click", async () => {
+  button.disabled = true;
+  log.textContent = "";
+  try {
+    const base = "./bundle/";
+    const manifestBytes = await fetchBytes(base + "manifest.json");
+    const manifest = JSON.parse(new TextDecoder().decode(manifestBytes));
+    const files = manifest.files;
+    line("manifest read: " + (files.snapshots || []).length + " snapshots, "
+         + (files.registry || []).length + " registry entries");
+
+    const [proposal, lowered, result] = await Promise.all([
+      fetchBytes(base + files.proposal),
+      fetchBytes(base + files.lowered),
+      fetchBytes(base + files.result),
+    ]);
+
+    // SNAPSHOTS ARE KEYED BY THEIR OWN HASH, computed here. A file whose bytes do not
+    // hash to the digest the manifest names is not the snapshot the proposal cites, and
+    // the checker will refuse rather than evaluate it.
+    const snapshots = new Map();
+    for (const entry of files.snapshots || []) {
+      const bytes = await fetchBytes(base + entry.path);
+      const digest = await sha256(bytes);
+      if (digest !== entry.sha256) {
+        line("hash mismatch: " + entry.path, "bad");
+        line("  manifest says " + entry.sha256.slice(0, 16));
+        line("  these bytes are " + digest.slice(0, 16));
+        throw new Error("a retained snapshot has been altered");
+      }
+      line("snapshot " + digest.slice(0, 16) + " verified");
+      snapshots.set(digest, bytes);
+    }
+
+    const registry = new Map();
+    for (const entry of files.registry || []) {
+      registry.set(entry.family, await fetchBytes(base + entry.path));
+    }
+    line("registry: " + [...registry.keys()].join(", "));
+
+    let allowlist = new Set();
+    try {
+      const raw = await fetchBytes("./vendor/allowlist.json");
+      allowlist = new Set(JSON.parse(new TextDecoder().decode(raw)).reviewed || []);
+    } catch {
+      // An absent allowlist is not an error: an empty one is the correct default, and
+      // the checker then treats no registry entry as reviewed.
+    }
+
+    line("");
+    line("running the checker...");
+    const outcome = await verify(
+      { proposal, lowered, result, manifest: manifestBytes, snapshots, registry },
+      { allowlist });
+
+    line("");
+    if (outcome.accepted) {
+      const verdict = JSON.parse(new TextDecoder().decode(result));
+      line("ACCEPTED", "ok");
+      line("The checker re-derived this result from the proposal and the snapshots.");
+      line("  verdict      " + verdict.model_result);
+      line("  premium      " + verdict.cost.premium);
+      line("  worst case   " + verdict.worst_case.pnl + " at " + verdict.worst_case.price);
+      line("  attained     " + verdict.worst_case.attained);
+      line("  ir digest    " + verdict.ir_digest.slice(0, 16));
+    } else {
+      line("REFUSED", "bad");
+      line("  class  " + outcome.refusal.class);
+      line("  at     " + outcome.refusal.at);
+      if (outcome.refusal.detail) line("  detail " + outcome.refusal.detail);
+      line("");
+      line("A refusal is not a failing verdict: it means this bundle was not established.");
+    }
+  } catch (error) {
+    line("");
+    line("COULD NOT FINISH", "bad");
+    line("  " + (error && error.message ? error.message : String(error)));
+    line("");
+    line("A check that did not finish has established nothing, which is what this says.");
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
+
+</body>
+</html>
