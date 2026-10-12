@@ -2686,6 +2686,22 @@ def live_bucket_bundle():
         check(figure in readme_plain,
               f"README's live table does not carry {figure!r} from the 12 October capture")
 
+    # THE SITE SERVES THE CHECKER THE PROJECT SHIPS, byte for byte.
+    #
+    # `site/` carries its own copy so the page works on static hosting with no build step.
+    # A stale copy would be the worst kind of wrong: the page would invite a reader to
+    # verify a result with code the repository no longer has, and the verdict would look
+    # just as authoritative. `tools/build_checker.py --check` already holds dist/ to its
+    # sources; this holds the vendored copy to dist/.
+    for name in ("checker.js", "allowlist.json"):
+        shipped = (PROJECT / "checker" / "dist" / name).read_bytes()
+        served = (PROJECT / "site" / "vendor" / name)
+        check(served.exists(), f"site/vendor/{name} is missing, so the page cannot verify")
+        if served.exists():
+            check(served.read_bytes() == shipped,
+                  f"site/vendor/{name} differs from checker/dist/{name}: the page would "
+                  f"verify with code this repository does not ship. Re-copy it.")
+
     # THE SCREENING TOOL NO LONGER GUESSES AT A THRESHOLD. The bug above was a hardcoded
     # 0.999; if one reappears, the tool can disagree with the engine again.
     # A BARE SUBSTRING WOULD BAN THE EXPLANATION, which this guard hit on its own first run:
@@ -2811,7 +2827,19 @@ def bundles():
     check(true_reduction(P1 - 1) == 0 and shifted(P1 - 1) == size,
           "bundles: a shifted bucket over-credits a long holder below the lower threshold")
 
-    print(f"bundles: {accepted} accepted, {len(found) - accepted} refused, each with its stated class")
+    # THE COUNTS README PUBLISHES, which were stale the moment two fixtures were added.
+    #
+    # README said "seven good and seventeen corrupted" and "refusing twelve corrupted ones"
+    # while the corpus held 8 and 19. Nothing checked either number, which is the same drift
+    # that put a wrong schema count in two documents (section 9). A count in prose is a claim.
+    corrupted = len(found) - accepted
+    readme = (PROJECT / "README.md").read_text()
+    check(f"{accepted} good and {corrupted} corrupted" in readme,
+          f"README's fixtures row does not say '{accepted} good and {corrupted} corrupted'")
+    check(f"refusing {corrupted} corrupted ones by class" in readme,
+          f"README does not say 'refusing {corrupted} corrupted ones by class'")
+
+    print(f"bundles: {accepted} accepted, {corrupted} refused, each with its stated class")
 
 
 def validate_manifest(document):
