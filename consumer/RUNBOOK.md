@@ -106,16 +106,36 @@ share one expiry in all three retained catalogues and live — so the pipeline a
 end on mainnet, read-only. On testnet the two sit 21 hours apart, both `period=1d`, so they can
 never pair there. Testnet was the one venue where the shape does not line up.
 
-**What remains is a market condition, and no decision reaches it.** A useful daily hedge needs
-the binary's target BELOW spot, so the NO leg that pays on a fall is out of the money and cheap.
-Run `python3 tools/hedgeable_today.py`: it names the failing precondition and exits 1, or exits 0
-and prints the live command. Do not switch underlying looking for a way round — BTC is the only
-one carrying a bucket at all — and do not read a cheap bucket ask as an opening: bucket index 1
-pays on a RISE into the band, so it is not downside protection, and `named[0]` is the correct
-leg.
+**Two different things were being waited for, and only one of them resolved.**
 
-For a demonstration that needs no market at all, use [`DEMO.md`](../DEMO.md), which replays the
-retained 18 September capture offline.
+**The MAINNET price condition resolved on 5 October.** A useful daily hedge needs the binary's
+target BELOW spot, so the NO leg that pays on a fall is out of the money and cheap. That held:
+spot 86,360 against a target of 85,749, the NO leg asking 0.3547, and `check --live` returned
+**passes** — 987 contracts, worst case −1,999.3793 against a 2,000 cap. It is retained in
+`fixtures/live/2026-10-05/` and replays offline. Use `python3 tools/hedgeable_today.py` to see
+whether today is another such day: exit 0 prints the live command, exit 1 names what failed.
+
+**The TESTNET order is a different blocker and it has NOT resolved.** Re-measured 12 October,
+and there are two independent walls:
+
+1. **Discovery.** The daily binary expires `-0300` and the daily bucket `-0600`, a fixed
+   3-hour offset seen on 24 Sep, 5 Oct and 12 Oct. `SoonestExpiry` finds no shared expiry, so
+   nothing is built.
+2. **Depth**, which is the wall a hand-written single-leg proposal would hit anyway: **all 16
+   Recurring books on testnet are empty.** Every binary YES/NO across BTC, ETH, SOL, HYPE and
+   ZEC, and all three bucket outcomes, both sides: 0 bids, 0 asks. None answered `null`, so the
+   coin encoding resolved and these are genuinely empty books rather than wrong coins.
+
+There is nothing to buy there at any price. **No step on this page reaches it**, and that is a
+fact about the venue rather than about this project. Do not aim a mainnet bundle at testnet to
+get around it — see the STOP section above.
+
+Do not switch underlying looking for a way round — BTC is the only one carrying a bucket at
+all — and do not read a cheap bucket ask as an opening: bucket index 1 pays on a RISE into the
+band, so it is not downside protection, and `named[0]` is the correct leg.
+
+For a demonstration that needs no market at all, use [`DEMO.md`](../DEMO.md), which pairs the
+retained 18 September replay with the 5 October live pass.
 
 Whichever way that goes, **re-sweep before acting**: every figure above is a dated observation,
 the instruments expire, and the digest you eventually approve is bound to a capture taken at
