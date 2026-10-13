@@ -230,3 +230,5 @@ catalogue — so `085ccfb` is the only copy.
 
 Market snapshots are historical observations, not prices to trade on.
 Capabilities and tiers in `PLAN.md` are proposed work, not completed features.
+
+Licensed under the MIT Licence. See [LICENSE](./LICENSE).
