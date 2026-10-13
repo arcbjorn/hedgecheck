@@ -4,6 +4,9 @@ Pre-trade verification of whether a proposed hedge satisfies an explicit
 protection objective, what satisfying it costs, and what the alternatives are —
 for Hyperliquid HIP-4 outcome markets.
 
+**Live site:** <https://arcbjorn.github.io/hedgecheck> — including a verifier that
+re-derives a retained result in the browser.
+
 > *Do these exact terms, costs and holdings satisfy my objective — and what does
 > satisfying it cost me, against what else I could do?*
 
