@@ -76,8 +76,8 @@ contract ApprovedOrderGateTest {
         (bool ok, bytes memory returned) = address(gate).call(call);
         _check(!ok, what);
         _check(returned.length >= 4, "a revert with no reason");
-        bytes4 actual = bytes4(returned[0]) | (bytes4(returned[1]) >> 8) | (bytes4(returned[2]) >> 16)
-            | (bytes4(returned[3]) >> 24);
+        bytes4 actual =
+            bytes4(returned[0]) | (bytes4(returned[1]) >> 8) | (bytes4(returned[2]) >> 16) | (bytes4(returned[3]) >> 24);
         _check(actual == expected, what);
     }
 
