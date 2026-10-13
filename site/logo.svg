@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img"
+     aria-label="HedgeCheck">
+  <title>HedgeCheck</title>
+  <!-- A hedged payoff and the bound it is checked against.
+       The solid line is the payoff: flat where the hedge holds the loss, rising
+       above it. The dashed line is the stated bound, drawn BELOW the floor, because
+       the whole claim is that the payoff never crosses it. -->
+  <rect width="64" height="64" rx="12" fill="#14161a"/>
+  <path d="M8 50 H56"
+        fill="none" stroke="#5cc98d" stroke-width="2.5"
+        stroke-linecap="round" stroke-dasharray="5 5"/>
+  <path d="M10 40 H28 L52 16"
+        fill="none" stroke="#e8eaee" stroke-width="4.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

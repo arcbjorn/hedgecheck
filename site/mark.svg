@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img"
+     aria-label="">
+  <!-- Inline header mark: no tile, strokes inherit the page's text colour so it works
+       in both light and dark mode. The dark tiled version is logo.svg, for the favicon. -->
+  <path d="M8 50 H56" fill="none" stroke="#5cc98d" stroke-width="3"
+        stroke-linecap="round" stroke-dasharray="5 5"/>
+  <path d="M10 40 H28 L52 16" fill="none" stroke="currentColor" stroke-width="5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
